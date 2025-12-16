@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rent Some Chairs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- DEV: Reset Session Button -->
+  <button id="devResetSession" class="dev-reset" title="Dev: Reset session">
+    ↺ Reset Session
+  </button>
+
+  <div class="bg">
+    <div class="orb orb-a"></div>
+    <div class="orb orb-b"></div>
+    <div class="orb orb-c"></div>
+    <div class="grid-overlay"></div>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">R</div>
+      <div class="brand-text">
+        <div class="brand-title">Rent Some Chairs</div>
+        <div class="brand-subtitle">Local chair rentals</div>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <div class="status-pill" id="statusPill">
+        <span class="status-dot"></span>
+        <span id="statusText">Not signed in</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="flowbar" id="flowbar">
+    <nav class="flowsteps" aria-label="Booking steps">
+      <button class="flowstep" data-step="login" type="button"><span class="dot"></span>Login</button>
+      <button class="flowstep" data-step="inventory" type="button"><span class="dot"></span>Inventory</button>
+      <button class="flowstep" data-step="date" type="button"><span class="dot"></span>Date</button>
+      <button class="flowstep" data-step="address" type="button"><span class="dot"></span>Address</button>
+      <button class="flowstep" data-step="review" type="button"><span class="dot"></span>Review</button>
+    </nav>
+
+    <aside class="flowsummary" aria-label="Order summary">
+      <div class="flowsummary-title">Order Summary</div>
+      <div class="flowsummary-lines" id="flowSummaryLines">No items selected.</div>
+      <div class="flowsummary-meta">
+        <div><span class="muted">Date:</span> <span id="flowSummaryDate">—</span></div>
+        <div class="flowsummary-total"><span class="muted">Total:</span> <span id="flowSummaryTotal">$0.00</span></div>
+      </div>
+    </aside>
+  </div>
+
+
+  <main class="wrap">
+
+    <!-- LANDING -->
+    <section id="pageLanding">
+      <section class="hero">
+        <div class="hero-left">
+          <div class="kicker">Event rentals made simple</div>
+          <h1 class="headline">Clean, sturdy chairs — delivered to your door.</h1>
+          <p class="subhead">
+            Reserve what you need in minutes. We’ll handle delivery and pickup so you can focus on your event.
+          </p>
+
+          <div class="feature-row" aria-label="Highlights">
+            <div class="feature-line">
+              <span class="feature-bullet" aria-hidden="true">✓</span>
+              <span class="feature-text">
+                <strong>Transparent pricing</strong>
+                <span class="muted-inline">— bulk discounts applied automatically.</span>
+              </span>
+            </div>
+            <div class="feature-line">
+              <span class="feature-bullet" aria-hidden="true">⏱</span>
+              <span class="feature-text">
+                <strong>Fast booking</strong>
+                <span class="muted-inline">— pick items → date → address.</span>
+              </span>
+            </div>
+            <div class="feature-line">
+              <span class="feature-bullet" aria-hidden="true">📍</span>
+              <span class="feature-text">
+                <strong>Local delivery</strong>
+                <span class="muted-inline">— distance-based fees coming soon.</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="mini-note">
+            <span class="mini-badge">Admin test</span>
+            <span class="mini-text">r@g.com / 1</span>
+          </div>
+        </div>
+
+        <div class="hero-right">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Welcome</div>
+                <div class="card-sub">Sign in, or continue as a guest.</div>
+              </div>
+<div class="step"><span class="dot"></span> Inventory</div>
+                <div class="step"><span class="dot"></span> Date</div>
+                <div class="step"><span class="dot"></span> Address</div>
+                <div class="step"><span class="dot"></span> Review</div>
+              </div>
+            </div>
+
+            <div class="card-body">
+              <button class="btn btn-primary" id="btnGmail">
+                <span class="btn-icon" aria-hidden="true">G</span>
+                Login with Gmail
+              </button>
+
+              <div class="divider"><span>or</span></div>
+
+              <div class="section-title">Login with Email</div>
+              <div class="grid2">
+                <div>
+                  <label>Email</label>
+                  <input class="input" id="emailInput" type="email" placeholder="you@example.com" />
+                </div>
+                <div>
+                  <label>Password</label>
+                  <input class="input" id="passInput" type="password" placeholder="••••••••" />
+                </div>
+              </div>
+              <button class="btn btn-good" id="btnEmailLogin">Continue</button>
+
+              <div class="divider"><span>or</span></div>
+
+              <div class="section-title">Continue as Guest</div>
+              <button class="btn btn-ghost" id="btnGuestToggle" type="button" aria-expanded="false">
+                Continue as Guest <span class="chev" aria-hidden="true">▾</span>
+              </button>
+
+              <div class="guest-panel" id="guestPanel">
+                <label>Email for confirmation</label>
+                <input class="input" id="guestEmail" type="email" placeholder="guest@example.com" />
+                <button class="btn btn-good" id="btnGuestContinue" type="button">Continue</button>
+              </div>
+
+              <div id="gmailHelper" class="helper subtle"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <!-- INVENTORY -->
+    
+<section id="pageInventory" class="hidden">
+  <section class="inv-wrap">
+    <div class="inv-header">
+      <div>
+        <div class="inv-title">Inventory</div>
+        <div class="inv-sub">Select what you want to rent. Pricing updates automatically as quantities change.</div>
+      </div>
+      <div class="inv-actions">
+        <div class="inv-upsell" id="invUpsell" hidden></div>
+        <div class="inv-actions-buttons">
+          <button class="btn btn-ghost inv-small" id="btnInvBack">Back</button>
+        <button class="btn btn-good inv-small" id="btnInvContinue" disabled>Continue</button>
+              </div>
+      </div>
+    </div>
+
+    <div class="inv-layout">
+      <div class="inv-grid" id="invGrid"></div>
+
+      <aside class="inv-side" aria-label="Order summary">
+        <div class="inv-side-card">
+          <div class="inv-side-title">Order Summary</div>
+          <div class="inv-side-sub" id="invSideHint">Pick quantities to see totals.</div>
+
+          <div class="inv-side-lines" id="invLines"></div>
+
+          <div class="inv-side-total">
+            <div class="inv-side-total-label">Estimated total</div>
+            <div class="inv-side-total-value" id="invTotal">$0.00</div>
+          </div>
+
+          <div class="inv-side-note">
+            Taxes, delivery, and coupons apply later at checkout.
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <div class="inv-footer">
+      <div class="inv-summary" id="invSummary">No items selected.</div>
+    </div>
+  </section>
+</section>
+
+
+</section>
+
+
+    <!-- CALENDAR -->
+    <section id="pageCalendar" class="hidden">
+      <section class="cal-wrap">
+        <div class="cal-header">
+          <div>
+            <div class="cal-title">Choose a Date</div>
+            <div class="cal-sub">Availability updates based on your selected items.</div>
+          </div>
+          <div class="cal-actions">
+            <button class="btn btn-ghost cal-small" id="btnCalBack">Back</button>
+            <button class="btn btn-good cal-small" id="btnCalContinue" disabled>Continue</button>
+          </div>
+        </div>
+
+        <div class="cal-shell">
+          <div class="cal-topbar">
+            <button class="cal-nav" id="btnCalPrev" type="button">‹</button>
+            <div class="cal-month" id="calMonthLabel">Month</div>
+            <button class="cal-nav" id="btnCalNext" type="button">›</button>
+          </div>
+
+          <div class="cal-weekdays" id="calWeekdays"></div>
+          <div class="cal-annual" id="calAnnual">
+          <div class="cal-annual-top">
+            <label class="cal-annual-toggle">
+              <input type="checkbox" id="chkAnnual" />
+              <span>Is your event annual? Save <strong id="annualSaveInline">$—</strong> by booking for the next <strong>5 years</strong>.</span>
+            </label>
+          </div>
+          <div class="cal-annual-body hidden" id="calAnnualBody">
+            <div class="cal-annual-savings" id="calAnnualSavings">Select a date to see savings.</div>
+            <div class="cal-annual-dates" id="calAnnualDates"></div>
+            <div class="muted" style="font-size:12px; margin-top:8px;">
+              Dates 2–5 must be <strong>10–14 months</strong> after the previous date.
+            </div>
+          </div>
+        </div>
+<div class="cal-grid" id="calGrid"></div>
+        </div>
+
+        
+        <div class="cal-annual-body hidden" id="calAnnualBody">
+            <div class="cal-annual-savings" id="calAnnualSavings">Select a date to see savings.</div>
+            <div class="cal-annual-dates" id="calAnnualDates"></div>
+            <div class="muted" style="font-size:12px; margin-top:8px;">
+              Dates 2–5 must be <strong>10–14 months</strong> after the previous date.
+            </div>
+          </div>
+        </div>
+        <div class="cal-footnote" id="calFootnote">Pick a day to continue.</div>
+        
+      </section>
+    </section>
+
+
+    <!-- ADDRESS -->
+    <section id="pageAddress" class="hidden">
+      <section class="addr-wrap">
+        <div class="addr-header">
+          <div>
+            <div class="addr-title">Delivery Address</div>
+            <div class="addr-sub">Where should we deliver your equipment?</div>
+          </div>
+          <div class="addr-actions">
+            <button class="btn btn-ghost addr-small" id="btnAddrBack">Back</button>
+            <button class="btn btn-good addr-small" id="btnAddrContinue">Continue</button>
+          </div>
+        </div>
+
+        <div class="addr-card">
+          <div class="addr-grid">
+            <label class="field">
+              <span class="label">Street address</span>
+              <input id="addrStreet" class="input" placeholder="123 Main St" autocomplete="street-address">
+            </label>
+
+            <div class="addr-row">
+              <label class="field">
+                <span class="label">City</span>
+                <input id="addrCity" class="input" placeholder="City" autocomplete="address-level2">
+              </label>
+              <label class="field">
+                <span class="label">State</span>
+                <input id="addrState" class="input" placeholder="NC" autocomplete="address-level1" maxlength="2">
+              </label>
+              <label class="field">
+                <span class="label">ZIP</span>
+                <input id="addrZip" class="input" placeholder="27513" autocomplete="postal-code" inputmode="numeric">
+              </label>
+            </div>
+
+            <label class="field">
+              <span class="label">Notes for delivery (optional)</span>
+              <input id="addrNotes" class="input" placeholder="Gate code, back entrance, etc.">
+            </label>
+          </div>
+        </div>
+
+        <div class="addr-footnote" id="addrFootnote">
+          Address autocomplete and maps will be added later.
+        </div>
+      </section>
+    </section>
+
+    <!-- REVIEW -->
+    <section id="pageReview" class="hidden">
+      <section class="rev-wrap">
+        <div class="rev-header">
+          <div>
+            <div class="rev-title">Review & Confirm</div>
+            <div class="rev-sub">Double-check everything before placing the booking.</div>
+          </div>
+          <div class="rev-actions">
+            <button class="btn btn-ghost rev-small" id="btnRevBack">Back</button>
+            <button class="btn btn-good rev-small" id="btnPlaceBooking">Place booking</button>
+          </div>
+        </div>
+
+        <div class="rev-layout">
+          <div class="rev-card">
+            <div class="rev-section-title">Items</div>
+            <div id="revItems" class="rev-items"></div>
+
+            <div class="rev-divider"></div>
+
+            <div class="rev-section-title">Date</div>
+            <div id="revDate" class="rev-text">—</div>
+
+            <div class="rev-divider"></div>
+
+            <div class="rev-section-title">Delivery address</div>
+            <div id="revAddress" class="rev-text">—</div>
+          </div>
+
+          <aside class="rev-side">
+            <div class="rev-side-card">
+              <div class="rev-side-title">Total</div>
+              <div class="rev-side-total" id="revTotal">$0.00</div>
+              <div class="rev-side-note">Taxes, delivery, and coupons apply later.</div>
+
+              <div class="rev-coupon">
+                <div class="rev-section-title">Coupon</div>
+                <div class="rev-coupon-row">
+                  <input id="revCoupon" class="input" placeholder="Enter code (optional)">
+                  <button class="btn btn-ghost" id="btnApplyCoupon" type="button">Apply</button>
+                </div>
+                <div class="muted" id="revCouponMsg" style="margin-top:8px;font-size:12px;"></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <div class="rev-footnote muted" id="revFootnote" style="margin-top:12px;">
+          This is a local prototype (data stored in your browser).
+        </div>
+      </section>
+    </section>
+
+    <!-- ADMIN -->
+    <section id="pageAdmin" class="hidden">
+      <section class="admin-wrap">
+
+        <div class="admin-header">
+          <div>
+            <div class="admin-title">Admin Panel</div>
+            <div class="admin-sub">Manage equipment, storage locations, and coupons.</div>
+          </div>
+          <div class="admin-actions">
+            <button class="btn btn-ghost admin-small" id="btnAdminToLanding">Back to Landing</button>
+            <button class="btn btn-ghost admin-small" id="btnDevWipeDb">DEV: Wipe Data</button>
+          </div>
+        </div>
+
+        <div class="admin-tabs" role="tablist" aria-label="Admin sections">
+          <button class="admin-tab active" data-tab="equipment" role="tab" aria-selected="true">Equipment</button>
+          <button class="admin-tab" data-tab="locations" role="tab" aria-selected="false">Storage Locations</button>
+          <button class="admin-tab" data-tab="coupons" role="tab" aria-selected="false">Coupons</button>
+        </div>
+
+        <!-- EQUIPMENT TAB -->
+        <section class="admin-panel" data-panel="equipment">
+          <div class="admin-grid">
+            <div class="admin-card">
+              <div class="admin-card-title" id="eqFormTitle">Add Equipment</div>
+
+              <input type="hidden" id="eqEditingId" value="" />
+
+              <div class="admin-field">
+                <label>Name</label>
+                <input class="input" id="eqName" type="text" placeholder="White Folding Chair" />
+              </div>
+
+              <div class="admin-field">
+                <label>Image URL</label>
+                <input class="input" id="eqImageUrl" type="text" placeholder="https://..." />
+              </div>
+
+              <div class="admin-row2">
+                <div class="admin-field">
+                  <label>Quantity (0 = Coming Soon)</label>
+                  <input class="input" id="eqQuantity" type="number" min="0" step="1" value="0" />
+                </div>
+                <div class="admin-field">
+                  <label>Order increment (0 = any quantity)</label>
+                  <input class="input" id="eqMaxPerOrder" type="number" min="0" step="1" value="0" />
+                </div>
+              </div>
+
+              <div class="admin-field">
+                <label>Description</label>
+                <textarea class="input textarea" id="eqDescription" rows="3" placeholder="Clean, sturdy chairs for any event."></textarea>
+              </div>
+
+              <div class="admin-card-subtitle">Pricing tiers (Min Qty → Price Each)</div>
+              <div id="eqTiersWrap" class="tiers-wrap"></div>
+              <div class="admin-row3">
+                <button class="btn btn-ghost admin-small" id="btnAddTier" type="button">+ Add Tier</button>
+                <button class="btn btn-ghost admin-small" id="btnClearTiers" type="button">Clear Tiers</button>
+              </div>
+
+              <div class="admin-row3">
+                <button class="btn btn-good" id="btnSaveEquipment" type="button">Save Equipment</button>
+                <button class="btn btn-ghost" id="btnCancelEditEquipment" type="button">Cancel Edit</button>
+              </div>
+
+              <div class="helper subtle" id="eqHelper"></div>
+            </div>
+
+            <div class="admin-card">
+              <div class="admin-card-title">Equipment List</div>
+              <div class="admin-list" id="eqList"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- LOCATIONS TAB -->
+        <section class="admin-panel hidden" data-panel="locations">
+          <div class="admin-grid">
+            <div class="admin-card">
+              <div class="admin-card-title" id="locFormTitle">Add Storage Location</div>
+              <input type="hidden" id="locEditingId" value="" />
+
+              <div class="admin-field">
+                <label>Street</label>
+                <input class="input" id="locStreet" type="text" placeholder="123 Main St" />
+              </div>
+
+              <div class="admin-row3">
+                <div class="admin-field">
+                  <label>City</label>
+                  <input class="input" id="locCity" type="text" placeholder="Holly Springs" />
+                </div>
+                <div class="admin-field">
+                  <label>State</label>
+                  <input class="input" id="locState" type="text" placeholder="NC" />
+                </div>
+                <div class="admin-field">
+                  <label>Zip</label>
+                  <input class="input" id="locZip" type="text" placeholder="27540" />
+                </div>
+              </div>
+
+              <div class="admin-row3">
+                <button class="btn btn-good" id="btnSaveLocation" type="button">Save Location</button>
+                <button class="btn btn-ghost" id="btnCancelEditLocation" type="button">Cancel Edit</button>
+              </div>
+
+              <div class="helper subtle" id="locHelper"></div>
+            </div>
+
+            <div class="admin-card">
+              <div class="admin-card-title">Locations List</div>
+              <div class="admin-list" id="locList"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- COUPONS TAB -->
+        <section class="admin-panel hidden" data-panel="coupons">
+          <div class="admin-grid">
+            <div class="admin-card">
+              <div class="admin-card-title" id="cpnFormTitle">Add Coupon</div>
+              <input type="hidden" id="cpnEditingId" value="" />
+
+              <div class="admin-row2">
+                <div class="admin-field">
+                  <label>Code</label>
+                  <input class="input" id="cpnCode" type="text" placeholder="SAVE10" />
+                </div>
+                <div class="admin-field">
+                  <label>Enabled</label>
+                  <div class="toggle-row">
+                    <input id="cpnEnabled" type="checkbox" checked />
+                    <span class="muted-inline">Coupon is active</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="admin-row2">
+                <div class="admin-field">
+                  <label>Type</label>
+                  <select class="input" id="cpnType">
+                    <option value="percent">Percent (%)</option>
+                    <option value="fixed">Fixed ($)</option>
+                  </select>
+                </div>
+                <div class="admin-field">
+                  <label>Amount</label>
+                  <input class="input" id="cpnAmount" type="number" min="0" step="0.01" value="10" />
+                </div>
+              </div>
+
+              <div class="admin-row3">
+                <button class="btn btn-good" id="btnSaveCoupon" type="button">Save Coupon</button>
+                <button class="btn btn-ghost" id="btnCancelEditCoupon" type="button">Cancel Edit</button>
+              </div>
+
+              <div class="helper subtle" id="cpnHelper"></div>
+            </div>
+
+            <div class="admin-card">
+              <div class="admin-card-title">Coupons List</div>
+              <div class="admin-list" id="cpnList"></div>
+            </div>
+          </div>
+        </section>
+
+      </section>
+    </section>
+
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+
+    <!-- Annual Date Picker Modal -->
+    <div class="modal hidden" id="annualModal" aria-hidden="true">
+      <div class="modal-backdrop" id="annualModalBackdrop"></div>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="annualModalTitle">
+        <div class="modal-head">
+          <div class="modal-title" id="annualModalTitle">Pick a Date</div>
+          <button class="btn btn-ghost" id="annualModalClose" type="button">Close</button>
+        </div>
+
+        <div class="modal-cal">
+          <div class="cal-topbar modal-topbar">
+            <button class="cal-nav" id="btnAnnualPrev" type="button">‹</button>
+            <div class="cal-month" id="annualMonthLabel">Month</div>
+            <button class="cal-nav" id="btnAnnualNext" type="button">›</button>
+          </div>
+          <div class="cal-weekdays" id="annualWeekdays"></div>
+          <div class="cal-grid cal-grid-small" id="annualGrid"></div>
+        </div>
+
+        <div class="modal-foot" id="annualModalFoot">Pick a date to continue.</div>
+      </div>
+    </div>
+    
+</body>
+</html>
