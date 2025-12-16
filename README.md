@@ -1,47 +1,76 @@
-# Rent Some Chairs - Local Dev
+# Rent Some Chairs — Full Package (Backend + Frontend)
 
-## Run
-Double-click `start-server.bat`.
-It will open http://localhost:5500/
+This package runs the **frontend on GitHub Pages** and uses **Google Sheets as the database** via a deployed **Google Apps Script Web App**.
 
-## Admin (temporary)
-Email: r@g.com
-Password: 1
+## What’s included
+- Frontend (static): `index.html`, `styles.css`, `js/*`
+- Backend (Apps Script): `apps_script/Code.gs`
+- Key features:
+  - Google login (GIS) + email/password login with verification code
+  - Owner/super-admin supported (server-side only)
+  - Inventory multi-select UI fix (selected items stay adjustable)
+  - Bookings saved to Sheets
+  - Admin snapshot + save equipment/locations/coupons
+  - Delivery quote endpoint (Distance Matrix) (optional; needs MAPS_API_KEY)
 
-## Dev shortcuts
-- Reset session button (bottom-left)
-- Emergency reset URL: http://localhost:5500/?reset=1
-- Open admin: http://localhost:5500/#admin
+---
 
+## Step 1 — Create the Google Sheet
+1. Create a new Google Sheet.
+2. Copy the **Sheet ID** from the URL (the long string between `/d/` and `/edit`).
+3. Leave it empty — the script will create the tabs + headers automatically on first request.
 
-## Fix in this version
-- Admin panel buttons now work after admin login (admin JS initializes properly).
+---
 
+## Step 2 — Create the Apps Script Web App
+1. Go to **script.google.com** → New project.
+2. Create a single file named `Code.gs` and paste the contents of `apps_script/Code.gs`.
+3. Open **Project Settings** → **Script Properties** and add:
 
-## Inventory
-After signing in (user/guest), you are routed to #inventory.
+Required:
+- `SHEET_ID` = `<your sheet id>`
+- `OWNER_EMAIL` = `rentsomechairs@gmail.com`
+- `OWNER_PASSWORD` = `12poqw09-`
 
-- Inventory now shows current unit price ($/ea) per item and an estimated total in a sidebar.
+Optional (recommended):
+- `ADMIN_NOTIFY_EMAIL` = `rentsomechairs@gmail.com`
+- `MAPS_API_KEY` = `<your Google Maps API key>` (only needed for delivery quote)
 
+4. Deploy:
+- Deploy → New deployment → **Web app**
+- Execute as: **Me**
+- Who has access: **Anyone**
+- Click Deploy and copy the Web App URL (ends with `/exec`)
 
-## Calendar
-After selecting inventory, Continue goes to #calendar. Calendar shows remaining quantities per selected item (based on bookings).
+---
 
+## Step 3 — Configure the frontend
+1. Open `js/config.js`
+2. Paste your Apps Script Web App URL:
+```js
+APPS_SCRIPT_URL: "https://script.google.com/macros/s/....../exec",
+```
 
-## New in v3_4
-- Persistent flow bar (Login → Review) with live order summary.
-- Inventory shows 'Add N more for only $X' when adding the next increment changes total.
-- Added Address and Review pages. Review places a booking (stored locally) and calendar availability subtracts bookings.
+3. Commit/push the site to GitHub Pages.
 
+---
 
-## v3_5
-- Inventory cards are select-first: image grid, click to select/expand, green check overlay.
-- Add-more callout is highlighted with an ! and stronger styling.
-- Calendar blocks past dates and supports optional 5-year annual booking mode with 10–14 month spacing.
-- Review places 1 or 5 bookings accordingly.
+## Notes / Security
+- The **owner account** is enforced server-side and never exposed in the frontend.
+- All writes go through Apps Script; Sheets should not be edited directly by untrusted users.
 
+---
 
-## v3_5_2
-- Inventory: click image selects & expands only that item; clicking again unselects.
-- Calendar: today is highlighted; past dates disabled.
-- Annual 5-year block moved above calendar grid for visibility.
+## Admin Config (Delivery Fee)
+If you set `MAPS_API_KEY`, you can add these keys via the Admin Config endpoint (or by editing the `Config` sheet):
+- `base_address` (string, e.g. `123 Main St, Raleigh, NC 27601`)
+- `delivery_base_fee` (number)
+- `delivery_per_mile` (number)
+- `delivery_max_miles` (number, optional)
+
+---
+
+## Troubleshooting
+- If the frontend says “Missing CONFIG.APPS_SCRIPT_URL” you didn’t set the URL in `js/config.js`.
+- If Apps Script says “Missing SHEET_ID” add it in Script Properties.
+- Google login requires your Google OAuth Client ID already embedded in the page meta tag.

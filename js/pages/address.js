@@ -1,43 +1,64 @@
-import { readDb, writeDb, getSession } from '../db.js';
+/* js/pages/address.js
+   Address page
+   Uses session helpers from app.js (NOT db.js)
+*/
 
-export function initAddress({ gotoCalendar, gotoReview } = {}){
-  const street = document.getElementById('addrStreet');
-  const city = document.getElementById('addrCity');
-  const state = document.getElementById('addrState');
-  const zip = document.getElementById('addrZip');
-  const notes = document.getElementById('addrNotes');
-  const btnBack = document.getElementById('btnAddrBack');
-  const btnContinue = document.getElementById('btnAddrContinue');
+import { getCheckout, setCheckout } from "../app.js";
+import { api } from "../api.js";
 
-  if (!street || !city || !state || !zip || !notes || !btnBack || !btnContinue) return;
+export async function renderAddress(ctx) {
+  const root = document.getElementById("page-address");
+  if (!root) return;
 
-  btnBack.onclick = () => gotoCalendar?.();
+  const checkout = getCheckout();
 
-  const db = readDb();
-  const a = (db.checkout && db.checkout.address) ? db.checkout.address : {};
-  street.value = a.street || '';
-  city.value = a.city || '';
-  state.value = a.state || '';
-  zip.value = a.zip || '';
-  notes.value = a.notes || '';
+  root.innerHTML = `
+    <h2>Delivery Address</h2>
+    <input
+      type="text"
+      id="addressInput"
+      placeholder="Start typing your address…"
+      style="width:100%;padding:8px"
+    />
+    <div id="addressMsg" style="margin-top:8px"></div>
+  `;
 
-  btnContinue.onclick = () => {
-    const streetV = (street.value || '').trim();
-    const cityV = (city.value || '').trim();
-    const stateV = (state.value || '').trim().toUpperCase();
-    const zipV = (zip.value || '').trim();
-    const notesV = (notes.value || '').trim();
+  const input = root.querySelector("#addressInput");
+  const msg = root.querySelector("#addressMsg");
 
-    if (!streetV || !cityV || !stateV || !zipV){
-      alert('Please fill out street, city, state, and ZIP.');
-      return;
+  if (checkout.address?.formatted) {
+    input.value = checkout.address.formatted;
+  }
+
+  input.addEventListener("change", async () => {
+    const formatted = input.value.trim();
+    if (!formatted) return;
+
+    msg.textContent = "Calculating delivery…";
+
+    try {
+      // Backend geocodes + calculates distance + fee
+      const res = await api("delivery.quote", {
+        address: formatted,
+      });
+
+      setCheckout({
+        ...checkout,
+        address: {
+          formatted,
+          lat: res.lat,
+          lng: res.lng,
+          distanceMiles: res.distanceMiles,
+          deliveryFee: res.deliveryFee,
+        },
+      });
+
+      msg.textContent = `Delivery fee: $${res.deliveryFee.toFixed(2)} (${res.distanceMiles.toFixed(
+        1
+      )} mi)`;
+    } catch (err) {
+      console.error(err);
+      msg.textContent = "Unable to calculate delivery.";
     }
-
-    const db2 = readDb();
-    db2.checkout = { ...(db2.checkout||{}), address: {
-      street: streetV, city: cityV, state: stateV, zip: zipV, notes: notesV
-    }};
-    writeDb(db2);
-    gotoReview?.();
-  };
+  });
 }

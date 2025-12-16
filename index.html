@@ -5,15 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Rent Some Chairs</title>
   <link rel="stylesheet" href="styles.css" />
+  <meta name="google-signin-client_id" content="328251555874-15b0ha0ptqme9l6hoggt9kecdvd1npqb.apps.googleusercontent.com" />
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
-<body>
-
-  <!-- DEV: Reset Session Button -->
-  <button id="devResetSession" class="dev-reset" title="Dev: Reset session">
-    ↺ Reset Session
-  </button>
-
-  <div class="bg">
+<body><div class="bg">
     <div class="orb orb-a"></div>
     <div class="orb orb-b"></div>
     <div class="orb orb-c"></div>
@@ -29,13 +24,19 @@
       </div>
     </div>
 
+    
     <div class="topbar-right">
+      <button class="btn btn-ghost topbar-btn hidden" id="btnTopProfile" type="button">Profile</button>
+      <button class="btn btn-ghost topbar-btn hidden" id="btnTopAdmin" type="button">Admin</button>
+      <button class="btn btn-ghost topbar-btn hidden" id="btnTopLogout" type="button">Logout</button>
       <div class="status-pill" id="statusPill">
         <span class="status-dot"></span>
         <span id="statusText">Not signed in</span>
       </div>
     </div>
-  </header>
+
+
+    </header>
 
   <div class="flowbar" id="flowbar">
     <nav class="flowsteps" aria-label="Booking steps">
@@ -92,12 +93,7 @@
               </span>
             </div>
           </div>
-
-          <div class="mini-note">
-            <span class="mini-badge">Admin test</span>
-            <span class="mini-text">r@g.com / 1</span>
-          </div>
-        </div>
+</div>
 
         <div class="hero-right">
           <div class="card">
@@ -357,12 +353,157 @@
         </div>
 
         <div class="rev-footnote muted" id="revFootnote" style="margin-top:12px;">
-          This is a local prototype (data stored in your browser).
+          Bookings are saved to our system. You'll see them in your profile after confirming.
         </div>
       </section>
     </section>
 
-    <!-- ADMIN -->
+    
+    <!-- PROFILE -->
+    <section id="pageProfile" class="hidden">
+      <section class="wrap">
+        <div class="profile-header">
+          <div>
+            <div class="profile-title">Your Profile</div>
+            <div class="profile-sub" id="profileSub">Manage your account and view your orders.</div>
+          </div>
+          <div class="profile-actions">
+            <button class="btn btn-ghost" id="btnProfileBack" type="button">Back</button>
+            <button class="btn btn-ghost" id="btnProfileSignOut" type="button">Sign out</button>
+          </div>
+        </div>
+
+        <div class="profile-grid">
+          <section class="card">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Account</div>
+                <div class="card-sub">Update your info.</div>
+              </div>
+              <div class="pill-row" id="profileBadges"></div>
+            </div>
+            <div class="card-body">
+              <div class="grid-2">
+                <div class="field">
+                  <label>Email</label>
+                  <input class="input" id="profEmail" type="email" disabled>
+                </div>
+                <div class="field">
+                  <label>Role</label>
+                  <input class="input" id="profRole" type="text" disabled>
+                </div>
+              </div>
+
+              <div class="grid-2" style="margin-top:12px;">
+                <div class="field">
+                  <label>Name</label>
+                  <input class="input" id="profName" type="text" placeholder="Optional">
+                </div>
+                <div class="field">
+                  <label>Phone</label>
+                  <input class="input" id="profPhone" type="tel" placeholder="Optional">
+                </div>
+              </div>
+
+              <div class="divider" style="margin:16px 0;"></div>
+
+              <div class="section-title">Default delivery address (optional)</div>
+              <div class="grid-2" style="margin-top:10px;">
+                <div class="field">
+                  <label>Street</label>
+                  <input class="input" id="profStreet" type="text">
+                </div>
+                <div class="field">
+                  <label>City</label>
+                  <input class="input" id="profCity" type="text">
+                </div>
+              </div>
+              <div class="grid-3" style="margin-top:10px;">
+                <div class="field">
+                  <label>State</label>
+                  <input class="input" id="profState" type="text" maxlength="2">
+                </div>
+                <div class="field">
+                  <label>Zip</label>
+                  <input class="input" id="profZip" type="text">
+                </div>
+                <div class="field">
+                  <label>Notes</label>
+                  <input class="input" id="profNotes" type="text" placeholder="Gate code, drop spot, etc.">
+                </div>
+              </div>
+
+              <div class="row" style="margin-top:14px; justify-content:flex-end; gap:10px;">
+                <button class="btn btn-ghost" id="btnProfResetAddress" type="button">Clear address</button>
+                <button class="btn" id="btnProfSave" type="button">Save profile</button>
+              </div>
+
+              <div class="muted" id="profSavedMsg" style="margin-top:10px; display:none;">Saved.</div>
+
+              <div class="divider" style="margin:16px 0;"></div>
+
+              <div id="guestUpgrade" class="guest-upgrade hidden">
+                <div class="section-title">Guest upgrade</div>
+                <div class="muted">Set a password to turn this guest session into an account you can sign into later.</div>
+                <div class="grid-2" style="margin-top:10px;">
+                  <div class="field">
+                    <label>New password</label>
+                    <input class="input" id="guestNewPass" type="password" placeholder="Choose a password">
+                  </div>
+                  <div class="field">
+                    <label>Confirm</label>
+                    <input class="input" id="guestNewPass2" type="password" placeholder="Confirm password">
+                  </div>
+                </div>
+                <div class="row" style="margin-top:12px; justify-content:flex-end;">
+                  <button class="btn" id="btnGuestUpgrade" type="button">Create account</button>
+                </div>
+              </div>
+
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Orders</div>
+                <div class="card-sub">Reorder quickly and see what’s coming up.</div>
+              </div>
+              <div class="row" style="gap:10px; align-items:center;">
+                <input class="input input-small" id="orderSearch" type="search" placeholder="Search orders…">
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="orders-list" id="ordersList"></div>
+              <div class="muted" id="ordersEmpty" style="display:none;">No orders yet. Place a booking and it will show up here.</div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </section>
+
+
+    <!-- VERIFY EMAIL -->
+    <section id="pageVerify" class="hidden">
+      <section class="card card-narrow">
+        <h2 class="card-title">Verify your email</h2>
+        <p class="muted">We sent a verification code to <span id="verifyEmailHint"></span>. Enter it below to activate your account.</p>
+
+        <div class="form">
+          <label class="label" for="verifyCodeInput">Verification code</label>
+          <input id="verifyCodeInput" class="input" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" />
+
+          <div class="row gap">
+            <button class="btn btn-primary" id="btnVerifySubmit" type="button">Verify</button>
+            <button class="btn btn-ghost" id="btnVerifyResend" type="button">Resend code</button>
+          </div>
+
+          <div class="muted small" id="verifyMsg"></div>
+        </div>
+      </section>
+    </section>
+
+<!-- ADMIN -->
     <section id="pageAdmin" class="hidden">
       <section class="admin-wrap">
 

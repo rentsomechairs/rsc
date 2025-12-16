@@ -1933,7 +1933,7 @@ body.is-admin #flowbar{ display:none; }
 .inv-card{ position: relative; }
 .inv-card:not(.is-open) .inv-desc,
 .inv-card:not(.is-open) .inv-meta,
-.inv-card:not(.is-open) .inv-controls{ display:none; }
+.inv-card:not(.is-open):not(.is-selected) .inv-controls{ display:none; }
 .inv-card.is-open .inv-desc,
 .inv-card.is-open .inv-meta,
 .inv-card.is-open .inv-controls{ display:block; }
@@ -2296,4 +2296,101 @@ body.is-admin #flowbar{ display:none; }
 .modal-backdrop{
   background: rgba(0,0,0,.65);
   backdrop-filter: blur(6px);
+}
+
+
+/* Topbar right buttons */
+.topbar-right{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.topbar-btn{
+  padding:9px 12px;
+  border-radius:999px;
+}
+.status-pill.on .status-dot{
+  background: rgba(134,239,172,.95);
+  box-shadow: 0 0 0 3px rgba(134,239,172,.18);
+}
+
+/* Profile */
+.profile-header{
+  display:flex; justify-content:space-between; align-items:flex-start;
+  gap:14px; flex-wrap:wrap;
+  margin-bottom: 14px;
+}
+.profile-title{font-weight:1000; font-size:26px; letter-spacing:-.02em;}
+.profile-sub{color:var(--muted); margin-top:6px;}
+.profile-actions{display:flex; gap:10px; align-items:center;}
+.profile-grid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 980px){
+  .profile-grid{grid-template-columns: 1fr;}
+}
+.pill-row{display:flex; gap:8px; flex-wrap:wrap;}
+.pill{
+  padding:7px 10px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.04);
+  font-size:12px;
+}
+.pill.good{border-color: rgba(134,239,172,.35); background: rgba(134,239,172,.08);}
+.pill.warn{border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.08);}
+.pill.bad{border-color: rgba(248,113,113,.35); background: rgba(248,113,113,.08);}
+
+.grid-2{display:grid; grid-template-columns: 1fr 1fr; gap:12px;}
+.grid-3{display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px;}
+@media (max-width: 720px){
+  .grid-2,.grid-3{grid-template-columns: 1fr;}
+}
+.section-title{font-weight:900; margin-top:2px;}
+.divider{height:1px; background: rgba(255,255,255,.10);}
+
+.input-small{padding:9px 12px; height: 38px; border-radius: 12px; min-width: 220px;}
+
+.orders-list{display:flex; flex-direction:column; gap:12px;}
+.order-card{
+  border:1px solid rgba(255,255,255,.12);
+  border-radius: 16px;
+  background: rgba(0,0,0,.18);
+  padding: 12px;
+}
+.order-top{
+  display:flex; justify-content:space-between; align-items:flex-start;
+  gap: 12px; flex-wrap:wrap;
+}
+.order-title{font-weight:1000;}
+.order-meta{color:var(--muted); font-size:13px; margin-top:4px; line-height:1.35;}
+.order-right{text-align:right;}
+.order-total{font-weight:1000; font-size:16px;}
+.order-actions{display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;}
+.btn-mini{padding:8px 10px; border-radius: 12px; font-size:13px;}
+.order-items{margin-top:10px; color: var(--muted); font-size:13px;}
+.guest-upgrade{
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(122,162,255,.25);
+  background: rgba(122,162,255,.06);
+}
+
+
+/* ---------- Top bar structure fix ---------- */
+.topbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 12px;
+}
+.topbar .brand{flex: 0 0 auto;}
+.topbar-right{flex: 0 0 auto; display:flex; align-items:center; gap:10px;}
+/* Keep the flowbar centered as its own row under the topbar */
+.flowbar{
+  margin-top: 14px;
+  display:flex;
+  justify-content:center;
 }
