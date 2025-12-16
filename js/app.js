@@ -171,7 +171,8 @@ function handleRoute() {
   });
 
   // render current page
-  safeCall(route.render, {
+  const root = document.getElementById(route.sectionId);
+  safeCall(route.render, root, {
     db,
     routeKey,
     cart: getCart(),
