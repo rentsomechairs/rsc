@@ -30,6 +30,9 @@ function dispatch_(action, payload, session){
     case "auth.resendVerification": return authResendVerification_(payload);
 
     case "inventory.list": return inventoryList_();
+    case "inventory.upsert": return inventoryUpsert_(payload, session);
+    case "inventory.delete": return inventoryDelete_(payload, session);
+    case "booking.quote": return bookingQuote_(payload, session);
 
     case "booking.create": return bookingCreate_(payload, session);
     case "booking.listByEmail": return bookingListByEmail_(payload, session);
@@ -54,6 +57,15 @@ function ensureSheet_(name, headers){
   if (!sh){
     sh = ss.insertSheet(name);
     sh.getRange(1,1,1,headers.length).setValues([headers]);
+    return sh;
+  }
+
+  // Reconcile headers (add any missing columns to the right)
+  const existing = sh.getRange(1,1,1,sh.getLastColumn() || 1).getValues()[0].map(h => String(h||"").trim());
+  const missing = headers.filter(h => existing.indexOf(h) === -1);
+  if (missing.length){
+    const startCol = existing.length + 1;
+    sh.getRange(1, startCol, 1, missing.length).setValues([missing]);
   }
   return sh;
 }
@@ -242,6 +254,107 @@ function inventoryList_(){
     }));
   return { items };
 }
+
+
+function requireAdmin_(session){
+  // Owner sessions are role=admin; future admins also role=admin
+  if (!session || !session.token) throw new Error("Not signed in.");
+  const s = getSessionByToken_(session.token);
+  if (!s) throw new Error("Session expired. Please sign in again.");
+  if (String(s.role||"user") !== "admin") throw new Error("Admin only.");
+  return s;
+}
+
+function getSessionByToken_(token){
+  const sh = sessionsSheet_();
+  const rows = rowsToObjects_(sh.getDataRange().getValues());
+  const t = String(token||"");
+  return rows.find(r => String(r.token||"") === t) || null;
+}
+
+function touchSession_(token){
+  const sh = sessionsSheet_();
+  const values = sh.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const tokIdx = headers.indexOf("token");
+  const lastSeenIdx = headers.indexOf("lastSeenAt");
+  for (let r=1;r<values.length;r++){
+    if (String(values[r][tokIdx]||"") === String(token||"")){
+      sh.getRange(r+1, lastSeenIdx+1).setValue(nowIso_());
+      return;
+    }
+  }
+}
+
+function inventoryUpsert_(p, session){
+  requireAdmin_(session);
+  touchSession_(session.token);
+
+  const sh = equipmentSheet_();
+  const values = sh.getDataRange().getValues();
+  const headers = values[0].map(h => String(h||"").trim());
+  const idIdx = headers.indexOf("id");
+
+  const item = p && p.item ? p.item : p;
+  if (!item) throw new Error("Missing item.");
+
+  const id = String(item.id || Utilities.getUuid().replace(/-/g,""));
+  const rowObj = {
+    id,
+    name: String(item.name||""),
+    description: String(item.description||""),
+    imageUrl: String(item.imageUrl||""),
+    totalQty: Number(item.totalQty||0),
+    pricingTiers: JSON.stringify(item.pricingTiers||[]),
+    active: (item.active === false || String(item.active) === "false") ? "false" : "true",
+    createdAt: String(item.createdAt||nowIso_()),
+    updatedAt: nowIso_(),
+  };
+
+  // find existing
+  for (let r=1;r<values.length;r++){
+    if (String(values[r][idIdx]||"") === id){
+      sh.getRange(r+1,1,1,headers.length).setValues([objectToRow_(headers, rowObj)]);
+      return { item: rowObj };
+    }
+  }
+
+  sh.appendRow(objectToRow_(headers, rowObj));
+  return { item: rowObj };
+}
+
+function inventoryDelete_(p, session){
+  requireAdmin_(session);
+  touchSession_(session.token);
+
+  const id = String(p.id||"");
+  if (!id) throw new Error("Missing id.");
+  const sh = equipmentSheet_();
+  const values = sh.getDataRange().getValues();
+  const headers = values[0].map(h => String(h||"").trim());
+  const idIdx = headers.indexOf("id");
+  for (let r=1;r<values.length;r++){
+    if (String(values[r][idIdx]||"") === id){
+      sh.deleteRow(r+1);
+      return { deleted:true };
+    }
+  }
+  return { deleted:false };
+}
+
+function bookingQuote_(p, session){
+  // allow signed-in or guest; quote doesn't require auth
+  const cart = (p.cart || []);
+  const checkout = p.checkout || {};
+  let subtotal = 0;
+  for (let i=0;i<cart.length;i++){
+    subtotal += (Number(cart[i].price)||0) * (Number(cart[i].qty)||0);
+  }
+  const delivery = Number(checkout.deliveryFee||0);
+  return { totals: { subtotal, delivery, total: subtotal + delivery } };
+}
+
+
 
 /* ---------- Coupons ---------- */
 

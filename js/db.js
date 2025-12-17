@@ -20,7 +20,12 @@ function seedDb(){
   };
 }
 
+let MEM_DB = null;
+function memDb_(){ if (!MEM_DB) MEM_DB = seedDb(); return MEM_DB; }
+
+
 export function readDb(){
+  if (!CONFIG.MOCK_MODE) return memDb_();
   const raw = localStorage.getItem(DB_KEY);
   if (!raw){
     const db = seedDb();
@@ -28,18 +33,8 @@ export function readDb(){
     return db;
   }
   try{
-    const db = JSON.parse(raw);
-    if (!db?.users) throw new Error("bad db");
-    if (!db.users.some(u => (u.email||"").toLowerCase() === ADMIN.email.toLowerCase())){
-      db.users.unshift({ id:"admin_1", email: ADMIN.email, password: ADMIN.password, role:"admin", createdAt: nowIso() });
-    }
-    if (!db.equipment) db.equipment = [];
-    if (!db.locations) db.locations = [];
-    if (!db.coupons) db.coupons = [];
-    if (!db.bookings) db.bookings = [];
-    if (!db.checkout) db.checkout = {};
-    return db;
-  } catch {
+    return JSON.parse(raw);
+  }catch{
     const db = seedDb();
     localStorage.setItem(DB_KEY, JSON.stringify(db));
     return db;
@@ -47,19 +42,27 @@ export function readDb(){
 }
 
 export function writeDb(db){
+  if (!CONFIG.MOCK_MODE){
+    MEM_DB = db;
+    return;
+  }
   localStorage.setItem(DB_KEY, JSON.stringify(db));
 }
 
 export function resetDb(){
+  if (!CONFIG.MOCK_MODE){
+    MEM_DB = seedDb();
+    return;
+  }
   localStorage.removeItem(DB_KEY);
 }
 
 export function setSession(session){
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
 
 export function getSession(){
-  try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); }
+  try { return JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null"); }
   catch { return null; }
 }
 
@@ -119,32 +122,50 @@ export function listBookingsByEmail(email){
 }
 
 /* ---------- Equipment CRUD ---------- */
-export function listEquipment(){
+export async function listEquipment(){
+  if (!CONFIG.MOCK_MODE){
+    // Ensure we have fresh inventory at least once per session
+    await syncInventoryFromServer().catch(()=>{});
+  }
   const db = readDb();
   return [...db.equipment].sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||""));
 }
 
-export function saveEquipment(item){
-  const db = readDb();
-  const isEdit = !!item.id;
-  if (!isEdit) {
-    const created = { ...item, id: uid("eq"), createdAt: nowIso(), updatedAt: nowIso() };
-    db.equipment.push(created);
+export async function saveEquipment(item){
+  if (CONFIG.MOCK_MODE){
+    const db = readDb();
+    const isEdit = !!item.id;
+    if (!isEdit) {
+      const created = { ...item, id: uid("eq"), createdAt: nowIso(), updatedAt: nowIso() };
+      db.equipment.push(created);
+      writeDb(db);
+      return created;
+    }
+    const idx = db.equipment.findIndex(x => x.id === item.id);
+    if (idx === -1) throw new Error("Equipment not found");
+    const updated = { ...db.equipment[idx], ...item, updatedAt: nowIso() };
+    db.equipment[idx] = updated;
     writeDb(db);
-    return created;
+    return updated;
   }
-  const idx = db.equipment.findIndex(x => x.id === item.id);
-  if (idx === -1) throw new Error("Equipment not found");
-  const updated = { ...db.equipment[idx], ...item, updatedAt: nowIso() };
-  db.equipment[idx] = updated;
-  writeDb(db);
-  return updated;
+
+  const session = getSession();
+  const r = await callApi('inventory.upsert', { item }, session);
+  // refresh local cache
+  await syncInventoryFromServer().catch(()=>{});
+  return r.item;
 }
 
-export function deleteEquipment(id){
-  const db = readDb();
-  db.equipment = db.equipment.filter(x => x.id !== id);
-  writeDb(db);
+export async function deleteEquipment(id){
+  if (CONFIG.MOCK_MODE){
+    const db = readDb();
+    db.equipment = db.equipment.filter(x => x.id !== id);
+    writeDb(db);
+    return;
+  }
+  const session = getSession();
+  await callApi('inventory.delete', { id }, session);
+  await syncInventoryFromServer().catch(()=>{});
 }
 
 /* ---------- Locations CRUD ---------- */

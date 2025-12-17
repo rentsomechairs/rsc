@@ -37,7 +37,7 @@ function snapToIncrement(qty, inc){
   return Math.max(0, Math.floor(q / step) * step);
 }
 
-export function initInventory({ gotoLanding, gotoCalendar, softRefresh=false } = {}) {
+export async function initInventory({ gotoLanding, gotoCalendar, softRefresh=false } = {}) {
   const grid = document.getElementById('invGrid');
   const summary = document.getElementById('invSummary');
   const btnBack = document.getElementById('btnInvBack');
@@ -53,7 +53,7 @@ export function initInventory({ gotoLanding, gotoCalendar, softRefresh=false } =
   btnBack.onclick = () => gotoLanding?.();
   btnContinue.onclick = () => gotoCalendar?.();
 
-  const equipment = listEquipment();
+  const equipment = await listEquipment();
   const cart = getCart();
   let openId = null;
 

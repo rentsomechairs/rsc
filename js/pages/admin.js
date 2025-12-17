@@ -108,9 +108,9 @@ function clearEquipmentForm(){
   $("eqHelper").textContent = "";
 }
 
-function renderEquipmentList(){
+async function renderEquipmentList(){
   const list = $("eqList");
-  const items = listEquipment();
+  const items = await listEquipment();
 
   if (!items.length){
     list.innerHTML = `<div class="helper subtle">No equipment yet. Add your first item on the left.</div>`;
@@ -153,7 +153,7 @@ function renderEquipmentList(){
       if (!confirm("Delete this equipment item?")) return;
       deleteEquipment(id);
       if ($("eqEditingId").value === id) clearEquipmentForm();
-      renderEquipmentList();
+      await renderEquipmentList();
     });
   });
 }
@@ -171,7 +171,7 @@ function initEquipment(){
     addTierRow(100, 1.00);
   }
 
-  $("btnSaveEquipment").addEventListener("click", () => {
+  $("btnSaveEquipment").addEventListener("click", async () => {
     const id = $("eqEditingId").value.trim() || null;
     const name = $("eqName").value.trim();
     const imageUrl = $("eqImageUrl").value.trim();
@@ -185,7 +185,7 @@ function initEquipment(){
       return;
     }
 
-    const saved = saveEquipment({
+    const saved = await saveEquipment({
       id: id || undefined,
       name,
       imageUrl,
@@ -196,7 +196,7 @@ function initEquipment(){
     });
 
     $("eqHelper").textContent = id ? "Saved changes." : "Equipment added.";
-    renderEquipmentList();
+    await renderEquipmentList();
 
     if (!id) {
       clearEquipmentForm();
@@ -206,7 +206,7 @@ function initEquipment(){
     }
   });
 
-  renderEquipmentList();
+  await renderEquipmentList();
 }
 
 /* ---------------- Locations ---------------- */
@@ -384,7 +384,7 @@ function initCoupons(){
 }
 
 /* ---------------- Admin Boot ---------------- */
-export function initAdmin({ route } = {}){
+export async function initAdmin({ route } = {}){
   initTabs();
   initEquipment();
   initLocations();

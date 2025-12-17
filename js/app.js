@@ -71,13 +71,13 @@ function showLanding(){
   route('landing');
   setActiveStep('login');
   updateFlowSummary();
-  initLanding({ gotoAdmin, gotoInventory });
+  await initLanding({ gotoAdmin, gotoInventory });
 }
 
 function showAdmin(){
   route('admin');
   if (!adminInitialized) {
-    initAdmin({ route });
+    await initAdmin({ route });
     adminInitialized = true;
   }
 }
@@ -86,35 +86,35 @@ function showInventory(){
   route('inventory');
   setActiveStep('inventory');
   updateFlowSummary();
-  initInventory({ gotoLanding, gotoCalendar, softRefresh: true });
+  await initInventory({ gotoLanding, gotoCalendar, softRefresh: true });
 }
 
 function showCalendar(){
   route('calendar');
   setActiveStep('date');
   updateFlowSummary();
-  initCalendar({ gotoInventory, gotoNext: gotoAddress });
+  await initCalendar({ gotoInventory, gotoNext: gotoAddress });
 }
 
 function showAddress(){
   route('address');
   setActiveStep('address');
   updateFlowSummary();
-  initAddress({ gotoCalendar, gotoReview });
+  await initAddress({ gotoCalendar, gotoReview });
 }
 
 function showReview(){
   route('review');
   setActiveStep('review');
   updateFlowSummary();
-  initReview({ gotoAddress, gotoDone: gotoLanding });
+  await initReview({ gotoAddress, gotoDone: gotoLanding });
 }
 
 function showProfile(){
   route('profile');
   // No flowstep here; keep current active
   updateFlowSummary();
-  initProfile({ gotoLanding, gotoInventory });
+  await initProfile({ gotoLanding, gotoInventory });
 }
 
 // Keep summary fresh when localStorage changes elsewhere
@@ -142,12 +142,12 @@ function needsAuth(session){
   return session?.role === 'user' || session?.role === 'guest' || session?.role === 'admin';
 }
 
-function handleRoute(){
+async function handleRoute(){
   const session = getSession();
   refreshTopbar(session);
   const hash = (location.hash || '').toLowerCase();
   const db = readDb();
-  const hasCart = !!(localStorage.getItem('rsc_cart_v1') && JSON.parse(localStorage.getItem('rsc_cart_v1')||'[]').length);
+  const hasCart = !!(sessionStorage.getItem('rsc_cart') && JSON.parse(sessionStorage.getItem('rsc_cart')||'[]').length);
   const hasDate = !!(db.checkout && db.checkout.date);
   const hasAddress = !!(db.checkout && db.checkout.address);
 
@@ -200,7 +200,7 @@ function handleRoute(){
   showLanding();
 }
 
-window.addEventListener('hashchange', handleRoute);
+window.addEventListener('hashchange', () => { handleRoute(); });
 handleRoute();
 
 // Update summary after any route (useful after date selection)
