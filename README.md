@@ -1,76 +1,157 @@
-# Rent Some Chairs — Full Package (Backend + Frontend)
+# Rent Some Chairs — Project Handoff (v3.6.1)
 
-This package runs the **frontend on GitHub Pages** and uses **Google Sheets as the database** via a deployed **Google Apps Script Web App**.
-
-## What’s included
-- Frontend (static): `index.html`, `styles.css`, `js/*`
-- Backend (Apps Script): `apps_script/Code.gs`
-- Key features:
-  - Google login (GIS) + email/password login with verification code
-  - Owner/super-admin supported (server-side only)
-  - Inventory multi-select UI fix (selected items stay adjustable)
-  - Bookings saved to Sheets
-  - Admin snapshot + save equipment/locations/coupons
-  - Delivery quote endpoint (Distance Matrix) (optional; needs MAPS_API_KEY)
+This zip contains the **current working state** of the Rent Some Chairs website.
+It is intended to be used as a clean handoff so development can continue in a new chat
+without historical context or lag.
 
 ---
 
-## Step 1 — Create the Google Sheet
-1. Create a new Google Sheet.
-2. Copy the **Sheet ID** from the URL (the long string between `/d/` and `/edit`).
-3. Leave it empty — the script will create the tabs + headers automatically on first request.
+## 1. What this project is
+
+A fully front-end (HTML/CSS/JS) rental booking website for an equipment rental business
+(chairs first, expandable later), with:
+
+- Admin-managed inventory and pricing
+- Customer booking flow (inventory → date → address → review)
+- Optional 5-year annual booking discount logic
+- User accounts, guest flow, and profile pages
+- Local prototype database (localStorage)
+- Designed to be later connected to a real backend (Google Sheets + Apps Script)
 
 ---
 
-## Step 2 — Create the Apps Script Web App
-1. Go to **script.google.com** → New project.
-2. Create a single file named `Code.gs` and paste the contents of `apps_script/Code.gs`.
-3. Open **Project Settings** → **Script Properties** and add:
+## 2. Current status (important)
 
-Required:
-- `SHEET_ID` = `<your sheet id>`
-- `OWNER_EMAIL` = `rentsomechairs@gmail.com`
-- `OWNER_PASSWORD` = `12poqw09-`
+✅ UI / UX is stable  
+✅ Admin panel works  
+✅ Inventory, calendar, annual logic works  
+✅ Profile page + order history works  
+❌ Still using localStorage (NOT production-ready backend)  
+❌ Payments not yet implemented  
+❌ Email + Google login not yet wired  
 
-Optional (recommended):
-- `ADMIN_NOTIFY_EMAIL` = `rentsomechairs@gmail.com`
-- `MAPS_API_KEY` = `<your Google Maps API key>` (only needed for delivery quote)
-
-4. Deploy:
-- Deploy → New deployment → **Web app**
-- Execute as: **Me**
-- Who has access: **Anyone**
-- Click Deploy and copy the Web App URL (ends with `/exec`)
+This is the **last prototype step before real backend integration**.
 
 ---
 
-## Step 3 — Configure the frontend
-1. Open `js/config.js`
-2. Paste your Apps Script Web App URL:
-```js
-APPS_SCRIPT_URL: "https://script.google.com/macros/s/....../exec",
+## 3. How to run locally
+
+### Requirements
+- Python 3 installed
+
+### Start local server
+From the project root:
+
+```bash
+python -m http.server 8000
 ```
 
-3. Commit/push the site to GitHub Pages.
+Then open:
+```
+http://localhost:8000
+```
+
+⚠️ Do NOT open index.html directly from the file system.
 
 ---
 
-## Notes / Security
-- The **owner account** is enforced server-side and never exposed in the frontend.
-- All writes go through Apps Script; Sheets should not be edited directly by untrusted users.
+## 4. Login credentials (prototype)
+
+### Admin
+- Email: r@g.com
+- Password: 1
+
+### Normal user
+- Any email + password you create
+
+### Guest
+- Continue as Guest
+- Can upgrade later via Profile page
 
 ---
 
-## Admin Config (Delivery Fee)
-If you set `MAPS_API_KEY`, you can add these keys via the Admin Config endpoint (or by editing the `Config` sheet):
-- `base_address` (string, e.g. `123 Main St, Raleigh, NC 27601`)
-- `delivery_base_fee` (number)
-- `delivery_per_mile` (number)
-- `delivery_max_miles` (number, optional)
+## 5. Folder structure
+
+```
+/
+├── index.html
+├── styles.css
+├── assets/
+├── js/
+│   ├── app.js
+│   ├── db.js
+│   ├── utils.js
+│   ├── services/
+│   │   └── api.js   (future backend)
+│   ├── pages/
+│   │   ├── landing.js
+│   │   ├── inventory.js
+│   │   ├── calendar.js
+│   │   ├── address.js
+│   │   ├── review.js
+│   │   ├── admin.js
+│   │   └── profile.js
+│   └── ui/
+│       └── flowbar.js
+```
 
 ---
 
-## Troubleshooting
-- If the frontend says “Missing CONFIG.APPS_SCRIPT_URL” you didn’t set the URL in `js/config.js`.
-- If Apps Script says “Missing SHEET_ID” add it in Script Properties.
-- Google login requires your Google OAuth Client ID already embedded in the page meta tag.
+## 6. Booking flow
+
+1. Landing / Login
+2. Inventory selection
+3. Date selection (single or 5-year annual)
+4. Address
+5. Review & confirm
+
+---
+
+## 7. Admin features
+
+- Equipment management
+- Storage locations
+- Coupons
+- Coming-soon items
+- Tier pricing
+
+---
+
+## 8. Profile features
+
+- Account info
+- Default address
+- Order history
+- Order again
+- Guest upgrade
+
+---
+
+## 9. Database plan
+
+Current:
+- localStorage via db.js
+
+Next:
+- Google Sheets + Apps Script API
+- Swap db.js calls for services/api.js
+
+---
+
+## 10. What’s left before launch
+
+1. Real backend (Sheets + Apps Script)
+2. Auth hardening (hash passwords / Google login)
+3. Server-side availability enforcement
+4. Booking confirmation emails
+5. Payments (Stripe)
+
+---
+
+## 11. How to continue
+
+Upload this zip in a new chat and say:
+
+“This is the Rent Some Chairs project. Please read the README and continue.”
+
+---

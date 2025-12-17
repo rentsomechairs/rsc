@@ -1,120 +1,68 @@
-/* js/pages/landing.js */
+import * as db from '../db.js';
+import { CONFIG } from '../config.js';
 
-import { api } from "../api.js";
-import { setSession } from "../app.js";
+export function initLanding({ gotoAdmin, gotoInventory }) {
+  const btnGmail = document.getElementById('btnGmail');
+  const gmailHelper = document.getElementById('gmailHelper');
 
-const PENDING_EMAIL_KEY = "rsc_pending_email_v1";
+  const btnEmailLogin = document.getElementById('btnEmailLogin');
+  const emailInput = document.getElementById('emailInput');
+  const passInput = document.getElementById('passInput');
 
-export function renderLanding(root){
-  root.innerHTML = `
-    <h2>Welcome</h2>
-    <p class="muted">Sign in with Google, email, or continue as guest.</p>
+  const btnGuestToggle = document.getElementById('btnGuestToggle');
+  const guestPanel = document.getElementById('guestPanel');
+  const guestEmail = document.getElementById('guestEmail');
+  const btnGuestContinue = document.getElementById('btnGuestContinue');
 
-    <div class="card" style="margin-top:12px">
-      <h3>Login with Google</h3>
-      <div id="googleBtnWrap" style="margin-top:10px"></div>
-      <div class="muted" style="margin-top:8px;font-size:13px">If the button doesn't appear, check your browser blocks or Google OAuth settings.</div>
-    </div>
-
-    <div class="card" style="margin-top:12px">
-      <h3>Login with Email</h3>
-      <input id="emailInput" type="email" placeholder="Email" />
-      <input id="passwordInput" type="password" placeholder="Password" />
-      <button id="emailLoginBtn">Login / Sign Up</button>
-    </div>
-
-    <div class="card" style="margin-top:12px">
-      <h3>Continue as Guest</h3>
-      <button id="guestBtn" class="btn-secondary">Continue as Guest</button>
-    </div>
-
-    <div id="landingMsg" style="margin-top:10px"></div>
-  `;
-
-  const msg = root.querySelector("#landingMsg");
-
-  // ---------- Guest ----------
-  root.querySelector("#guestBtn").addEventListener("click", async () => {
-    msg.textContent = "Continuing as guest…";
-    try{
-      const res = await api("auth.guest", {});
-      setSession(res.session);
-    }catch(e){
-      // fallback (mock mode or offline)
-      console.warn(e);
-      setSession({ role:"guest", email:null, token:null });
-    }
-    location.hash = "#inventory";
+  btnGmail?.addEventListener('click', () => {
+    if (gmailHelper) gmailHelper.textContent = 'Gmail login will be added later (requires hosted OAuth).';
+    alert('Gmail login not wired yet.');
   });
 
-  // ---------- Email ----------
-  root.querySelector("#emailLoginBtn").addEventListener("click", async () => {
-    const email = root.querySelector("#emailInput").value.trim().toLowerCase();
-    const password = root.querySelector("#passwordInput").value;
+  btnGuestToggle?.addEventListener('click', () => {
+    guestPanel?.classList.toggle('open');
+    const isOpen = guestPanel?.classList.contains('open');
+    btnGuestToggle.setAttribute('aria-expanded', String(!!isOpen));
+    const chev = btnGuestToggle.querySelector('.chev');
+    if (chev) chev.textContent = isOpen ? '▴' : '▾';
+  });
 
-    if (!email || !password) {
-      msg.textContent = "Enter email and password.";
+  btnGuestContinue?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const email = (guestEmail?.value || '').trim();
+    if (!email) return alert('Guest email is required.');
+    const u = db.upsertUser(email, '', 'guest');
+    db.setSession({ userId: u.id, email: u.email, role: 'guest' });
+    gotoInventory?.();
+  });
+
+  btnEmailLogin?.addEventListener('click', async () => {
+    const email = (emailInput?.value || '').trim();
+    const pass = passInput?.value || '';
+
+    if (!email || !pass) return alert('Enter email and password.');
+
+    // Admin shortcut in mock mode only (local prototype)
+    if (CONFIG.MOCK_MODE && email.toLowerCase() === db.ADMIN.email.toLowerCase() && pass === db.ADMIN.password) {
+      db.setSession({ userId: 'admin_1', email, role: 'admin' });
+      gotoAdmin?.();
       return;
     }
-
-    msg.textContent = "Signing in…";
 
     try {
-      const res = await api("auth.email", { email, password });
+      const r = await db.backendEmailLogin(email, pass);
 
-      // Backend returns {status:'verify_required'} when user is unverified
-      if (res.status === "verify_required"){
-        sessionStorage.setItem(PENDING_EMAIL_KEY, email);
-        location.hash = "#verify";
-        return;
+      // If the backend requires verification, prompt for code (keeps UX minimal without adding a new page yet)
+      if (r.needsVerification) {
+        const code = prompt('Enter the verification code sent to your email:');
+        if (!code) return alert('Verification required. Please try again.');
+        await db.backendVerifyEmail(email, code.trim());
       }
 
-      // Backend returns {session:{...}}
-      if (res.session){
-        setSession(res.session);
-        location.hash = "#inventory";
-        return;
-      }
-
-      msg.textContent = "Unexpected login response.";
+      gotoInventory?.();
     } catch (e) {
-      console.error(e);
-      msg.textContent = e?.message || "Login failed.";
+      alert(e?.message || 'Login failed.');
     }
   });
-
-  // ---------- Google ----------
-  // Uses Google Identity Services loaded in index.html
-  const wrap = root.querySelector("#googleBtnWrap");
-
-  function renderGoogleButton(){
-    const clientIdMeta = document.querySelector('meta[name="google-signin-client_id"]')?.getAttribute("content");
-    const clientId = clientIdMeta || null;
-
-    if (!window.google?.accounts?.id || !clientId){
-      wrap.innerHTML = `<div class="muted">Google Sign-In not ready.</div>`;
-      return;
-    }
-
-    window.google.accounts.id.initialize({
-      client_id: clientId,
-      callback: async (resp) => {
-        msg.textContent = "Signing in with Google…";
-        try{
-          const r = await api("auth.google", { idToken: resp.credential });
-          setSession(r.session);
-          location.hash = "#inventory";
-        }catch(e){
-          console.error(e);
-          msg.textContent = e?.message || "Google login failed.";
-        }
-      },
-    });
-
-    wrap.innerHTML = "";
-    window.google.accounts.id.renderButton(wrap, { theme: "outline", size: "large", text: "signin_with" });
-  }
-
-  // slight delay so GIS can finish loading
-  setTimeout(renderGoogleButton, 250);
 }

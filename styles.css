@@ -1933,7 +1933,7 @@ body.is-admin #flowbar{ display:none; }
 .inv-card{ position: relative; }
 .inv-card:not(.is-open) .inv-desc,
 .inv-card:not(.is-open) .inv-meta,
-.inv-card:not(.is-open):not(.is-selected) .inv-controls{ display:none; }
+.inv-card:not(.is-open) .inv-controls{ display:none; }
 .inv-card.is-open .inv-desc,
 .inv-card.is-open .inv-meta,
 .inv-card.is-open .inv-controls{ display:block; }
@@ -2394,7 +2394,3 @@ body.is-admin #flowbar{ display:none; }
   display:flex;
   justify-content:center;
 }
-
-/* --- Added for router shell --- */
-.container { max-width: 980px; margin: 0 auto; padding: 16px; }
-.error-box { margin: 12px 0; padding: 12px; border: 1px solid #d77; border-radius: 10px; background: #fff5f5; color: #7a1f1f; white-space: pre-wrap; }

@@ -1,79 +1,276 @@
-/* js/pages/profile.js
-   User profile page
-   Exports renderProfile as expected by app.js
-*/
+import { getSession, clearSession, readDb, writeDb, getUserByEmail, updateUserByEmail, setUserPassword, listBookingsByEmail, setCart } from '../db.js';
+import { updateFlowSummary } from '../ui/flowbar.js';
+import { listEquipment } from '../db.js';
 
-import { api } from "../api.js";
-import { getSession, setSession } from "../app.js";
+function esc(s){
+  return String(s ?? "").replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[c]));
+}
+function money(n){ return `$${Number(n||0).toFixed(2)}`; }
 
-export async function renderProfile(ctx) {
-  const root = document.getElementById("page-profile");
-  if (!root) return;
+function formatDateDisplay(iso){
+  if (!iso) return '—';
+  const [y,m,d] = String(iso).split('-').map(Number);
+  if (!y||!m||!d) return iso;
+  const dt = new Date(y, m-1, d);
+  const mon = dt.toLocaleString(undefined,{month:'short'});
+  const day = d;
+  const yr = y;
+  const suf = (day % 100 >= 11 && day % 100 <= 13) ? 'th' : ({1:'st',2:'nd',3:'rd'}[day%10]||'th');
+  return `${mon}. ${day}${suf}, ${yr}`;
+}
 
-  const session = getSession();
-
-  if (!session) {
-    root.innerHTML = `<p>Please log in to view your profile.</p>`;
-    return;
-  }
-
-  root.innerHTML = `
-    <h2>Your Profile</h2>
-
-    <div id="profileInfo">Loading…</div>
-
-    <h3 style="margin-top:16px">Booking History</h3>
-    <div id="bookingHistory">Loading…</div>
-
-    <div style="margin-top:16px">
-      <button id="logoutBtn">Log out</button>
-    </div>
-  `;
-
-  const infoEl = root.querySelector("#profileInfo");
-  const historyEl = root.querySelector("#bookingHistory");
-
-  try {
-    const res = await api("me.get", {});
-    const user = res.user;
-
-    infoEl.innerHTML = `
-      <div><strong>Email:</strong> ${user.email}</div>
-      <div><strong>Role:</strong> ${user.role}</div>
-      <div><strong>Verified:</strong> ${user.verified ? "Yes" : "No"}</div>
-    `;
-  } catch (err) {
-    console.error(err);
-    infoEl.innerHTML = `<span style="color:red">Failed to load profile.</span>`;
-  }
-
-  try {
-    const res = await api("booking.my", {});
-    const bookings = res.items || [];
-
-    if (!bookings.length) {
-      historyEl.innerHTML = `<em>No bookings yet.</em>`;
-    } else {
-      historyEl.innerHTML = bookings
-        .map(
-          (b) => `
-          <div style="border-bottom:1px solid #ddd;padding:6px 0">
-            <div><strong>ID:</strong> ${b.id}</div>
-            <div><strong>Date:</strong> ${b.date}</div>
-            <div><strong>Status:</strong> ${b.status}</div>
-            <div><strong>Total:</strong> $${Number(b.total).toFixed(2)}</div>
-          </div>
-        `
-        )
-        .join("");
+function groupBookings(bookings){
+  const map = new Map();
+  for (const b of bookings){
+    const key = b.bookingId || b.groupId || b.id;
+    if (!map.has(key)){
+      map.set(key, {
+        key,
+        createdAt: b.createdAt,
+        customerEmail: b.customerEmail,
+        address: b.address,
+        coupon: b.coupon || null,
+        annual: !!b.annual,
+        status: b.status || 'Pending',
+        dates: [],
+        items: b.items || {},
+        totals: []
+      });
     }
-  } catch (err) {
-    console.error(err);
-    historyEl.innerHTML = `<span style="color:red">Failed to load bookings.</span>`;
+    const g = map.get(key);
+    g.dates.push(b.date);
+    // Keep latest address/status
+    g.address = b.address || g.address;
+    g.status = b.status || g.status;
+    g.annual = g.annual || !!b.annual;
+    g.items = b.items || g.items;
+    g.totals.push(b.total || b.promoTotal || null);
+  }
+  const groups = Array.from(map.values());
+  for (const g of groups){
+    g.dates = g.dates.filter(Boolean).sort();
+    g.createdAt = g.createdAt || (g.dates[0] ? g.dates[0] : null);
+  }
+  groups.sort((a,b) => String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  return groups;
+}
+
+function itemsSummary(items, equipment){
+  const parts = [];
+  for (const [id, qty] of Object.entries(items||{})){
+    const eq = equipment.find(e => e.id === id);
+    const name = eq ? eq.name : id;
+    parts.push(`${name}: ${qty}`);
+  }
+  return parts.join(' • ') || '—';
+}
+
+export function initProfile({ gotoLanding, gotoInventory } = {}){
+  const sess = getSession();
+  const email = sess?.email || '';
+  const role = sess?.role || 'guest';
+
+  const btnBack = document.getElementById('btnProfileBack');
+  const btnSignOut = document.getElementById('btnProfileSignOut');
+  const badges = document.getElementById('profileBadges');
+  const sub = document.getElementById('profileSub');
+
+  const profEmail = document.getElementById('profEmail');
+  const profRole = document.getElementById('profRole');
+  const profName = document.getElementById('profName');
+  const profPhone = document.getElementById('profPhone');
+
+  const street = document.getElementById('profStreet');
+  const city = document.getElementById('profCity');
+  const state = document.getElementById('profState');
+  const zip = document.getElementById('profZip');
+  const notes = document.getElementById('profNotes');
+
+  const btnSave = document.getElementById('btnProfSave');
+  const btnClearAddr = document.getElementById('btnProfResetAddress');
+  const savedMsg = document.getElementById('profSavedMsg');
+
+  const guestUpgrade = document.getElementById('guestUpgrade');
+  const guestPass = document.getElementById('guestNewPass');
+  const guestPass2 = document.getElementById('guestNewPass2');
+  const btnGuestUpgrade = document.getElementById('btnGuestUpgrade');
+
+  const ordersList = document.getElementById('ordersList');
+  const ordersEmpty = document.getElementById('ordersEmpty');
+  const search = document.getElementById('orderSearch');
+
+  btnBack.onclick = () => {
+    // go somewhere sensible
+    if (role === 'admin') location.hash = '#admin';
+    else location.hash = '#inventory';
+  };
+  btnSignOut.onclick = () => {
+    clearSession();
+    location.hash = '';
+    gotoLanding?.();
+  };
+
+  const user = getUserByEmail(email) || { email, role };
+  profEmail.value = user.email || '';
+  profRole.value = user.role || role;
+
+  profName.value = user.name || '';
+  profPhone.value = user.phone || '';
+
+  const addr = user.defaultAddress || {};
+  street.value = addr.street || '';
+  city.value = addr.city || '';
+  state.value = addr.state || '';
+  zip.value = addr.zip || '';
+  notes.value = addr.notes || '';
+
+  // Badges
+  badges.innerHTML = '';
+  if (role === 'admin') badges.innerHTML += '<span class="pill good">Admin</span>';
+  if (role === 'guest') badges.innerHTML += '<span class="pill warn">Guest</span>';
+  if (user.isVerified) badges.innerHTML += '<span class="pill good">Verified</span>';
+  else badges.innerHTML += '<span class="pill warn">Not verified</span>';
+
+  if (role === 'guest'){
+    sub.textContent = 'You are browsing as a guest. You can upgrade to an account any time.';
+    guestUpgrade.classList.remove('hidden');
+  } else {
+    guestUpgrade.classList.add('hidden');
   }
 
-  root.querySelector("#logoutBtn").onclick = () => {
-    setSession(null);
-    location.hash = "#landing";
+  function showSaved(){
+    savedMsg.style.display = 'block';
+    savedMsg.textContent = 'Saved.';
+    setTimeout(()=> savedMsg.style.display='none', 1200);
+  }
+
+  btnClearAddr.onclick = () => {
+    street.value=''; city.value=''; state.value=''; zip.value=''; notes.value='';
   };
+
+  btnSave.onclick = () => {
+    const patch = {
+      name: profName.value.trim(),
+      phone: profPhone.value.trim(),
+      defaultAddress: {
+        street: street.value.trim(),
+        city: city.value.trim(),
+        state: state.value.trim(),
+        zip: zip.value.trim(),
+        notes: notes.value.trim()
+      }
+    };
+    updateUserByEmail(email, patch);
+    showSaved();
+  };
+
+  btnGuestUpgrade.onclick = () => {
+    const p1 = guestPass.value;
+    const p2 = guestPass2.value;
+    if (!p1 || p1.length < 4) { alert('Please choose a password (4+ chars).'); return; }
+    if (p1 !== p2) { alert('Passwords do not match.'); return; }
+
+    // Set password and flip role to user
+    updateUserByEmail(email, { password: p1, role: 'user' });
+    // Update session
+    const db2 = readDb();
+    db2.checkout = db2.checkout || {};
+    writeDb(db2);
+    // Keep email same, update role
+    localStorage.setItem('rsc_sess', JSON.stringify({ email, role:'user', createdAt: new Date().toISOString() }));
+    alert('Account created! You can now sign in with email + password.');
+    guestUpgrade.classList.add('hidden');
+    badges.innerHTML = '<span class="pill warn">Not verified</span>';
+    updateFlowSummary?.();
+  };
+
+  // Orders
+  const equipment = listEquipment();
+  const bookings = listBookingsByEmail(email);
+  const groups = groupBookings(bookings);
+
+  function renderOrders(){
+    const q = (search.value || '').trim().toLowerCase();
+    const filtered = !q ? groups : groups.filter(g => {
+      const txt = [
+        g.key, g.status,
+        (g.dates||[]).join(' '),
+        itemsSummary(g.items, equipment),
+        (g.address?.street||''),
+        (g.address?.city||''),
+        (g.address?.state||''),
+        (g.address?.zip||'')
+      ].join(' ').toLowerCase();
+      return txt.includes(q);
+    });
+
+    ordersList.innerHTML = '';
+    if (!filtered.length){
+      ordersEmpty.style.display = 'block';
+      return;
+    }
+    ordersEmpty.style.display = 'none';
+
+    for (const g of filtered){
+      const isAnnual = !!g.annual || (g.dates && g.dates.length === 5);
+      const datesLabel = isAnnual ? g.dates.map(formatDateDisplay).join(' • ') : formatDateDisplay(g.dates[0]);
+      const addrLabel = g.address ? `${g.address.street || ''} • ${g.address.city || ''}, ${g.address.state || ''} ${g.address.zip || ''}` : '—';
+      const itemsLabel = itemsSummary(g.items, equipment);
+
+      // Try to compute total from stored totals; fallback to 0
+      const stored = g.totals.filter(x => x != null);
+      const total = stored.length ? stored[0] : null;
+
+      const el = document.createElement('div');
+      el.className = 'order-card';
+      el.innerHTML = `
+        <div class="order-top">
+          <div>
+            <div class="order-title">${isAnnual ? '5-Year Annual Booking' : 'Single Booking'} <span class="muted">• ${esc(g.status)}</span></div>
+            <div class="order-meta">
+              <div><strong>Dates:</strong> ${esc(datesLabel)}</div>
+              <div><strong>Items:</strong> ${esc(itemsLabel)}</div>
+              <div><strong>Address:</strong> ${esc(addrLabel)}</div>
+            </div>
+          </div>
+          <div class="order-right">
+            <div class="order-total">${total != null ? money(total) : ''}</div>
+            <div class="muted" style="font-size:12px;">${g.key}</div>
+          </div>
+        </div>
+
+        <div class="order-actions">
+          <button class="btn btn-ghost btn-mini" type="button" data-action="reorder">Order again</button>
+          <button class="btn btn-ghost btn-mini" type="button" data-action="toReview">Jump to review</button>
+        </div>
+      `;
+
+      el.querySelector('[data-action="reorder"]').onclick = () => {
+        // Prefill cart + checkout
+        setCart(Object.entries(g.items||{}).map(([id, qty]) => ({ id, qty })));
+        const db2 = readDb();
+        db2.checkout = db2.checkout || {};
+        db2.checkout.annual = isAnnual;
+        db2.checkout.dates = isAnnual ? (g.dates || []) : [g.dates[0]];
+        db2.checkout.date = isAnnual ? null : g.dates[0];
+        db2.checkout.address = g.address || null;
+        writeDb(db2);
+        updateFlowSummary?.();
+        alert('Loaded this order. You can review and adjust before placing again.');
+        location.hash = '#inventory';
+        gotoInventory?.();
+      };
+
+      el.querySelector('[data-action="toReview"]').onclick = () => {
+        location.hash = '#review';
+      };
+
+      ordersList.appendChild(el);
+    }
+  }
+
+  search.addEventListener('input', renderOrders);
+  renderOrders();
 }
