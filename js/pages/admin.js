@@ -1,8 +1,10 @@
 import {
+  listCategories, saveCategory, deleteCategory,
   listEquipment, saveEquipment, deleteEquipment,
   listLocations, saveLocation, deleteLocation,
   listCoupons, saveCoupon, deleteCoupon, toggleCouponEnabled,
-  resetDb
+  resetDb,
+  readDb, writeDb, getSession
 } from "../db.js";
 
 function $(id){ return document.getElementById(id); }
@@ -57,6 +59,134 @@ function initTabs(){
   show("equipment");
 }
 
+
+/* ---------------- Categories (dynamic) ---------------- */
+function renderCategorySelect(){
+  const sel = $("eqCategory");
+  if (!sel) return;
+  const cats = listCategories();
+  sel.innerHTML = `<option value="">— Select category —</option>` +
+    cats.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
+}
+
+let editingCatId = null;
+
+function showCatPreview(url){
+  const box = $("catPreview");
+  if (!box) return;
+  if (!url){ box.hidden = true; box.innerHTML = ""; return; }
+  box.hidden = false;
+  box.innerHTML = `<img src="${esc(url)}" alt="Category image preview" /> <div class="mini-hint">${esc(url.startsWith("data:") ? "Uploaded image (stored locally)" : "Image URL")}</div>`;
+}
+
+function clearCatForm(){
+  editingCatId = null;
+  if ($("catFormTitle")) $("catFormTitle").textContent = "Add Category";
+  if ($("catName")) $("catName").value = "";
+  if ($("catImageUrl")) $("catImageUrl").value = "";
+  if ($("catAnnualEligible")) $("catAnnualEligible").checked = false;
+  if ($("catSortOrder")) $("catSortOrder").value = "0";
+  showCatPreview("");
+  if ($("catFormMsg")) $("catFormMsg").textContent = "";
+}
+
+function renderCategories(){
+  const list = $("catList");
+  if (!list) return;
+  const cats = listCategories();
+  if (!cats.length){
+    list.innerHTML = `<div class="admin-empty">No categories yet. Add your first one.</div>`;
+    return;
+  }
+  list.innerHTML = cats.map(c => `
+    <div class="admin-list-row">
+      <div class="admin-list-main">
+        <div class="admin-list-title">${esc(c.name)}</div>
+        <div class="admin-list-sub">
+          ${c.annualEligible ? "Annual promo eligible" : "Not eligible"} • Sort ${Number(c.sortOrder||0)}
+        </div>
+      </div>
+      <div class="admin-list-actions">
+        <button class="btn btn-ghost admin-small" data-cat-edit="${esc(c.id)}">Edit</button>
+        <button class="btn btn-bad admin-small" data-cat-del="${esc(c.id)}">Delete</button>
+      </div>
+    </div>
+  `).join("");
+
+  list.querySelectorAll("[data-cat-edit]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-cat-edit");
+      const cat = cats.find(x => x.id === id);
+      if (!cat) return;
+      editingCatId = id;
+      $("catFormTitle").textContent = "Edit Category";
+      $("catName").value = cat.name || "";
+      $("catImageUrl").value = cat.imageUrl || "";
+      $("catAnnualEligible").checked = !!cat.annualEligible;
+      $("catSortOrder").value = String(cat.sortOrder ?? 0);
+      showCatPreview(cat.imageUrl || "");
+    });
+  });
+  list.querySelectorAll("[data-cat-del]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-cat-del");
+      if (!confirm("Delete this category? Items will remain but be uncategorized.")) return;
+      deleteCategory(id);
+      renderCategories();
+      renderCategorySelect();
+    });
+  });
+}
+
+function initCategoriesTab(){
+  const btnUpload = $("btnCatUpload");
+  const fileInput = $("catImageFile");
+  if (btnUpload && fileInput){
+    btnUpload.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", async () => {
+      const f = fileInput.files && fileInput.files[0];
+      if (!f) return;
+      const dataUrl = await new Promise((resolve,reject)=>{
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result||""));
+        r.onerror = reject;
+        r.readAsDataURL(f);
+      });
+      $("catImageUrl").value = dataUrl;
+      showCatPreview(dataUrl);
+      fileInput.value = "";
+    });
+  }
+
+  if ($("catImageUrl")){
+    $("catImageUrl").addEventListener("input", () => showCatPreview($("catImageUrl").value.trim()));
+  }
+
+  if ($("btnCatClear")) $("btnCatClear").addEventListener("click", clearCatForm);
+
+  if ($("btnCatSave")) $("btnCatSave").addEventListener("click", () => {
+    try{
+      const payload = {
+        id: editingCatId || undefined,
+        name: $("catName").value.trim(),
+        imageUrl: $("catImageUrl").value.trim(),
+        annualEligible: $("catAnnualEligible").checked,
+        sortOrder: $("catSortOrder").value
+      };
+      saveCategory(payload);
+      $("catFormMsg").textContent = "Saved.";
+      clearCatForm();
+      renderCategories();
+      renderCategorySelect();
+    } catch (e){
+      $("catFormMsg").textContent = e?.message || "Could not save category.";
+    }
+  });
+
+  renderCategories();
+}
+
+
 /* ---------------- Equipment ---------------- */
 function addTierRow(minQty="", priceEach=""){
   const wrap = $("eqTiersWrap");
@@ -93,6 +223,35 @@ function setEquipmentForm(item){
   $("eqEditingId").value = item?.id || "";
   $("eqFormTitle").textContent = item?.id ? "Edit Equipment" : "Add Equipment";
   $("eqName").value = item?.name || "";
+  // Default category behavior:
+  // - If item already has a categoryId, use it.
+  // - If missing (legacy data), infer from the name.
+  // - If new item, default to chairs so promos work out of the box.
+  if ($("eqCategory")) {
+    const cats = listCategories();
+    const existingId = String(item?.categoryId || "").trim();
+    const legacy = String(item?.category || "").trim().toLowerCase();
+    let pick = existingId;
+
+    // Back-compat: legacy values like "chairs"/"tables"
+    if (!pick && legacy){
+      const byName = cats.find(c => String(c.name||"").toLowerCase() === legacy) || cats.find(c => String(c.name||"").toLowerCase().includes(legacy));
+      if (byName) pick = byName.id;
+      // map common legacy tokens
+      if (!pick && legacy === "chairs") pick = (cats.find(c => String(c.name||"").toLowerCase().includes("chair"))||{}).id || "";
+      if (!pick && legacy === "tables") pick = (cats.find(c => String(c.name||"").toLowerCase().includes("table"))||{}).id || "";
+    }
+
+    // If still empty, infer from name
+    if (!pick){
+      const nm = String(item?.name || "").toLowerCase();
+      const inferredName = nm.includes("chair") ? "chairs" : (nm.includes("table") ? "tables" : "other");
+      const byInf = cats.find(c => String(c.name||"").toLowerCase() === inferredName) || cats.find(c => String(c.name||"").toLowerCase().includes(inferredName));
+      pick = byInf ? byInf.id : "";
+    }
+
+    $("eqCategory").value = pick;
+  }
   $("eqImageUrl").value = item?.imageUrl || "";
   $("eqQuantity").value = String(item?.quantity ?? 0);
   $("eqMaxPerOrder").value = String(item?.maxPerOrder ?? 0);
@@ -108,9 +267,9 @@ function clearEquipmentForm(){
   $("eqHelper").textContent = "";
 }
 
-async function renderEquipmentList(){
+function renderEquipmentList(){
   const list = $("eqList");
-  const items = await listEquipment();
+  const items = listEquipment();
 
   if (!items.length){
     list.innerHTML = `<div class="helper subtle">No equipment yet. Add your first item on the left.</div>`;
@@ -153,7 +312,7 @@ async function renderEquipmentList(){
       if (!confirm("Delete this equipment item?")) return;
       deleteEquipment(id);
       if ($("eqEditingId").value === id) clearEquipmentForm();
-      await renderEquipmentList();
+      renderEquipmentList();
     });
   });
 }
@@ -171,9 +330,10 @@ function initEquipment(){
     addTierRow(100, 1.00);
   }
 
-  $("btnSaveEquipment").addEventListener("click", async () => {
+  $("btnSaveEquipment").addEventListener("click", () => {
     const id = $("eqEditingId").value.trim() || null;
     const name = $("eqName").value.trim();
+    const categoryId = $("eqCategory") ? $("eqCategory").value : "";
     const imageUrl = $("eqImageUrl").value.trim();
     const quantity = Math.max(0, Math.floor(Number($("eqQuantity").value || 0)));
     const maxPerOrder = Math.max(0, Math.floor(Number($("eqMaxPerOrder").value || 0)));
@@ -185,9 +345,10 @@ function initEquipment(){
       return;
     }
 
-    const saved = await saveEquipment({
+    const saved = saveEquipment({
       id: id || undefined,
       name,
+      categoryId,
       imageUrl,
       quantity,
       maxPerOrder,
@@ -196,7 +357,7 @@ function initEquipment(){
     });
 
     $("eqHelper").textContent = id ? "Saved changes." : "Equipment added.";
-    await renderEquipmentList();
+    renderEquipmentList();
 
     if (!id) {
       clearEquipmentForm();
@@ -206,7 +367,7 @@ function initEquipment(){
     }
   });
 
-  await renderEquipmentList();
+  renderEquipmentList();
 }
 
 /* ---------------- Locations ---------------- */
@@ -384,11 +545,42 @@ function initCoupons(){
 }
 
 /* ---------------- Admin Boot ---------------- */
-export async function initAdmin({ route } = {}){
+
+/* ---------------- Fees ---------------- */
+function initFees(){
+  const inp = $("adminSameDayFee");
+  const inpDeliver = $("adminDefaultDeliverBy");
+  const inpPickup = $("adminDefaultPickupAt");
+  const btn = $("btnSaveFees");
+  if (!inp || !btn) return;
+
+  const db = readDb();
+  const s = db.settings || {};
+  inp.value = String(Number(s.sameDayFee || 0).toFixed(2));
+  if (inpDeliver) inpDeliver.value = s.defaultDeliverBy || "12:00";
+  if (inpPickup) inpPickup.value = s.defaultPickupAt || "18:00";
+
+  btn.addEventListener("click", () => {
+    const d = readDb();
+    if (!d.settings) d.settings = { sameDayFee: 0 };
+    d.settings.sameDayFee = Math.max(0, Number(inp.value || 0));
+    if (inpDeliver) d.settings.defaultDeliverBy = inpDeliver.value || "12:00";
+    if (inpPickup) d.settings.defaultPickupAt = inpPickup.value || "18:00";
+    writeDb(d);
+    const old = btn.textContent;
+    btn.textContent = "Saved!";
+    setTimeout(() => { btn.textContent = old; }, 900);
+  });
+}
+
+export function initAdmin({ route } = {}){
   initTabs();
+  initCategoriesTab();
+  renderCategorySelect();
   initEquipment();
   initLocations();
   initCoupons();
+  initFees();
 
   const btnBack = $("btnAdminToLanding");
   if (btnBack && route) btnBack.addEventListener("click", () => {

@@ -1,4 +1,4 @@
-import { listEquipment, getCart, readDb } from '../db.js';
+import { listEquipment, getCart, getCheckout } from '../db.js';
 
 function formatDateDisplay(iso){
   if (!iso) return '—';
@@ -17,9 +17,32 @@ function formatDateDisplay(iso){
 function money(n){ return `$${Number(n||0).toFixed(2)}`; }
 
 function normalizeTiers(pricingTiers){
-  return (pricingTiers || [])
-    .map(t => ({ minQty: Number(t.minQty||0), priceEach: Number(t.priceEach||0) }))
-    .filter(t => t.minQty > 0 && t.priceEach > 0)
+  let tiers = pricingTiers;
+
+  // Support tiers saved as JSON strings (e.g., from imports or form serialization)
+  if (typeof tiers === 'string'){
+    try { tiers = JSON.parse(tiers); } catch (e) { tiers = []; }
+  }
+
+  // Support tiers saved as an object/map: { "1": 2.5, "50": 1.75 }
+  if (tiers && !Array.isArray(tiers) && typeof tiers === 'object'){
+    // If wrapped (e.g., { tiers: [...] })
+    if (Array.isArray(tiers.tiers)) tiers = tiers.tiers;
+    else {
+      const out = [];
+      for (const [k,v] of Object.entries(tiers)){
+        const minQty = Number(k);
+        const priceEach = Number(v);
+        if (Number.isFinite(minQty) && Number.isFinite(priceEach)) out.push({ minQty, priceEach });
+      }
+      tiers = out;
+    }
+  }
+
+  if (!Array.isArray(tiers)) tiers = [];
+  return tiers
+    .map(t => ({ minQty: Number(t?.minQty ?? 0), priceEach: Number(t?.priceEach ?? 0) }))
+    .filter(t => Number.isFinite(t.minQty) && t.minQty >= 0 && Number.isFinite(t.priceEach) && t.priceEach > 0)
     .sort((a,b)=>a.minQty-b.minQty);
 }
 function annualPromoTotal(cart, equipment, datesCount){
@@ -27,7 +50,7 @@ function annualPromoTotal(cart, equipment, datesCount){
   let normalPerDate = 0;
   let promoPerDate = 0;
   for (const ci of cart){
-    const eq = equipment.find(e => e.id === ci.id);
+    const eq = equipment.find(e => String(e.id) === String(ci.id));
     if (!eq) continue;
     const qty = Number(ci.qty||0);
     const unit = unitPriceForQty(eq.pricingTiers, qty);
@@ -46,12 +69,16 @@ function unitPriceForQty(pricingTiers, qty){
   const q = Number(qty||0);
   let chosen=null;
   for (const t of tiers){ if (q >= t.minQty) chosen=t; }
+  if (!chosen && tiers.length) chosen = tiers[0];
   return chosen ? chosen.priceEach : null;
 }
 
 export function setActiveStep(step){
   document.querySelectorAll('.flowstep').forEach(btn => {
-    btn.classList.toggle('active', (btn.getAttribute('data-step') === step));
+    const on = (btn.getAttribute('data-step') === step);
+    btn.classList.toggle('active', on);
+    if (on) btn.setAttribute('aria-current','step');
+    else btn.removeAttribute('aria-current');
   });
 }
 
@@ -61,14 +88,35 @@ export function updateFlowSummary(){
   const totalEl = document.getElementById('flowSummaryTotal');
   if (!lines || !dateEl || !totalEl) return;
 
-  const db = readDb();
-  const annual = !!db.checkout?.annual;
-  const dates = Array.isArray(db.checkout?.dates) ? db.checkout.dates : (db.checkout?.date ? [db.checkout.date] : []);
+  const checkout = getCheckout();
+  const annual = !!checkout?.annual;
+  const dates = Array.isArray(checkout?.dates) ? checkout.dates : (checkout?.date ? [checkout.date] : []);
   if (!dates.length) dateEl.textContent = '—';
   else if (!annual) dateEl.textContent = formatDateDisplay(dates[0]);
   else dateEl.textContent = `${dates.length}/5 selected`;
 
+  
   const cart = getCart();
+
+  // Control which flow steps are clickable based on progress.
+  const cartHasQty = cart.some(ci => Number(ci.qty || 0) > 0);
+  const hasDate = dates.length > 0;
+  const addr = checkout?.address || null;
+  const hasAddress = !!(addr && (addr.street || addr.address1 || '').trim());
+  const canDate = cartHasQty;
+  const canAddress = cartHasQty && hasDate;
+  const canReview = cartHasQty && hasDate && hasAddress;
+
+  const btnInv = document.querySelector('.flowstep[data-step="inventory"]');
+  const btnDate = document.querySelector('.flowstep[data-step="date"]');
+  const btnAddr = document.querySelector('.flowstep[data-step="address"]');
+  const btnRev = document.querySelector('.flowstep[data-step="review"]');
+
+  if (btnInv) btnInv.disabled = false;
+  if (btnDate) btnDate.disabled = !canDate;
+  if (btnAddr) btnAddr.disabled = !canAddress;
+  if (btnRev) btnRev.disabled = !canReview;
+
   const equipment = listEquipment();
 
   if (!cart.length){
@@ -82,7 +130,7 @@ export function updateFlowSummary(){
     const PROMO = 0.75;
     let perDate = 0;
     for (const ci of cart){
-      const eq = equipment.find(e => e.id === ci.id);
+      const eq = equipment.find(e => String(e.id) === String(ci.id));
       if (!eq) continue;
       const qty = Number(ci.qty||0);
       const unit = unitPriceForQty(eq.pricingTiers, qty);
@@ -95,7 +143,7 @@ export function updateFlowSummary(){
 const parts = [];
   let perDateTotal = 0;
   for (const ci of cart){
-    const eq = equipment.find(e => e.id === ci.id);
+    const eq = equipment.find(e => String(e.id) === String(ci.id));
     if (!eq) continue;
     const qty = Number(ci.qty||0);
     parts.push(`${eq.name}: ${qty}`);
@@ -108,16 +156,15 @@ const parts = [];
     const promo = annualPromoTotal(cart, equipment, 5);
     totalEl.textContent = money(promo.promo);
   } else {
-    const multiplier = (dates.length ? 1 : 0);
-    totalEl.textContent = money(perDateTotal * (multiplier || 1));
+    totalEl.textContent = money(perDateTotal);
   }
 }
 
-export function wireFlowbarNav({ gotoLanding, gotoInventory, gotoCalendar, gotoAddress, gotoReview } = {}){
+export function wireFlowbarNav({ gotoInventory, gotoCalendar, gotoAddress, gotoReview } = {}){
   document.querySelectorAll('.flowstep').forEach(btn => {
     btn.addEventListener('click', () => {
+      if (btn.disabled) return;
       const step = btn.getAttribute('data-step');
-      if (step === 'login') gotoLanding?.();
       if (step === 'inventory') gotoInventory?.();
       if (step === 'date') gotoCalendar?.();
       if (step === 'address') gotoAddress?.();

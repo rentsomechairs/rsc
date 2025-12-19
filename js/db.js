@@ -1,8 +1,9 @@
 const DB_KEY = "rsc_db_v1";
 const SESSION_KEY = "rsc_sess";
-
-import { CONFIG } from './config.js';
-import { callApi } from './api.js';
+// Per-user (session-scoped) keys
+const CART_KEY = "rsc_cart_v1";
+const CHECKOUT_KEY = "rsc_checkout_v1";
+const PREF_KEY = "rsc_pref_v1";
 
 export const ADMIN = { email: "r@g.com", password: "1" };
 
@@ -12,20 +13,45 @@ function uid(prefix){ return `${prefix}_${Date.now()}_${Math.random().toString(1
 function seedDb(){
   return {
     users: [{ id:"admin_1", email: ADMIN.email, password: ADMIN.password, role:"admin", createdAt: nowIso() }],
-    equipment: [],
+    categories: [
+      { id:"cat_chairs", name:"Chairs", imageUrl:"", annualEligible:true, sortOrder:0, createdAt: nowIso(), updatedAt: nowIso() },
+      { id:"cat_tables", name:"Tables", imageUrl:"", annualEligible:false, sortOrder:10, createdAt: nowIso(), updatedAt: nowIso() },
+      { id:"cat_other", name:"Other", imageUrl:"", annualEligible:false, sortOrder:99, createdAt: nowIso(), updatedAt: nowIso() }
+    ],
+    equipment: [
+  {
+    id: "eq_demo_chair",
+    name: "White Folding Chair (Demo)",
+    categoryId: "cat_chairs",
+    imageUrl: "",
+    quantity: 300,
+    maxPerOrder: 10,
+    description: "Starter item seeded for testing on GitHub Pages.",
+    pricingTiers: [
+  { minQty: 10,  priceEach: 1.90 },
+  { minQty: 20,  priceEach: 1.80 },
+  { minQty: 30,  priceEach: 1.70 },
+  { minQty: 40,  priceEach: 1.60 },
+  { minQty: 50,  priceEach: 1.50 },
+  { minQty: 60,  priceEach: 1.40 },
+  { minQty: 70,  priceEach: 1.30 },
+  { minQty: 80,  priceEach: 1.20 },
+  { minQty: 90,  priceEach: 1.10 },
+  { minQty: 100, priceEach: 1.00 }
+],
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  }
+],
     locations: [],
     coupons: [],
     bookings: [],
-    checkout: {}
+    checkout: {},
+    settings: { sameDayFee: 0, defaultDeliverBy: '12:00', defaultPickupAt: '18:00' }
   };
 }
 
-let MEM_DB = null;
-function memDb_(){ if (!MEM_DB) MEM_DB = seedDb(); return MEM_DB; }
-
-
 export function readDb(){
-  if (!CONFIG.MOCK_MODE) return memDb_();
   const raw = localStorage.getItem(DB_KEY);
   if (!raw){
     const db = seedDb();
@@ -33,8 +59,19 @@ export function readDb(){
     return db;
   }
   try{
-    return JSON.parse(raw);
-  }catch{
+    const db = JSON.parse(raw);
+    if (!db?.users) throw new Error("bad db");
+    if (!db.users.some(u => (u.email||"").toLowerCase() === ADMIN.email.toLowerCase())){
+      db.users.unshift({ id:"admin_1", email: ADMIN.email, password: ADMIN.password, role:"admin", createdAt: nowIso() });
+    }
+    if (!db.equipment) db.equipment = [];
+    if (!db.locations) db.locations = [];
+    if (!db.coupons) db.coupons = [];
+    if (!db.bookings) db.bookings = [];
+    if (!db.checkout) db.checkout = {};
+    if (!db.settings) db.settings = { sameDayFee: 0 };
+    return db;
+  } catch {
     const db = seedDb();
     localStorage.setItem(DB_KEY, JSON.stringify(db));
     return db;
@@ -42,28 +79,29 @@ export function readDb(){
 }
 
 export function writeDb(db){
-  if (!CONFIG.MOCK_MODE){
-    MEM_DB = db;
-    return;
-  }
   localStorage.setItem(DB_KEY, JSON.stringify(db));
 }
 
 export function resetDb(){
-  if (!CONFIG.MOCK_MODE){
-    MEM_DB = seedDb();
-    return;
-  }
   localStorage.removeItem(DB_KEY);
 }
 
 export function setSession(session){
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch {}
+  // Do not persist in localStorage for this prototype.
+  try { localStorage.removeItem(SESSION_KEY); } catch {}
 }
 
 export function getSession(){
-  try { return JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null"); }
-  catch { return null; }
+  // Session should NOT persist after closing the browser (better for testing).
+  try {
+    const v = sessionStorage.getItem(SESSION_KEY);
+    if (v) return JSON.parse(v);
+  } catch {}
+
+  // If an old persistent session exists from earlier versions, clear it.
+  try { localStorage.removeItem(SESSION_KEY); } catch {}
+  return null;
 }
 
 export function clearSession(){
@@ -73,6 +111,21 @@ export function clearSession(){
   }
   try { sessionStorage.clear(); } catch {}
 }
+
+function sessionUserKey(session){
+  if (session?.userId) return String(session.userId);
+  if (session?.email) return String(session.email).toLowerCase();
+  return 'anon';
+}
+
+export function getActiveUserKey(){
+  return sessionUserKey(getSession());
+}
+
+function scopedKey(base, session){
+  return `${base}:${sessionUserKey(session ?? getSession())}`;
+}
+
 
 export function verifyUser(email, password){
   const db = readDb();
@@ -122,51 +175,74 @@ export function listBookingsByEmail(email){
 }
 
 /* ---------- Equipment CRUD ---------- */
-export async function listEquipment(){
-  if (!CONFIG.MOCK_MODE){
-    // Ensure we have fresh inventory at least once per session
-    await syncInventoryFromServer().catch(()=>{});
-  }
+export function listEquipment(){
   const db = readDb();
   return [...db.equipment].sort((a,b) => (b.createdAt||"").localeCompare(a.createdAt||""));
 }
 
-export async function saveEquipment(item){
-  if (CONFIG.MOCK_MODE){
-    const db = readDb();
-    const isEdit = !!item.id;
-    if (!isEdit) {
-      const created = { ...item, id: uid("eq"), createdAt: nowIso(), updatedAt: nowIso() };
-      db.equipment.push(created);
-      writeDb(db);
-      return created;
-    }
-    const idx = db.equipment.findIndex(x => x.id === item.id);
-    if (idx === -1) throw new Error("Equipment not found");
-    const updated = { ...db.equipment[idx], ...item, updatedAt: nowIso() };
-    db.equipment[idx] = updated;
+export function saveEquipment(item){
+  const db = readDb();
+  const isEdit = !!item.id;
+  if (!isEdit) {
+    const created = { ...item, id: uid("eq"), createdAt: nowIso(), updatedAt: nowIso() };
+    db.equipment.push(created);
     writeDb(db);
-    return updated;
+    return created;
   }
-
-  const session = getSession();
-  const r = await callApi('inventory.upsert', { item }, session);
-  // refresh local cache
-  await syncInventoryFromServer().catch(()=>{});
-  return r.item;
+  const idx = db.equipment.findIndex(x => x.id === item.id);
+  if (idx === -1) throw new Error("Equipment not found");
+  const updated = { ...db.equipment[idx], ...item, updatedAt: nowIso() };
+  db.equipment[idx] = updated;
+  writeDb(db);
+  return updated;
 }
 
-export async function deleteEquipment(id){
-  if (CONFIG.MOCK_MODE){
-    const db = readDb();
-    db.equipment = db.equipment.filter(x => x.id !== id);
-    writeDb(db);
-    return;
-  }
-  const session = getSession();
-  await callApi('inventory.delete', { id }, session);
-  await syncInventoryFromServer().catch(()=>{});
+export function deleteEquipment(id){
+  const db = readDb();
+  db.equipment = db.equipment.filter(x => x.id !== id);
+  writeDb(db);
 }
+
+
+export function listCategories(){
+  const db = readDb();
+  return [...(db.categories||[])].sort((a,b)=> (a.sortOrder??0)-(b.sortOrder??0) || String(a.name||"").localeCompare(String(b.name||"")));
+}
+
+export function saveCategory(cat){
+  const db = readDb();
+  db.categories = db.categories || [];
+  const isEdit = !!cat.id;
+  const cleaned = {
+    ...cat,
+    name: String(cat.name||"").trim(),
+    imageUrl: String(cat.imageUrl||"").trim(),
+    annualEligible: (Object.prototype.hasOwnProperty.call(cat,'annualEligible') ? !!cat.annualEligible : /\bchair(s)?\b/i.test(String(cat.name||""))),
+    sortOrder: Number.isFinite(Number(cat.sortOrder)) ? Number(cat.sortOrder) : 0,
+  };
+  if (!cleaned.name) throw new Error("Category name is required");
+
+  if (!isEdit){
+    const created = { ...cleaned, id: uid("cat"), createdAt: nowIso(), updatedAt: nowIso() };
+    db.categories.push(created);
+    writeDb(db);
+    return created;
+  }
+  const idx = db.categories.findIndex(x => x.id === cleaned.id);
+  if (idx === -1) throw new Error("Category not found");
+  db.categories[idx] = { ...db.categories[idx], ...cleaned, updatedAt: nowIso() };
+  writeDb(db);
+  return db.categories[idx];
+}
+
+export function deleteCategory(id){
+  const db = readDb();
+  db.categories = (db.categories||[]).filter(x => x.id !== id);
+  // do not delete equipment; instead detach them
+  db.equipment = (db.equipment||[]).map(eq => (eq.categoryId===id ? { ...eq, categoryId: "" } : eq));
+  writeDb(db);
+}
+
 
 /* ---------- Locations CRUD ---------- */
 export function listLocations(){
@@ -247,104 +323,57 @@ export function toggleCouponEnabled(id){
 
 
 /* ---------- Cart (prototype) ---------- */
-const CART_KEY = "rsc_cart_v1";
-
-export function getCart(){
-  try { return JSON.parse(localStorage.getItem(CART_KEY) || "[]"); }
-  catch { return []; }
+export function getCart(session){
+  try {
+    const s = session || getSession();
+    return JSON.parse(localStorage.getItem(scopedKey(CART_KEY, s)) || "[]");
+  } catch { return []; }
 }
 
-export function setCart(items){
-  localStorage.setItem(CART_KEY, JSON.stringify(items || []));
+export function setCart(items, session){
+  const s = session || getSession();
+  localStorage.setItem(scopedKey(CART_KEY, s), JSON.stringify(items || []));
 }
 
-export function clearCart(){
-  localStorage.removeItem(CART_KEY);
+export function clearCart(session){
+  const s = session || getSession();
+  localStorage.removeItem(scopedKey(CART_KEY, s));
+}
+
+/* ---------- Checkout (prototype) ---------- */
+export function getCheckout(session){
+  try {
+    const s = session || getSession();
+    return JSON.parse(localStorage.getItem(scopedKey(CHECKOUT_KEY, s)) || "{}");
+  } catch { return {}; }
+}
+
+export function setCheckout(state, session){
+  const s = session || getSession();
+  localStorage.setItem(scopedKey(CHECKOUT_KEY, s), JSON.stringify(state || {}));
+}
+
+export function patchCheckout(patch, session){
+  const cur = getCheckout(session);
+  const next = { ...cur, ...(patch || {}) };
+  setCheckout(next, session);
+  return next;
 }
 
 
-/* =========================
-   Backend bridge (Apps Script)
-   ========================= */
-
-export async function syncInventoryFromServer(){
-  if (CONFIG.MOCK_MODE) return { ok:true, mode:"mock" };
-  const session = getSession();
-  const r = await callApi('inventory.list', {}, session);
-  const db = readDb();
-  db.equipment = r.items || [];
-  writeDb(db);
-  return { ok:true, count: (r.items||[]).length };
+/* ---------- User Preferences (scoped) ---------- */
+export function getPrefs(session){
+  try { return JSON.parse(localStorage.getItem(scopedKey(PREF_KEY, session)) || "{}"); }
+  catch { return {}; }
+}
+export function setPrefs(prefs, session){
+  localStorage.setItem(scopedKey(PREF_KEY, session), JSON.stringify(prefs || {}));
+}
+export function patchPrefs(patch, session){
+  const cur = getPrefs(session);
+  setPrefs({ ...(cur||{}), ...(patch||{}) }, session);
 }
 
-export async function syncCouponsFromServer(){
-  if (CONFIG.MOCK_MODE) return { ok:true, mode:"mock" };
-  const session = getSession();
-  const r = await callApi('coupon.list', {}, session);
-  const db = readDb();
-  db.coupons = r.items || [];
-  writeDb(db);
-  return { ok:true, count: (r.items||[]).length };
-}
-
-export async function syncBookingsFromServer(email){
-  if (CONFIG.MOCK_MODE) return { ok:true, mode:"mock" };
-  const session = getSession();
-  const r = await callApi('booking.listByEmail', { email }, session);
-  const db = readDb();
-  db.bookings = r.items || [];
-  writeDb(db);
-  return { ok:true, count: (r.items||[]).length };
-}
-
-export async function backendEmailLogin(email, password){
-  if (CONFIG.MOCK_MODE) {
-    // keep prototype behavior
-    const v = verifyUser(email, password);
-    if (!v.ok) {
-      if (v.reason === 'bad_password') return { ok:false, reason:'bad_password' };
-      const created = upsertUser(email, password, 'user');
-      setSession({ userId: created.id, email: created.email, role: 'user' });
-      return { ok:true, session: getSession() };
-    }
-    setSession({ userId: v.user.id, email: v.user.email, role: v.user.role || 'user' });
-    return { ok:true, session: getSession() };
-  }
-
-  const r = await callApi('auth.emailLogin', { email, password }, null);
-  setSession(r.session);
-  // pull down latest data for this user
-  await syncInventoryFromServer().catch(()=>{});
-  await syncCouponsFromServer().catch(()=>{});
-  await syncBookingsFromServer(email).catch(()=>{});
-  return { ok:true, session: r.session, needsVerification: !!r.needsVerification };
-}
-
-export async function backendVerifyEmail(email, code){
-  if (CONFIG.MOCK_MODE) return { ok:true, mode:"mock" };
-  const r = await callApi('auth.verifyEmail', { email, code }, null);
-  setSession(r.session);
-  return { ok:true, session: r.session };
-}
-
-export async function backendResendVerification(email){
-  if (CONFIG.MOCK_MODE) return { ok:true, mode:"mock" };
-  await callApi('auth.resendVerification', { email }, null);
-  return { ok:true };
-}
-
-export async function backendCreateBooking(booking){
-  if (CONFIG.MOCK_MODE) {
-    const db = readDb();
-    db.bookings = db.bookings || [];
-    const created = { ...booking, id: uid('bk'), createdAt: nowIso() };
-    db.bookings.unshift(created);
-    writeDb(db);
-    return { ok:true, booking: created };
-  }
-  const session = getSession();
-  const r = await callApi('booking.create', { booking }, session);
-  // refresh bookings cache
-  if (session?.email) await syncBookingsFromServer(session.email).catch(()=>{});
-  return { ok:true, booking: r.booking };
+export function clearCheckout(session){
+  localStorage.removeItem(scopedKey(CHECKOUT_KEY, session));
 }

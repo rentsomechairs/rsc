@@ -1,5 +1,4 @@
 import * as db from '../db.js';
-import { CONFIG } from '../config.js';
 
 export function initLanding({ gotoAdmin, gotoInventory }) {
   const btnGmail = document.getElementById('btnGmail');
@@ -37,32 +36,28 @@ export function initLanding({ gotoAdmin, gotoInventory }) {
     gotoInventory?.();
   });
 
-  btnEmailLogin?.addEventListener('click', async () => {
+  btnEmailLogin?.addEventListener('click', () => {
     const email = (emailInput?.value || '').trim();
     const pass = passInput?.value || '';
 
     if (!email || !pass) return alert('Enter email and password.');
 
-    // Admin shortcut in mock mode only (local prototype)
-    if (CONFIG.MOCK_MODE && email.toLowerCase() === db.ADMIN.email.toLowerCase() && pass === db.ADMIN.password) {
+    if (email.toLowerCase() === db.ADMIN.email.toLowerCase() && pass === db.ADMIN.password) {
       db.setSession({ userId: 'admin_1', email, role: 'admin' });
       gotoAdmin?.();
       return;
     }
 
-    try {
-      const r = await db.backendEmailLogin(email, pass);
-
-      // If the backend requires verification, prompt for code (keeps UX minimal without adding a new page yet)
-      if (r.needsVerification) {
-        const code = prompt('Enter the verification code sent to your email:');
-        if (!code) return alert('Verification required. Please try again.');
-        await db.backendVerifyEmail(email, code.trim());
-      }
-
+    const v = db.verifyUser(email, pass);
+    if (!v.ok) {
+      if (v.reason === 'bad_password') return alert('Wrong password.');
+      const created = db.upsertUser(email, pass, 'user');
+      db.setSession({ userId: created.id, email: created.email, role: 'user' });
       gotoInventory?.();
-    } catch (e) {
-      alert(e?.message || 'Login failed.');
+      return;
     }
+
+    db.setSession({ userId: v.user.id, email: v.user.email, role: v.user.role || 'user' });
+    gotoInventory?.();
   });
 }

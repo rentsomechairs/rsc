@@ -4,9 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Rent Some Chairs</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=fix19" />
 </head>
 <body>
+  <div id="buildTag" style="position:fixed;bottom:10px;right:10px;z-index:9999;font-size:12px;opacity:.7;pointer-events:none;">fix17</div>
 
   <!-- DEV: Reset Session Button -->
   <button id="devResetSession" class="dev-reset" title="Dev: Reset session">
@@ -20,45 +21,45 @@
     <div class="grid-overlay"></div>
   </div>
 
-  <header class="topbar">
-    <div class="brand">
-      <div class="logo" aria-hidden="true">R</div>
-      <div class="brand-text">
-        <div class="brand-title">Rent Some Chairs</div>
-        <div class="brand-subtitle">Local chair rentals</div>
-      </div>
-    </div>
-
-    
-    <div class="topbar-right">
-      <button class="btn btn-ghost topbar-btn hidden" id="btnTopProfile" type="button">Profile</button>
-      <button class="btn btn-ghost topbar-btn hidden" id="btnTopAdmin" type="button">Admin</button>
-      <div class="status-pill" id="statusPill">
-        <span class="status-dot"></span>
-        <span id="statusText">Not signed in</span>
-      </div>
-    </div>
-
-
-    </header>
-
   <div class="flowbar" id="flowbar">
-    <nav class="flowsteps" aria-label="Booking steps">
-      <button class="flowstep" data-step="login" type="button"><span class="dot"></span>Login</button>
-      <button class="flowstep" data-step="inventory" type="button"><span class="dot"></span>Inventory</button>
-      <button class="flowstep" data-step="date" type="button"><span class="dot"></span>Date</button>
-      <button class="flowstep" data-step="address" type="button"><span class="dot"></span>Address</button>
-      <button class="flowstep" data-step="review" type="button"><span class="dot"></span>Review</button>
-    </nav>
-
-    <aside class="flowsummary" aria-label="Order summary">
-      <div class="flowsummary-title">Order Summary</div>
-      <div class="flowsummary-lines" id="flowSummaryLines">No items selected.</div>
-      <div class="flowsummary-meta">
-        <div><span class="muted">Date:</span> <span id="flowSummaryDate">—</span></div>
-        <div class="flowsummary-total"><span class="muted">Total:</span> <span id="flowSummaryTotal">$0.00</span></div>
+    <div class="flowbar-top">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">R</div>
+        <div class="brand-text">
+          <div class="brand-title">Rent Some Chairs</div>
+          <div class="brand-subtitle">Local chair rentals</div>
+        </div>
       </div>
-    </aside>
+
+      <div class="flowbar-right">
+        <button class="btn btn-ghost topbar-btn" id="btnFlowLogin" type="button">Login</button>
+        <button class="btn btn-ghost topbar-btn hidden" id="btnFlowProfile" type="button">Profile</button>
+        <button class="btn btn-ghost topbar-btn hidden" id="btnFlowSignOut" type="button">Sign out</button>
+        <button class="btn btn-ghost topbar-btn hidden" id="btnFlowAdmin" type="button">Admin</button>
+        <div class="status-pill" id="statusPill">
+          <span class="status-dot"></span>
+          <span id="statusText">Not signed in</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="flowbar-bottom">
+      <nav class="flowsteps" aria-label="Booking steps">
+        <button class="flowstep" data-step="inventory" type="button"><span class="dot"></span>Inventory</button>
+        <button class="flowstep" data-step="date" type="button"><span class="dot"></span>Date</button>
+        <button class="flowstep" data-step="address" type="button"><span class="dot"></span>Address</button>
+        <button class="flowstep" data-step="review" type="button"><span class="dot"></span>Review</button>
+      </nav>
+
+      <aside class="flowsummary" aria-label="Order summary">
+        <div class="flowsummary-title">Order Summary</div>
+        <div class="flowsummary-lines" id="flowSummaryLines">No items selected.</div>
+        <div class="flowsummary-meta">
+          <div><span class="muted">Date:</span> <span id="flowSummaryDate">—</span></div>
+          <div class="flowsummary-total"><span class="muted">Total:</span> <span id="flowSummaryTotal">$0.00</span></div>
+        </div>
+      </aside>
+    </div>
   </div>
 
 
@@ -106,17 +107,12 @@
 
         <div class="hero-right">
           <div class="card">
-            <div class="card-head">
-              <div>
-                <div class="card-title">Welcome</div>
-                <div class="card-sub">Sign in, or continue as a guest.</div>
-              </div>
-<div class="step"><span class="dot"></span> Inventory</div>
-                <div class="step"><span class="dot"></span> Date</div>
-                <div class="step"><span class="dot"></span> Address</div>
-                <div class="step"><span class="dot"></span> Review</div>
-              </div>
-            </div>
+	            <div class="card-head">
+	              <div>
+	                <div class="card-title">Welcome</div>
+	                <div class="card-sub">Sign in, or continue as a guest.</div>
+	              </div>
+	            </div>
 
             <div class="card-body">
               <button class="btn btn-primary" id="btnGmail">
@@ -178,6 +174,7 @@
     </div>
 
     <div class="inv-layout">
+      <div class="inv-cats" id="invCats" aria-label="Inventory categories"></div>
       <div class="inv-grid" id="invGrid"></div>
 
       <aside class="inv-side" aria-label="Order summary">
@@ -201,6 +198,10 @@
 
     <div class="inv-footer">
       <div class="inv-summary" id="invSummary">No items selected.</div>
+      <div class="page-actions-bottom">
+        <button class="btn btn-ghost inv-small" id="btnInvBackBottom" type="button">Back</button>
+        <button class="btn btn-good inv-small" id="btnInvContinueBottom" type="button" disabled>Continue</button>
+      </div>
     </div>
   </section>
 </section>
@@ -250,15 +251,12 @@
         </div>
 
         
-        <div class="cal-annual-body hidden" id="calAnnualBody">
-            <div class="cal-annual-savings" id="calAnnualSavings">Select a date to see savings.</div>
-            <div class="cal-annual-dates" id="calAnnualDates"></div>
-            <div class="muted" style="font-size:12px; margin-top:8px;">
-              Dates 2–5 must be <strong>10–14 months</strong> after the previous date.
-            </div>
-          </div>
-        </div>
         <div class="cal-footnote" id="calFootnote">Pick a day to continue.</div>
+      <div class="page-actions-bottom">
+        <button class="btn btn-ghost" id="btnCalBackBottom" type="button">Back</button>
+        <button class="btn btn-good" id="btnCalContinueBottom" type="button" disabled>Continue</button>
+      </div>
+
         
       </section>
     </section>
@@ -309,7 +307,11 @@
 
         <div class="addr-footnote" id="addrFootnote">
           Address autocomplete and maps will be added later.
+                <div class="page-actions-bottom">
+          <button class="btn btn-ghost addr-small" id="btnAddrBackBottom" type="button">Back</button>
+          <button class="btn btn-good addr-small" id="btnAddrContinueBottom" type="button">Continue</button>
         </div>
+</div>
       </section>
     </section>
 
@@ -364,7 +366,11 @@
         <div class="rev-footnote muted" id="revFootnote" style="margin-top:12px;">
           This is a local prototype (data stored in your browser).
         </div>
-      </section>
+            <div class="page-actions-bottom">
+        <button class="btn btn-ghost rev-small" id="btnRevBackBottom" type="button">Back</button>
+        <button class="btn btn-good rev-small" id="btnPlaceBookingBottom" type="button">Place booking</button>
+      </div>
+</section>
     </section>
 
     
@@ -377,12 +383,17 @@
             <div class="profile-sub" id="profileSub">Manage your account and view your orders.</div>
           </div>
           <div class="profile-actions">
-            <button class="btn btn-ghost" id="btnProfileBack" type="button">Back</button>
-            <button class="btn btn-ghost" id="btnProfileSignOut" type="button">Sign out</button>
+            <button class="btn btn-primary btn-green" id="btnProfileOrderNow" type="button">Order Now</button>
           </div>
         </div>
 
-        <div class="profile-grid">
+        <div class="admin-tabs" id="profileTabs" style="margin-top:8px;">
+          <button class="admin-tab active" data-tab="account" type="button">Account information</button>
+          <button class="admin-tab" data-tab="orders" type="button">Orders</button>
+          <button class="admin-tab" data-tab="settings" type="button">Settings</button>
+        </div>
+
+        <div id="profileTabAccount">
           <section class="card">
             <div class="card-head">
               <div>
@@ -471,7 +482,9 @@
 
             </div>
           </section>
+        </div>
 
+        <div id="profileTabOrders" class="hidden">
           <section class="card">
             <div class="card-head">
               <div>
@@ -488,11 +501,43 @@
             </div>
           </section>
         </div>
-      </section>
-    </section>
 
-<!-- ADMIN -->
-    <section id="pageAdmin" class="hidden">
+        <div id="profileTabSettings" class="hidden">
+                    <section class="card">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Promotion Preferences</div>
+                <div class="card-sub">Control optional suggestions shown during ordering.</div>
+              </div>
+            </div>
+            <div class="card-body">
+              <label class="toggle-row" style="justify-content:space-between;">
+                <div>
+                  <div style="font-weight:900;">Show quantity discount suggestions</div>
+                  <div class="muted-inline">The “Add X more for only…” popup.</div>
+                </div>
+                <input id="profileToggleUpsell" type="checkbox" />
+              </label>
+
+              <div class="divider" style="margin:14px 0;"></div>
+
+              <label class="toggle-row" style="justify-content:space-between;">
+                <div>
+                  <div style="font-weight:900;">Show annual booking suggestion</div>
+                  <div class="muted-inline">The “Is your event annual?” popup.</div>
+                </div>
+                <input id="profileToggleAnnual" type="checkbox" />
+              </label>
+            </div>
+          </section>
+        </div>
+      </section>
+    </section><!-- ADMIN -->
+    
+
+          
+
+<section id="pageAdmin" class="hidden">
       <section class="admin-wrap">
 
         <div class="admin-header">
@@ -510,6 +555,7 @@
           <button class="admin-tab active" data-tab="equipment" role="tab" aria-selected="true">Equipment</button>
           <button class="admin-tab" data-tab="locations" role="tab" aria-selected="false">Storage Locations</button>
           <button class="admin-tab" data-tab="coupons" role="tab" aria-selected="false">Coupons</button>
+          <button class="admin-tab" data-tab="categories" role="tab" aria-selected="false">Categories</button>
         </div>
 
         <!-- EQUIPMENT TAB -->
@@ -523,6 +569,16 @@
               <div class="admin-field">
                 <label>Name</label>
                 <input class="input" id="eqName" type="text" placeholder="White Folding Chair" />
+              </div>
+
+              <div class="admin-field">
+                <label>Category</label>
+                <select class="input" id="eqCategory">
+                  <option value="">— Select category —</option>
+                </select>
+                <div class="helper subtle" style="margin-top:6px;">
+                  Used for promos like the 5-year annual chair discount. (Name can be anything.)
+                </div>
               </div>
 
               <div class="admin-field">
@@ -657,15 +713,86 @@
               <div class="admin-card-title">Coupons List</div>
               <div class="admin-list" id="cpnList"></div>
             </div>
+          
+            <div class="admin-card">
+              <div class="admin-card-title">Fees</div>
+              <div class="admin-field">
+                <label>Same-day delivery fee</label>
+                <input class="input" id="adminSameDayFee" type="number" min="0" step="0.01" placeholder="0.00" />
+                <div class="muted-inline" style="margin-top:6px;">Applied when the selected delivery date is today.</div>
+              </div>
+              <div class="admin-field" style="margin-top:14px;">
+                <label>Default delivery time (delivered by)</label>
+                <input class="input" id="adminDefaultDeliverBy" type="time" />
+                <div class="muted-inline" style="margin-top:6px;">Prefills the delivery time prompt.</div>
+              </div>
+              <div class="admin-field" style="margin-top:14px;">
+                <label>Default pickup time (ready for pickup)</label>
+                <input class="input" id="adminDefaultPickupAt" type="time" />
+                <div class="muted-inline" style="margin-top:6px;">Prefills the pickup time prompt.</div>
+              </div>
+
+              <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+                <button class="btn btn-good admin-small" id="btnSaveFees" type="button">Save fees</button>
+              </div>
+            </div>
+</div>
+        </section>
+        <!-- CATEGORIES TAB -->
+        <section class="admin-panel hidden" data-panel="categories">
+          <div class="admin-grid">
+            <div class="admin-card">
+              <div class="admin-card-title" id="catFormTitle">Add Category</div>
+
+              <div class="form-row">
+                <label class="label">Name</label>
+                <input class="input" id="catName" placeholder="e.g., Chairs, Tables, Tents" />
+              </div>
+
+              <div class="form-row">
+                <label class="label">Image</label>
+                <div class="row gap">
+                  <input class="input" id="catImageUrl" placeholder="Paste image URL, or use Upload" />
+                  <button class="btn btn-ghost admin-small" id="btnCatUpload">Upload</button>
+                  <input type="file" id="catImageFile" accept="image/*" hidden />
+                </div>
+                <div class="mini-hint">Images are stored in your browser (base64) if uploaded.</div>
+                <div class="cat-preview" id="catPreview" hidden></div>
+              </div>
+
+              <div class="form-row">
+                <label class="label">
+                  <input type="checkbox" id="catAnnualEligible" />
+                  Counts toward 5-year annual savings (chairs promo)
+                </label>
+              </div>
+
+              <div class="form-row">
+                <label class="label">Sort Order</label>
+                <input class="input" id="catSortOrder" type="number" value="0" />
+              </div>
+
+              <div class="row gap">
+                <button class="btn btn-good" id="btnCatSave">Save Category</button>
+                <button class="btn btn-ghost" id="btnCatClear">Clear</button>
+              </div>
+              <div class="mini-hint" id="catFormMsg"></div>
+            </div>
+
+            <div class="admin-card">
+              <div class="admin-card-title">Categories List</div>
+              <div class="admin-list" id="catList"></div>
+            </div>
           </div>
         </section>
+
 
       </section>
     </section>
 
   </main>
 
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?v=fix19"></script>
 
     <!-- Annual Date Picker Modal -->
     <div class="modal hidden" id="annualModal" aria-hidden="true">
@@ -690,5 +817,19 @@
       </div>
     </div>
     
+
+  <!-- Generic UI Modal -->
+  <div class="modal hidden" id="uiModal" aria-hidden="true">
+    <div class="modal-backdrop" id="uiModalBackdrop"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="uiModalTitle">
+      <div class="modal-head">
+        <div class="modal-title" id="uiModalTitle">Modal</div>
+        <button class="btn btn-ghost" id="uiModalClose" type="button">Close</button>
+      </div>
+      <div class="modal-body" id="uiModalBody"></div>
+      <div class="modal-actions" id="uiModalActions"></div>
+    </div>
+  </div>
+
 </body>
 </html>

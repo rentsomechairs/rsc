@@ -1,4 +1,4 @@
-import { readDb, writeDb, getSession } from '../db.js';
+import { getCheckout, setCheckout } from '../db.js';
 
 export function initAddress({ gotoCalendar, gotoReview } = {}){
   const street = document.getElementById('addrStreet');
@@ -7,14 +7,26 @@ export function initAddress({ gotoCalendar, gotoReview } = {}){
   const zip = document.getElementById('addrZip');
   const notes = document.getElementById('addrNotes');
   const btnBack = document.getElementById('btnAddrBack');
+  const btnBackBottom = document.getElementById('btnAddrBackBottom');
   const btnContinue = document.getElementById('btnAddrContinue');
+  const btnContinueBottom = document.getElementById('btnAddrContinueBottom');
 
   if (!street || !city || !state || !zip || !notes || !btnBack || !btnContinue) return;
 
+  const backHtml = `<div class="btn-main">Back</div><div class="btn-sub">to Date</div>`;
+  const nextHtml = `<div class="btn-main">Continue</div><div class="btn-sub">to Review</div>`;
+  btnBack.innerHTML = backHtml;
+  btnContinue.innerHTML = nextHtml;
+  if (btnBackBottom) btnBackBottom.innerHTML = backHtml;
+  if (btnContinueBottom) btnContinueBottom.innerHTML = nextHtml;
+
+  btnBack.onclick = () => gotoCalendar?.();
+  if (btnBackBottom) btnBackBottom.onclick = () => btnBack.click();
+
   btnBack.onclick = () => gotoCalendar?.();
 
-  const db = readDb();
-  const a = (db.checkout && db.checkout.address) ? db.checkout.address : {};
+  const checkout = getCheckout();
+  const a = checkout?.address ? checkout.address : {};
   street.value = a.street || '';
   city.value = a.city || '';
   state.value = a.state || '';
@@ -33,11 +45,11 @@ export function initAddress({ gotoCalendar, gotoReview } = {}){
       return;
     }
 
-    const db2 = readDb();
-    db2.checkout = { ...(db2.checkout||{}), address: {
-      street: streetV, city: cityV, state: stateV, zip: zipV, notes: notesV
-    }};
-    writeDb(db2);
+    setCheckout({
+      ...(getCheckout()||{}),
+      address: { street: streetV, city: cityV, state: stateV, zip: zipV, notes: notesV }
+    });
     gotoReview?.();
   };
+  if (btnContinueBottom) btnContinueBottom.onclick = () => btnContinue.click();
 }

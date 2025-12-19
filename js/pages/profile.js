@@ -1,6 +1,5 @@
-import { getSession, clearSession, readDb, writeDb, getUserByEmail, updateUserByEmail, setUserPassword, listBookingsByEmail, setCart } from '../db.js';
+import { getSession, setSession, getUserByEmail, updateUserByEmail, listBookingsByEmail, getCart, setCart, getCheckout, setCheckout, listEquipment, getPrefs, patchPrefs } from '../db.js';
 import { updateFlowSummary } from '../ui/flowbar.js';
-import { listEquipment } from '../db.js';
 
 function esc(s){
   return String(s ?? "").replace(/[&<>"']/g, c => ({
@@ -72,9 +71,56 @@ export function initProfile({ gotoLanding, gotoInventory } = {}){
   const email = sess?.email || '';
   const role = sess?.role || 'guest';
 
+  const btnOrderNow = document.getElementById('btnProfileOrderNow');
+
+  // Profile tabs (Account / Orders / Settings)
+  const tabsEl = document.getElementById('profileTabs');
+  const tabAccount = document.getElementById('profileTabAccount');
+  const tabOrders = document.getElementById('profileTabOrders');
+  const tabSettings = document.getElementById('profileTabSettings');
+
+  function showTab(key){
+    if (!tabAccount || !tabOrders || !tabSettings) return;
+    tabAccount.classList.toggle('hidden', key !== 'account');
+    tabOrders.classList.toggle('hidden', key !== 'orders');
+    tabSettings.classList.toggle('hidden', key !== 'settings');
+
+    if (tabsEl){
+      const btns = Array.from(tabsEl.querySelectorAll('.admin-tab'));
+      btns.forEach(b => b.classList.toggle('active', b.dataset.tab === key));
+    }
+  }
+
+  if (tabsEl){
+    tabsEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('.admin-tab');
+      if (!btn) return;
+      showTab(btn.dataset.tab || 'account');
+    });
+  }
+  // default
+  showTab('account');
+
+
+  const promoToggle = document.getElementById('profileToggleUpsell');
+  const prefs = getPrefs(sess) || {};
+  if (promoToggle){
+    promoToggle.checked = !prefs.hideUpsell;
+    promoToggle.addEventListener('change', () => {
+      patchPrefs({ hideUpsell: !promoToggle.checked }, sess);
+    });
+  }
+
+  const annualToggle = document.getElementById('profileToggleAnnual');
+  if (annualToggle){
+    annualToggle.checked = !prefs.annualUpsellOff;
+    annualToggle.addEventListener('change', () => {
+      patchPrefs({ annualUpsellOff: !annualToggle.checked }, sess);
+    });
+  }
+
   const btnBack = document.getElementById('btnProfileBack');
-  const btnSignOut = document.getElementById('btnProfileSignOut');
-  const badges = document.getElementById('profileBadges');
+    const badges = document.getElementById('profileBadges');
   const sub = document.getElementById('profileSub');
 
   const profEmail = document.getElementById('profEmail');
@@ -101,18 +147,41 @@ export function initProfile({ gotoLanding, gotoInventory } = {}){
   const ordersEmpty = document.getElementById('ordersEmpty');
   const search = document.getElementById('orderSearch');
 
-  btnBack.onclick = () => {
-    // go somewhere sensible
-    if (role === 'admin') location.hash = '#admin';
-    else location.hash = '#inventory';
-  };
-  btnSignOut.onclick = () => {
-    clearSession();
-    location.hash = '';
-    gotoLanding?.();
-  };
+  // Back button removed from UI (kept safe if markup still has it)
+  if (btnBack) btnBack.style.display = 'none';
 
   const user = getUserByEmail(email) || { email, role };
+
+  function continueTarget(){
+    const cart = getCart();
+    const checkout = getCheckout() || {};
+    const hasCart = cart.some(ci => Number(ci.qty || 0) > 0);
+    const dates = Array.isArray(checkout.dates) ? checkout.dates : (checkout.date ? [checkout.date] : []);
+    const hasDate = dates.length > 0;
+    const addr = checkout.address || null;
+    const hasAddr = !!(addr && (addr.street || addr.address1 || '').trim());
+
+    if (!hasCart) return '#inventory';
+    if (!hasDate) return '#calendar';
+    if (!hasAddr) return '#address';
+    return '#review';
+  }
+
+  function updateOrderButton(){
+    const cart = getCart();
+    const checkout = getCheckout() || {};
+    const hasCart = cart.some(ci => Number(ci.qty || 0) > 0);
+    const dates = Array.isArray(checkout.dates) ? checkout.dates : (checkout.date ? [checkout.date] : []);
+    const started = hasCart || dates.length > 0 || !!(checkout.address && (checkout.address.street||'').trim());
+    if (btnOrderNow) btnOrderNow.textContent = started ? 'Continue order' : 'Order Now';
+  }
+
+  btnOrderNow.onclick = () => {
+    const h = continueTarget();
+    location.hash = h;
+    if (h === '#inventory') gotoInventory?.();
+  };
+  updateOrderButton();
   profEmail.value = user.email || '';
   profRole.value = user.role || role;
 
@@ -174,12 +243,9 @@ export function initProfile({ gotoLanding, gotoInventory } = {}){
 
     // Set password and flip role to user
     updateUserByEmail(email, { password: p1, role: 'user' });
-    // Update session
-    const db2 = readDb();
-    db2.checkout = db2.checkout || {};
-    writeDb(db2);
-    // Keep email same, update role
-    localStorage.setItem('rsc_sess', JSON.stringify({ email, role:'user', createdAt: new Date().toISOString() }));
+    // Update session (keep email; flip role)
+    const upgraded = getUserByEmail(email);
+    setSession({ userId: upgraded?.id || null, email, role: upgraded?.role || 'user', createdAt: new Date().toISOString() });
     alert('Account created! You can now sign in with email + password.');
     guestUpgrade.classList.add('hidden');
     badges.innerHTML = '<span class="pill warn">Not verified</span>';
@@ -188,7 +254,7 @@ export function initProfile({ gotoLanding, gotoInventory } = {}){
 
   // Orders
   const equipment = listEquipment();
-  const bookings = listBookingsByEmail(email);
+  const bookings = listBookingsByEmail((email || 'guest'));
   const groups = groupBookings(bookings);
 
   function renderOrders(){
@@ -250,13 +316,12 @@ export function initProfile({ gotoLanding, gotoInventory } = {}){
       el.querySelector('[data-action="reorder"]').onclick = () => {
         // Prefill cart + checkout
         setCart(Object.entries(g.items||{}).map(([id, qty]) => ({ id, qty })));
-        const db2 = readDb();
-        db2.checkout = db2.checkout || {};
-        db2.checkout.annual = isAnnual;
-        db2.checkout.dates = isAnnual ? (g.dates || []) : [g.dates[0]];
-        db2.checkout.date = isAnnual ? null : g.dates[0];
-        db2.checkout.address = g.address || null;
-        writeDb(db2);
+        setCheckout({
+          annual: isAnnual,
+          dates: isAnnual ? (g.dates || []) : [g.dates[0]],
+          date: isAnnual ? null : g.dates[0],
+          address: g.address || null
+        });
         updateFlowSummary?.();
         alert('Loaded this order. You can review and adjust before placing again.');
         location.hash = '#inventory';

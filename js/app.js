@@ -1,3 +1,4 @@
+export const BUILD_TAG = '3.6.1-fix19';
 import { initLanding } from './pages/landing.js';
 import { initAdmin } from './pages/admin.js';
 import { initInventory } from './pages/inventory.js';
@@ -5,7 +6,7 @@ import { initCalendar } from './pages/calendar.js';
 import { initAddress } from './pages/address.js';
 import { initReview } from './pages/review.js';
 import { initProfile } from './pages/profile.js';
-import { getSession, clearSession, readDb } from './db.js';
+import { getSession, clearSession, readDb, getCart, getCheckout } from './db.js';
 import { setActiveStep, updateFlowSummary, wireFlowbarNav } from './ui/flowbar.js';
 
 const landing = document.getElementById('pageLanding');
@@ -17,8 +18,10 @@ const review = document.getElementById('pageReview');
 const profile = document.getElementById('pageProfile');
 
 
-const btnTopProfile = document.getElementById('btnTopProfile');
-const btnTopAdmin = document.getElementById('btnTopAdmin');
+const btnFlowLogin = document.getElementById('btnFlowLogin');
+const btnFlowProfile = document.getElementById('btnFlowProfile');
+const btnFlowSignOut = document.getElementById('btnFlowSignOut');
+const btnFlowAdmin = document.getElementById('btnFlowAdmin');
 const statusPill = document.getElementById('statusPill');
 const statusText = document.getElementById('statusText');
 
@@ -32,16 +35,11 @@ function refreshTopbar(session){
   if (statusPill){
     statusPill.classList.toggle('on', signedIn);
   }
-  if (btnTopProfile){
-    btnTopProfile.classList.toggle('hidden', !(role === 'user' || role === 'admin' || role === 'guest'));
-  }
-  if (btnTopAdmin){
-    btnTopAdmin.classList.toggle('hidden', role !== 'admin');
-  }
+  if (btnFlowLogin) btnFlowLogin.classList.toggle('hidden', signedIn);
+  if (btnFlowProfile) btnFlowProfile.classList.toggle('hidden', !signedIn);
+  if (btnFlowSignOut) btnFlowSignOut.classList.toggle('hidden', !signedIn);
+  if (btnFlowAdmin) btnFlowAdmin.classList.toggle('hidden', role !== 'admin');
 }
-
-btnTopProfile?.addEventListener('click', () => { location.hash = '#profile'; });
-btnTopAdmin?.addEventListener('click', () => { location.hash = '#admin'; });
 
 let adminInitialized = false;
 
@@ -64,20 +62,19 @@ function gotoCalendar(){ location.hash = '#calendar'; showCalendar(); }
 function gotoAddress(){ location.hash = '#address'; showAddress(); }
 function gotoReview(){ location.hash = '#review'; showReview(); }
 function gotoProfile(){ location.hash = '#profile'; showProfile(); }
-
-wireFlowbarNav({ gotoLanding, gotoInventory, gotoCalendar, gotoAddress, gotoReview });
+wireFlowbarNav({ gotoInventory, gotoCalendar, gotoAddress, gotoReview });
 
 function showLanding(){
   route('landing');
-  setActiveStep('login');
+  setActiveStep('');
   updateFlowSummary();
-  await initLanding({ gotoAdmin, gotoInventory });
+  initLanding({ gotoAdmin, gotoInventory });
 }
 
 function showAdmin(){
   route('admin');
   if (!adminInitialized) {
-    await initAdmin({ route });
+    initAdmin({ route });
     adminInitialized = true;
   }
 }
@@ -86,35 +83,35 @@ function showInventory(){
   route('inventory');
   setActiveStep('inventory');
   updateFlowSummary();
-  await initInventory({ gotoLanding, gotoCalendar, softRefresh: true });
+  initInventory({ gotoLanding, gotoCalendar, softRefresh: true });
 }
 
 function showCalendar(){
   route('calendar');
   setActiveStep('date');
   updateFlowSummary();
-  await initCalendar({ gotoInventory, gotoNext: gotoAddress });
+  initCalendar({ gotoInventory, gotoNext: gotoAddress });
 }
 
 function showAddress(){
   route('address');
   setActiveStep('address');
   updateFlowSummary();
-  await initAddress({ gotoCalendar, gotoReview });
+  initAddress({ gotoCalendar, gotoReview });
 }
 
 function showReview(){
   route('review');
   setActiveStep('review');
   updateFlowSummary();
-  await initReview({ gotoAddress, gotoDone: gotoLanding });
+  initReview({ gotoAddress, gotoDone: gotoLanding });
 }
 
 function showProfile(){
   route('profile');
   // No flowstep here; keep current active
   updateFlowSummary();
-  await initProfile({ gotoLanding, gotoInventory });
+  initProfile({ gotoLanding, gotoInventory });
 }
 
 // Keep summary fresh when localStorage changes elsewhere
@@ -142,14 +139,15 @@ function needsAuth(session){
   return session?.role === 'user' || session?.role === 'guest' || session?.role === 'admin';
 }
 
-async function handleRoute(){
+function handleRoute(){
   const session = getSession();
   refreshTopbar(session);
   const hash = (location.hash || '').toLowerCase();
-  const db = readDb();
-  const hasCart = !!(sessionStorage.getItem('rsc_cart') && JSON.parse(sessionStorage.getItem('rsc_cart')||'[]').length);
-  const hasDate = !!(db.checkout && db.checkout.date);
-  const hasAddress = !!(db.checkout && db.checkout.address);
+  const cart = getCart();
+  const checkout = getCheckout() || {};
+  const hasCart = cart.some(ci => Number(ci.qty||0) > 0);
+  const hasDate = !!(checkout.date || (Array.isArray(checkout.dates) && checkout.dates.length));
+  const hasAddress = !!checkout.address;
 
   if (hash === '#profile') {
     if (needsAuth(session)) return showProfile();
@@ -196,11 +194,27 @@ async function handleRoute(){
     showAddress();
     return;
   }
-
+  if (needsAuth(session) && !hash) return showProfile();
   showLanding();
 }
 
-window.addEventListener('hashchange', () => { handleRoute(); });
+
+// Flowbar actions
+btnFlowLogin?.addEventListener('click', () => {
+  location.hash = '';
+  showLanding();
+});
+
+btnFlowProfile?.addEventListener('click', () => gotoProfile());
+
+btnFlowSignOut?.addEventListener('click', () => {
+  clearSession();
+  location.hash = '';
+  handleRoute();
+});
+
+btnFlowAdmin?.addEventListener('click', () => gotoAdmin());
+window.addEventListener('hashchange', handleRoute);
 handleRoute();
 
 // Update summary after any route (useful after date selection)
