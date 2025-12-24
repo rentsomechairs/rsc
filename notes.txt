@@ -1,0 +1,5 @@
+Be able to type for quantity. also add quantity to plus and minus buttons
+move offers for deal as pop ups when you click continue rather than as buttons
+fix highlight around today confusing with what is picked
+make it so that when you click a date, you can book it withouth pressing continue
+

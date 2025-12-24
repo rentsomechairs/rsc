@@ -13,32 +13,148 @@ function uid(prefix){ return `${prefix}_${Date.now()}_${Math.random().toString(1
 function seedDb(){
   return {
     users: [{ id:"admin_1", email: ADMIN.email, password: ADMIN.password, role:"admin", createdAt: nowIso() }],
-    categories: [
-      { id:"cat_chairs", name:"Chairs", imageUrl:"", annualEligible:true, sortOrder:0, createdAt: nowIso(), updatedAt: nowIso() },
-      { id:"cat_tables", name:"Tables", imageUrl:"", annualEligible:false, sortOrder:10, createdAt: nowIso(), updatedAt: nowIso() },
-      { id:"cat_other", name:"Other", imageUrl:"", annualEligible:false, sortOrder:99, createdAt: nowIso(), updatedAt: nowIso() }
-    ],
-    equipment: [
+categories: [
+  { id:"cat_chairs", name:"Chairs", imageUrl:"", annualEligible:true, sortOrder:0, createdAt: nowIso(), updatedAt: nowIso() },
+  { id:"cat_tables", name:"Tables", imageUrl:"", annualEligible:false, sortOrder:10, createdAt: nowIso(), updatedAt: nowIso() },
+  { id:"cat_stages", name:"Stages", imageUrl:"", annualEligible:false, sortOrder:20, createdAt: nowIso(), updatedAt: nowIso() },
+  { id:"cat_other", name:"Other", imageUrl:"", annualEligible:false, sortOrder:99, createdAt: nowIso(), updatedAt: nowIso() }
+],
+equipment: [
   {
-    id: "eq_demo_chair",
-    name: "White Folding Chair (Demo)",
+    id: "eq_seed_white_folding_chair",
+    name: "White Folding Chair (Seed)",
     categoryId: "cat_chairs",
     imageUrl: "",
-    quantity: 300,
-    maxPerOrder: 10,
-    description: "Starter item seeded for testing on GitHub Pages.",
+    quantity: 200,
+    maxPerOrder: 0,
+    description: "Seeded demo item for quick testing (GitHub Pages).",
     pricingTiers: [
-  { minQty: 10,  priceEach: 1.90 },
-  { minQty: 20,  priceEach: 1.80 },
-  { minQty: 30,  priceEach: 1.70 },
-  { minQty: 40,  priceEach: 1.60 },
-  { minQty: 50,  priceEach: 1.50 },
-  { minQty: 60,  priceEach: 1.40 },
-  { minQty: 70,  priceEach: 1.30 },
-  { minQty: 80,  priceEach: 1.20 },
-  { minQty: 90,  priceEach: 1.10 },
-  { minQty: 100, priceEach: 1.00 }
-],
+    { minQty: 10, priceEach: 1.90 },
+    { minQty: 20, priceEach: 1.80 },
+    { minQty: 30, priceEach: 1.70 },
+    { minQty: 40, priceEach: 1.60 },
+    { minQty: 50, priceEach: 1.50 },
+    { minQty: 60, priceEach: 1.40 },
+    { minQty: 70, priceEach: 1.30 },
+    { minQty: 80, priceEach: 1.20 },
+    { minQty: 90, priceEach: 1.10 },
+    { minQty: 100, priceEach: 1.00 }
+  ],
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  },
+  {
+    id: "eq_seed_black_resin_chair",
+    name: "Black Resin Chair (Seed)",
+    categoryId: "cat_chairs",
+    imageUrl: "",
+    quantity: 150,
+    maxPerOrder: 0,
+    description: "Seeded demo item for quick testing (GitHub Pages).",
+    pricingTiers: [
+    { minQty: 10, priceEach: 2.25 },
+    { minQty: 20, priceEach: 2.10 },
+    { minQty: 30, priceEach: 1.95 },
+    { minQty: 40, priceEach: 1.80 },
+    { minQty: 50, priceEach: 1.70 },
+    { minQty: 60, priceEach: 1.60 },
+    { minQty: 70, priceEach: 1.50 },
+    { minQty: 80, priceEach: 1.40 },
+    { minQty: 90, priceEach: 1.30 },
+    { minQty: 100, priceEach: 1.20 }
+  ],
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  },
+  {
+    id: "eq_seed_table_6ft_banquet",
+    name: "6ft Banquet Table (Seed)",
+    categoryId: "cat_tables",
+    imageUrl: "",
+    quantity: 30,
+    maxPerOrder: 0,
+    description: "Seeded demo item for quick testing (GitHub Pages).",
+    pricingTiers: [
+    { minQty: 1, priceEach: 12.00 },
+    { minQty: 2, priceEach: 11.50 },
+    { minQty: 3, priceEach: 11.00 },
+    { minQty: 4, priceEach: 10.50 },
+    { minQty: 5, priceEach: 10.00 },
+    { minQty: 6, priceEach: 9.50 },
+    { minQty: 7, priceEach: 9.00 },
+    { minQty: 8, priceEach: 8.50 },
+    { minQty: 9, priceEach: 8.00 },
+    { minQty: 10, priceEach: 7.50 }
+  ],
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  },
+  {
+    id: "eq_seed_table_60in_round",
+    name: "60in Round Table (Seed)",
+    categoryId: "cat_tables",
+    imageUrl: "",
+    quantity: 20,
+    maxPerOrder: 0,
+    description: "Seeded demo item for quick testing (GitHub Pages).",
+    pricingTiers: [
+    { minQty: 1, priceEach: 14.00 },
+    { minQty: 2, priceEach: 13.50 },
+    { minQty: 3, priceEach: 13.00 },
+    { minQty: 4, priceEach: 12.50 },
+    { minQty: 5, priceEach: 12.00 },
+    { minQty: 6, priceEach: 11.50 },
+    { minQty: 7, priceEach: 11.00 },
+    { minQty: 8, priceEach: 10.50 },
+    { minQty: 9, priceEach: 10.00 },
+    { minQty: 10, priceEach: 9.50 }
+  ],
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  },
+  {
+    id: "eq_seed_stage_4x8_platform",
+    name: "Stage Platform 4x8 (Seed)",
+    categoryId: "cat_stages",
+    imageUrl: "",
+    quantity: 10,
+    maxPerOrder: 0,
+    description: "Seeded demo item for quick testing (GitHub Pages).",
+    pricingTiers: [
+    { minQty: 1, priceEach: 75.00 },
+    { minQty: 2, priceEach: 72.00 },
+    { minQty: 3, priceEach: 69.00 },
+    { minQty: 4, priceEach: 66.00 },
+    { minQty: 5, priceEach: 63.00 },
+    { minQty: 6, priceEach: 60.00 },
+    { minQty: 7, priceEach: 57.00 },
+    { minQty: 8, priceEach: 54.00 },
+    { minQty: 9, priceEach: 51.00 },
+    { minQty: 10, priceEach: 48.00 }
+  ],
+    createdAt: nowIso(),
+    updatedAt: nowIso()
+  },
+  {
+    id: "eq_seed_stage_4x4_section",
+    name: "Stage Section 4x4 (Seed)",
+    categoryId: "cat_stages",
+    imageUrl: "",
+    quantity: 12,
+    maxPerOrder: 0,
+    description: "Seeded demo item for quick testing (GitHub Pages).",
+    pricingTiers: [
+    { minQty: 1, priceEach: 45.00 },
+    { minQty: 2, priceEach: 43.00 },
+    { minQty: 3, priceEach: 41.00 },
+    { minQty: 4, priceEach: 39.00 },
+    { minQty: 5, priceEach: 37.00 },
+    { minQty: 6, priceEach: 35.00 },
+    { minQty: 7, priceEach: 33.00 },
+    { minQty: 8, priceEach: 31.00 },
+    { minQty: 9, priceEach: 29.00 },
+    { minQty: 10, priceEach: 27.00 }
+  ],
     createdAt: nowIso(),
     updatedAt: nowIso()
   }

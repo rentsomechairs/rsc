@@ -157,7 +157,8 @@ export function initProfile({ gotoLanding, gotoInventory } = {}){
     const checkout = getCheckout() || {};
     const hasCart = cart.some(ci => Number(ci.qty || 0) > 0);
     const dates = Array.isArray(checkout.dates) ? checkout.dates : (checkout.date ? [checkout.date] : []);
-    const hasDate = dates.length > 0;
+    const annual = !!checkout.annual;
+    const hasDate = annual ? (dates.length === 5) : (dates.length > 0);
     const addr = checkout.address || null;
     const hasAddr = !!(addr && (addr.street || addr.address1 || '').trim());
 

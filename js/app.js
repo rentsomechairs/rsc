@@ -146,7 +146,9 @@ function handleRoute(){
   const cart = getCart();
   const checkout = getCheckout() || {};
   const hasCart = cart.some(ci => Number(ci.qty||0) > 0);
-  const hasDate = !!(checkout.date || (Array.isArray(checkout.dates) && checkout.dates.length));
+  const datesArr = Array.isArray(checkout.dates) ? checkout.dates : (checkout.date ? [checkout.date] : []);
+  const annual = !!checkout.annual;
+  const hasDate = annual ? (datesArr.length === 5) : (datesArr.length > 0);
   const hasAddress = !!checkout.address;
 
   if (hash === '#profile') {

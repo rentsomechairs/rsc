@@ -18,6 +18,17 @@ function formatDateDisplay(iso){
   return `${mon}. ${day}${suf}, ${yr}`;
 }
 
+function addDaysIso(iso, days){
+  const [y,m,d] = String(iso||'').split('-').map(Number);
+  if (!y||!m||!d) return iso;
+  const dt = new Date(y, m-1, d);
+  dt.setDate(dt.getDate() + Number(days||0));
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth()+1).padStart(2,'0');
+  const dd = String(dt.getDate()).padStart(2,'0');
+  return `${yy}-${mm}-${dd}`;
+}
+
 
 function pad2(n){ return String(n).padStart(2,'0'); }
 function isoDate(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
@@ -240,23 +251,35 @@ export function initCalendar({ gotoInventory, gotoNext } = {}){
           <div class="admin-row2" style="margin-top:10px;">
             <div class="admin-field">
               <label>Deliver by</label>
+              <div class="muted-inline" style="margin-top:4px;">${formatDateDisplay(dateIso)}</div>
               <input class="input" id="timeDeliverBy" type="time" value="${cur.deliverBy || defs.deliverBy || ''}">
-              <div class="muted-inline" style="margin-top:6px;">What time do the chairs need to be delivered by?</div>
             </div>
             <div class="admin-field">
-              <label>Ready for pickup</label>
-              <input class="input" id="timePickupAt" type="time" value="${cur.pickupAt || defs.pickupAt || ''}">
-              <div class="muted-inline" style="margin-top:6px;">What time will the chairs be ready for pickup?</div>
+              <label>Picked up for return by</label>
+              <div class="muted-inline" id="pickupDateLabel" style="margin-top:4px;">${formatDateDisplay(addDaysIso(dateIso, (cur.pickupOffset ?? 1)))}</div>
+              <div style="margin-top:8px;">
+                <label style="display:block;font-size:12px;opacity:.85;margin-bottom:6px;">Pickup date (relative to delivery)</label>
+                <select class="input" id="pickupDayOffset">
+                  <option value="0">${formatDateDisplay(dateIso)} (same day)</option>
+                  <option value="1" selected>${formatDateDisplay(addDaysIso(dateIso,1))} (next day)</option>
+                  <option value="2">${formatDateDisplay(addDaysIso(dateIso,2))} (two days later)</option>
+                </select>
+              </div>
+              <input class="input" id="timePickupAt" type="time" value="${cur.pickupAt || defs.pickupAt || ''}" style="margin-top:10px;">
             </div>
           </div>
         `,
+
+
         actions: [
           { label:'Cancel', className:'btn btn-ghost', onClick: () => resolve(false) },
           { label:'Confirm', className:'btn btn-good', onClick: () => {
               const d = document.getElementById('timeDeliverBy')?.value || '';
               const p = document.getElementById('timePickupAt')?.value || '';
               if (!d || !p){ resolve(false); return; }
-              timesByDate = { ...(timesByDate||{}), [dateIso]: { deliverBy: d, pickupAt: p } };
+                            const off = Number(document.getElementById('pickupDayOffset')?.value || (cur.pickupOffset ?? 1) || 1);
+              const pickupDate = addDaysIso(dateIso, off);
+              timesByDate = { ...(timesByDate||{}), [dateIso]: { deliverBy: d, pickupAt: p, pickupOffset: off, pickupDate } };
               saveCheckout();
               updateContinue();
               // After confirming times for a single-date order, advance the flow (will trigger annual prompt if applicable)
@@ -266,6 +289,21 @@ export function initCalendar({ gotoInventory, gotoNext } = {}){
           }
         ]
       });
+// Bind pickup-day selector to update the displayed pickup date and default selection
+setTimeout(() => {
+  const sel = document.getElementById('pickupDayOffset');
+  const lbl = document.getElementById('pickupDateLabel');
+  if (sel){
+    const off0 = (cur.pickupOffset ?? 1);
+    sel.value = String(off0);
+    const update = () => {
+      const off = Number(sel.value || 1);
+      if (lbl) lbl.textContent = formatDateDisplay(addDaysIso(dateIso, off));
+    };
+    sel.addEventListener('change', update);
+    update();
+  }
+}, 0);
     });
   }
 
@@ -574,23 +612,74 @@ export function initCalendar({ gotoInventory, gotoNext } = {}){
       const selected = pickedDates[slotIndex] === iso;
       const isToday = iso === isoDate(today);
 
-      const badges = avail.slice(0, 3).map(a => {
-        let cls = 'cal-badge';
-        if (a.remaining <= 0) cls += ' zero';
-        else if (a.remaining <= Math.max(5, Math.floor(a.total*0.15))) cls += ' low';
-        const label = (a.name || '').split(' ').slice(0,2).join(' ');
-        return `<span class=\"${cls}\">${a.remaining}<small>${esc(label||a.id)}</small></span>`;
+      const tooltipItems = avail.map(a => {
+        const need = Math.max(0, Math.floor(Number(requestedQtyById.get(a.id) || 0)));
+        const insufficient = a.remaining < need;
+        const status = (need ? `Need ${need} • ` : '') + `${a.remaining}/${a.total} left`;
+        return `<div class="cal-tip-row${insufficient ? ' low' : ''}">
+          <span class="ct-name">${esc(a.name || a.id)}</span>
+          <span class="ct-val">${esc(status)}</span>
+        </div>`;
       }).join('');
 
-      const el = document.createElement('div');
+      const tooltip = `<div class="cal-tooltip">
+        <div class="cal-tip-title">Availability</div>
+        ${tooltipItems || '<div class="cal-tip-row"><span class="ct-name">No items selected</span></div>'}
+      </div>`;
+
+      const hint = `<span class="cal-tip-icon" title="Hover for availability">ⓘ</span>`;
+const el = document.createElement('div');
       // Only highlight "Today" when it is the selected date.
       el.className = 'cal-day' + (isOut ? ' is-out' : '') + (selected ? ' is-selected' : '') + (disabled ? ' is-disabled' : '') + ((isToday && selected) ? ' is-today' : '');
       el.innerHTML = `
         <div class="cal-day-top">
           <div class="cal-num">${d.getDate()}</div>
-          <div class="cal-badges">${badges}</div>
+          <div class="cal-badges">${hint}</div>
+          ${tooltip}
         </div>
       `;
+/* tooltip viewport clamp */
+const tipEl = el.querySelector('.cal-tooltip');
+const iconEl = el.querySelector('.cal-tip-icon');
+const showTip = () => {
+  if (!tipEl) return;
+  // Make it fixed so it isn't clipped by the calendar grid
+  tipEl.style.display = 'block';
+  tipEl.style.position = 'fixed';
+  tipEl.style.left = '0px';
+  tipEl.style.top = '0px';
+  tipEl.style.transform = 'none';
+  tipEl.style.visibility = 'hidden';
+  tipEl.style.zIndex = '9999';
+  const anchor = (iconEl || el).getBoundingClientRect();
+  const tipRect = tipEl.getBoundingClientRect();
+  const pad = 10;
+  let left = anchor.left;
+  let top = anchor.bottom + 12; // slightly lower than before
+  if (left + tipRect.width > window.innerWidth - pad) left = window.innerWidth - pad - tipRect.width;
+  if (left < pad) left = pad;
+  if (top + tipRect.height > window.innerHeight - pad) {
+    top = anchor.top - 12 - tipRect.height; // flip above
+  }
+  if (top < pad) top = pad;
+  tipEl.style.left = `${Math.round(left)}px`;
+  tipEl.style.top = `${Math.round(top)}px`;
+  tipEl.style.visibility = 'visible';
+  // Ensure hovered cell is above neighbors (prevents number overlap)
+  el.style.zIndex = '120';
+};
+const hideTip = () => {
+  if (!tipEl) return;
+  tipEl.style.display = 'none';
+  tipEl.style.position = '';
+  tipEl.style.left = '';
+  tipEl.style.top = '';
+  tipEl.style.visibility = '';
+  tipEl.style.zIndex = '';
+  el.style.zIndex = '';
+};
+el.addEventListener('mouseenter', showTip);
+el.addEventListener('mouseleave', hideTip);
 
       el.addEventListener('click', async () => {
         if (disabled) return;
@@ -723,15 +812,22 @@ export function initCalendar({ gotoInventory, gotoNext } = {}){
       const anyZero = avail.some(a => a.remaining <= 0);
       const disabled = isPast || anyZero;
 
-      const badges = avail.slice(0, 3).map(a => {
-        let cls = 'cal-badge';
-        if (a.remaining <= 0) cls += ' zero';
-        else if (a.remaining <= Math.max(5, Math.floor(a.total*0.15))) cls += ' low';
-        const label = (a.name || '').split(' ').slice(0,2).join(' ');
-        return `<span class=\"${cls}\">${a.remaining}<small>${esc(label||a.id)}</small></span>`;
+      const tooltipItems = avail.map(a => {
+        const status = `${a.remaining}/${a.total} left`;
+        const low = (a.remaining <= Math.max(5, Math.floor(a.total*0.15)));
+        return `<div class="cal-tip-row${(a.remaining <= 0 || low) ? ' low' : ''}">
+          <span class="ct-name">${esc(a.name || a.id)}</span>
+          <span class="ct-val">${esc(status)}</span>
+        </div>`;
       }).join('');
 
-      const selected = pickedDates[0] === iso;
+      const tooltip = `<div class="cal-tooltip">
+        <div class="cal-tip-title">Availability</div>
+        ${tooltipItems || '<div class="cal-tip-row"><span class="ct-name">No items selected</span></div>'}
+      </div>`;
+
+      const hint = `<span class="cal-tip-icon" title="Hover for availability">ⓘ</span>`;
+const selected = pickedDates[0] === iso;
       const isToday = iso === isoDate(today);
 
       const el = document.createElement('div');
@@ -741,9 +837,52 @@ export function initCalendar({ gotoInventory, gotoNext } = {}){
       el.innerHTML = `
         <div class="cal-day-top">
           <div class="cal-num">${d.getDate()}</div>
-          <div class="cal-badges">${badges}</div>
+          <div class="cal-badges">${hint}</div>
+          ${tooltip}
         </div>
       `;
+/* tooltip viewport clamp */
+const tipEl = el.querySelector('.cal-tooltip');
+const iconEl = el.querySelector('.cal-tip-icon');
+const showTip = () => {
+  if (!tipEl) return;
+  // Make it fixed so it isn't clipped by the calendar grid
+  tipEl.style.display = 'block';
+  tipEl.style.position = 'fixed';
+  tipEl.style.left = '0px';
+  tipEl.style.top = '0px';
+  tipEl.style.transform = 'none';
+  tipEl.style.visibility = 'hidden';
+  tipEl.style.zIndex = '9999';
+  const anchor = (iconEl || el).getBoundingClientRect();
+  const tipRect = tipEl.getBoundingClientRect();
+  const pad = 10;
+  let left = anchor.left;
+  let top = anchor.bottom + 12; // slightly lower than before
+  if (left + tipRect.width > window.innerWidth - pad) left = window.innerWidth - pad - tipRect.width;
+  if (left < pad) left = pad;
+  if (top + tipRect.height > window.innerHeight - pad) {
+    top = anchor.top - 12 - tipRect.height; // flip above
+  }
+  if (top < pad) top = pad;
+  tipEl.style.left = `${Math.round(left)}px`;
+  tipEl.style.top = `${Math.round(top)}px`;
+  tipEl.style.visibility = 'visible';
+  // Ensure hovered cell is above neighbors (prevents number overlap)
+  el.style.zIndex = '120';
+};
+const hideTip = () => {
+  if (!tipEl) return;
+  tipEl.style.display = 'none';
+  tipEl.style.position = '';
+  tipEl.style.left = '';
+  tipEl.style.top = '';
+  tipEl.style.visibility = '';
+  tipEl.style.zIndex = '';
+  el.style.zIndex = '';
+};
+el.addEventListener('mouseenter', showTip);
+el.addEventListener('mouseleave', hideTip);
 
       el.addEventListener('click', async () => {
         if (disabled) return;
@@ -826,9 +965,10 @@ export function initCalendar({ gotoInventory, gotoNext } = {}){
       // When turning annual OFF, keep only the first date.
       const first = pickedDates[0] || (getCheckout()?.date || null);
       if (annualMode){
-        pickedDates = first ? [first] : [todayIso];
+        // If the user hasn't picked a first date yet, don't auto-pick today.
+        pickedDates = [];
       } else {
-        pickedDates = first ? [first] : [];
+        pickedDates = [];
       }
 
       saveCheckout();
@@ -840,10 +980,10 @@ export function initCalendar({ gotoInventory, gotoNext } = {}){
       if (!annualMode) {
         renderMain();
       } else {
-        foot.textContent = 'Pick your annual dates below.';
+        foot.textContent = 'Pick your first annual date to continue.';
         // Help the user keep moving: open the picker for the 2nd date if the first is set.
-        if (pickedDates[0]) openModal(1);
-      }
+                openModal(0);
+}
     });
   }
 
@@ -855,7 +995,9 @@ export function initCalendar({ gotoInventory, gotoNext } = {}){
 
   if (!annualMode) renderMain();
   else foot.textContent = 'Pick your annual dates below.';
-}function getDefaultTimesFor(dateIso){
+}
+
+function getDefaultTimesFor(dateIso){
     const db = readDb();
     const settings = db.settings || {};
     const defDeliver = settings.defaultDeliverBy || '';

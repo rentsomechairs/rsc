@@ -736,8 +736,10 @@ label{
   min-height: 86px;
   cursor:pointer;
   transition: border-color .15s ease, background .15s ease, transform .06s ease;
+  position: relative;
+  overflow: visible;
 }
-.cal-day:hover{ border-color: rgba(122,162,255,.45); background: rgba(122,162,255,.06); }
+.cal-day:hover{ border-color: rgba(122,162,255,.45); background: rgba(122,162,255,.06); z-index: 5; }
 .cal-day:active{ transform: translateY(1px); }
 .cal-day.is-out{ opacity: .45; }
 .cal-day.is-selected{
@@ -769,6 +771,48 @@ label{
   background: rgba(251,113,133,.10);
   color: rgba(251,113,133,.95);
 }
+
+.cal-tip-icon{ font-size:13px; opacity:.7; }
+.cal-day:hover .cal-tip-icon{ opacity:1; }
+
+.cal-tooltip{
+  position:absolute;
+  left:10px;
+  top:54px;
+  min-width: 220px;
+  max-width: 320px;
+  background: rgb(10,10,18);
+  border:1px solid rgba(255,255,255,.14);
+  border-radius: 14px;
+  padding: 10px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.45);
+  display:none;
+  pointer-events:none;
+  z-index: 60;
+}
+
+.cal-day:hover .cal-tooltip{ /* handled by JS */ }
+
+.cal-tip-title{
+  font-weight:700;
+  font-size:13px;
+  margin-bottom:6px;
+}
+
+.cal-tip-row{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  font-size:12px;
+  opacity:.92;
+  padding:4px 0;
+  border-top:1px solid rgba(255,255,255,.06);
+}
+
+.cal-tip-row:first-of-type{ border-top:0; }
+.cal-tip-row.low{ opacity:1; color: rgba(251,191,36,.95); }
+.ct-name{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width: 190px; }
+.ct-val{ white-space:nowrap; opacity:.9; }
 .cal-footnote{
   margin-top: 12px;
   padding: 12px 14px;
@@ -789,8 +833,8 @@ label{
   z-index: 30;
   display:flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 8px;
+  padding: 8px 12px;
   border-bottom: 1px solid rgba(255,255,255,.10);
   background: rgba(10,12,18,.72);
   backdrop-filter: blur(14px);
@@ -808,12 +852,18 @@ label{
   align-items:center;
   justify-content:flex-end;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.flowbar-right::-webkit-scrollbar{ display:none; }
+
+/* Tighten topbar buttons a bit to reduce header height */
+.topbar-btn{ padding: 6px 10px; font-size: 12px; }
 
 .flowbar-bottom{
   display:flex;
-  align-items:stretch;
+  align-items:center;
   justify-content:space-between;
   gap: 12px;
 }
@@ -892,6 +942,7 @@ label{
   .flowbar{ position: static; }
   .flowbar-bottom{ flex-direction: column; }
   .flowsummary{ max-width: none; width: 100%; }
+  .flowbar-right{ flex-wrap: wrap; overflow-x: visible; }
 }
 
 /* Hide flowbar on admin page */
@@ -1744,8 +1795,10 @@ label{
   min-height: 86px;
   cursor:pointer;
   transition: border-color .15s ease, background .15s ease, transform .06s ease;
+  position: relative;
+  overflow: visible;
 }
-.cal-day:hover{ border-color: rgba(122,162,255,.45); background: rgba(122,162,255,.06); }
+.cal-day:hover{ border-color: rgba(122,162,255,.45); background: rgba(122,162,255,.06); z-index: 5; }
 .cal-day:active{ transform: translateY(1px); }
 .cal-day.is-out{ opacity: .45; }
 .cal-day.is-selected{
@@ -2207,6 +2260,50 @@ body.is-admin
   margin-top: 12px;
 }
 
+/* Generic UI modal: keep actions visible even when content is long */
+#uiModal .modal-card{
+  max-height: 88vh;
+  display:flex;
+  flex-direction: column;
+}
+#uiModal .modal-body{
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow:auto;
+  padding-right: 4px;
+}
+#uiModal .modal-actions{
+  flex: 0 0 auto;
+  position: sticky;
+  bottom: 0;
+  padding-top: 12px;
+  background: rgba(20,20,25,.98);
+  border-top: 1px solid rgba(255,255,255,.10);
+}
+
+/* Upsell modal layout: grouped sections + multi-column grid */
+.upsellGroup{ margin: 14px 0 0; }
+.upsellGroupTitle{ font-weight: 950; font-size: 12px; opacity: .9; letter-spacing: .2px; margin-bottom: 8px; }
+.upsellGrid{
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 10px;
+}
+.upsellRow{
+  border:1px solid rgba(255,255,255,.12);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(255,255,255,.03);
+}
+.upsellRowTop{ display:flex; justify-content:space-between; gap: 12px; align-items:flex-start; }
+.upsellRowLeft{ min-width:0; }
+.upsellRowRight{ flex: 0 0 auto; display:flex; flex-direction:column; gap: 8px; align-items:flex-end; }
+.upsellName{ font-weight: 900; line-height: 1.2; }
+.upsellLine{ font-size: 13px; opacity: .9; margin-top: 4px; }
+.upsellMuted{ opacity: .75; }
+.upsellRow .btn{ padding: 8px 12px; white-space: nowrap; }
+.upsellRow .uAdded{ display:none; font-size: 13px; opacity: .95; white-space: nowrap; }
+
 /* Make annual date picker modal roomier */
 #annualModal .modal-card{
   width: min(920px, 96vw);
@@ -2598,3 +2695,35 @@ body.is-admin
 .inv-cat-btn.active{border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.10);} 
 .inv-cat-img{width:28px;height:28px;border-radius:10px;object-fit:cover;border:1px solid rgba(255,255,255,.12);} 
 .inv-cat-name{font-weight:700;font-size:.95rem;white-space:nowrap;}
+
+/* Typed quantity input (Inventory) */
+.inv-qty-input{
+  width: 72px;
+  text-align: center;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color: var(--text);
+  padding: 8px 8px;
+  font-weight: 950;
+  font-size: 14px;
+  outline: none;
+}
+.inv-qty-input:focus{
+  box-shadow: 0 0 0 4px rgba(255,255,255,.10);
+  border-color: rgba(255,255,255,.22);
+}
+/* Ensure select inputs are readable */
+select.input{ color: var(--text); }
+
+
+/* Select dropdown readability */
+select.input{
+  background: rgba(10,10,18,.92);
+  color: var(--text);
+  border-color: rgba(255,255,255,.18);
+}
+select.input option{
+  background: rgb(10,10,18);
+  color: var(--text);
+}

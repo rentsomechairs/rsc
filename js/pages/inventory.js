@@ -83,6 +83,48 @@ function computeUpsell(eq, current, increment, maxSelectable){
 
   return { add: increment, nextQty, delta, unitNext };
 }
+function roundUpToIncrement(qty, increment){
+  const q = Math.max(0, Math.floor(Number(qty||0)));
+  const inc = Math.max(1, Math.floor(Number(increment||1)));
+  if (q <= 0) return 0;
+  return Math.ceil(q / inc) * inc;
+}
+
+function desiredQtyFromTyped(eq, raw){
+  const qtyAvail = Math.max(0, Math.floor(Number(eq.quantity || 0)));
+  const increment = Math.max(1, Math.floor(Number(eq.maxPerOrder || 1)));
+  const entered = Math.max(0, Math.floor(Number(raw || 0)));
+  if (!entered) return 0;
+  let next = roundUpToIncrement(entered, increment);
+  next = clamp(next, 0, qtyAvail);
+  return next;
+}
+
+function commitAllTypedQty(equipment){
+  // Commits any typed values before continuing (so blur isn't required)
+  const inputs = Array.from(document.querySelectorAll('.inv-qty-input'));
+  const changes = [];
+  for (const inp of inputs){
+    const card = inp.closest('.inv-card');
+    const id = card?.getAttribute('data-id');
+    if (!id) continue;
+    const eq = (equipment || []).find(e => String(e.id) === String(id));
+    if (!eq) continue;
+    const cur = cartQty(String(id));
+    const typed = inp.value;
+    if (typed == null || typed === '') continue;
+    const desired = desiredQtyFromTyped(eq, typed);
+    if (desired !== cur){
+      changes.push({ id: String(id), qty: desired });
+    }
+  }
+  if (!changes.length) return false;
+  for (const ch of changes){
+    setQty(ch.id, ch.qty);
+  }
+  return true;
+}
+
 
 export function initInventory({ gotoLanding, gotoCalendar, softRefresh=false } = {}) {
   const grid = document.getElementById('invGrid');
@@ -279,39 +321,209 @@ export function initInventory({ gotoLanding, gotoCalendar, softRefresh=false } =
   }
 
   function showUpsellOnContinue(){
-    const best = getBestUpsell();
     if (hideUpsell) return false;
-    if (!best) return false;
-    if (hasSeenUpsell()) return false;
+    const categories = listCategories();
+// Build a list of "next tier" offers for every cart item that can unlock a better unit price.
+    const offers = [];
+    for (const ci of cart){
+      const eq = equipment.find(e => String(e.id) === String(ci.id));
+      if (!eq) continue;
 
-    markUpsellSeen();
+      const qtyAvail = Math.max(0, Math.floor(Number(eq.quantity || 0)));
+      const qty = Math.max(0, Math.floor(Number(ci.qty || 0)));
+      if (!qty) continue;
+
+      const tiers = normalizeTiers(eq.pricingTiers);
+      if (!tiers.length) continue;
+
+      // Compute current unit price and locate the *next* tier that actually lowers it.
+      // This avoids excluding items where the first tier is treated as the base price
+      // (e.g., tiers start at 10, but qty < 10 still prices at that same tier).
+      const unitNow = unitPriceForQty(eq.pricingTiers, qty);
+      if (unitNow == null) continue;
+
+      let nextTier = null;
+      let unitNext = null;
+      for (const t of tiers){
+        const minQty = Math.max(0, Math.floor(Number(t.minQty || 0)));
+        if (minQty <= qty) continue;
+        const u = unitPriceForQty(eq.pricingTiers, minQty);
+        if (u == null) continue;
+        if (u < unitNow){
+          nextTier = { ...t, minQty };
+          unitNext = u;
+          break;
+        }
+      }
+      if (!nextTier || unitNext == null) continue;
+
+      const add = Math.max(0, Math.floor(Number(nextTier.minQty || 0) - qty));
+      if (!add) continue;
+
+      const nextQty = qty + add;
+      if (nextQty > qtyAvail) continue;
+
+      // unitNext is already computed from nextTier.minQty, but keep this consistent
+      // in case unit pricing logic changes.
+      unitNext = unitPriceForQty(eq.pricingTiers, nextQty);
+      if (unitNext == null) continue;
+      if (!(unitNext < unitNow)) continue; // only prompt when it truly lowers the rate
+
+      const totalNow = unitNow * qty;
+      const totalNext = unitNext * nextQty;
+      const delta = totalNext - totalNow; // additional cost to upgrade
+      const savings = (unitNow * nextQty) - totalNext; // savings vs paying old rate on all items
+      const perAdded = delta / Math.max(1, add);
+
+      if (!isFinite(delta) || !isFinite(savings)) continue;
+      if (delta <= 0) continue;
+
+      // Category grouping for the modal UI
+      const catId = String(eq.categoryId || '');
+      const catName = String((categories || []).find(c => String(c.id) === catId)?.name || 'Other');
+
+      offers.push({
+        id: String(eq.id),
+        name: String(eq.name || 'Item'),
+        categoryId: catId,
+        categoryName: catName,
+        qty,
+        add,
+        nextQty,
+        unitNow,
+        unitNext,
+        delta,
+        savings,
+        perAdded
+      });
+    }
+
+    if (!offers.length) return false;
+
+    // Sort by category then most savings first so the best opportunities are visible.
+    offers.sort((a,b) => {
+      const ca = String(a.categoryName || '');
+      const cb = String(b.categoryName || '');
+      if (ca !== cb) return ca.localeCompare(cb);
+      return (b.savings - a.savings);
+    });
+
+    // Group into category sections and show in a multi-column grid so the footer stays reachable.
+    const groups = new Map();
+    for (const o of offers){
+      const key = String(o.categoryName || 'Other');
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(o);
+    }
+
+    const rowCard = (o) => `
+      <div class="upsellRow" data-upsell-id="${esc(o.id)}" data-orig-qty="${o.qty}" data-next-qty="${o.nextQty}" data-add="${o.add}" data-unit-next="${o.unitNext}">
+        <div class="upsellRowTop">
+          <div class="upsellRowLeft">
+            <div class="upsellName">${esc(o.name)}</div>
+            <div class="upsellLine">Current: <strong class="uNowQty">${o.qty}</strong> @ <strong class="uNowUnit">${money(o.unitNow)}</strong>/ea</div>
+            <div class="upsellLine">Add <strong class="uAdd">${o.add}</strong> to reach <strong class="uNextQty">${o.nextQty}</strong> @ <strong>${money(o.unitNext)}</strong>/ea</div>
+            <div class="upsellLine">Additional cost: <strong>${money(o.delta)}</strong> <span class="upsellMuted">(≈ ${money(o.perAdded)}/each added)</span></div>
+            <div class="upsellLine">You save: <strong>${money(o.savings)}</strong> total</div>
+          </div>
+          <div class="upsellRowRight">
+            <button type="button" class="btn btn-good" data-upsell-action="add">Yes, add ${o.add} more</button>
+            <div class="uAdded">✅ Added</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const groupsHtml = Array.from(groups.entries()).map(([cat, items]) => `
+      <div class="upsellGroup">
+        <div class="upsellGroupTitle">${esc(cat)}</div>
+        <div class="upsellGrid">
+          ${items.map(rowCard).join('')}
+        </div>
+      </div>
+    `).join('');
+
     openModal({
       title: 'Quantity discount',
       bodyHtml: `
-        <div style="margin-bottom:10px;">You can add <strong>${best.upsell.add}</strong> more <strong>${esc(best.eq.name)}</strong> to reach <strong>${best.upsell.nextQty}</strong> total.</div>
-        <div style="margin-bottom:12px;">Additional cost: <strong>${money(best.upsell.delta)}</strong> (new rate: ${money(best.upsell.unitNext)}/ea)</div>
-        <label style="display:flex;gap:8px;align-items:center;font-size:13px;opacity:.9;">
+        <div style="margin-bottom:8px;opacity:.95;">
+          You have quantity discounts available. Review each item below to see the new rate and total savings.
+        </div>
+        <div id="upsellList">${groupsHtml}</div>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;opacity:.9;margin-top:10px;">
           <input type="checkbox" id="chkNoMoreUpsell">
           Do not show this again
         </label>
       `,
       actions: [
-        { label:'No thank you', className:'btn btn-ghost', onClick: () => {
+        { label:'No thank you', className:'btn btn-primary', onClick: () => {
             const c = document.getElementById('chkNoMoreUpsell');
             if (c?.checked) patchPrefs({ hideUpsell: true }, session);
-            gotoCalendar?.();
-          }
-        },
-        { label:`Add ${best.upsell.add} more`, className:'btn btn-good', onClick: () => {
-            const c = document.getElementById('chkNoMoreUpsell');
-            if (c?.checked) patchPrefs({ hideUpsell: true }, session);
-            setQty(best.eq.id, best.upsell.nextQty);
             gotoCalendar?.();
           }
         }
       ]
     });
-    return true;
+
+    // Wire up row-level add buttons + dynamic footer label.
+    const accepted = new Set();
+    const modalBody = document.getElementById('uiModalBody');
+    const modalActions = document.getElementById('uiModalActions');
+    const footerBtn = modalActions?.querySelector('button');
+    const refreshFooter = () => {
+      if (!footerBtn) return;
+      footerBtn.textContent = accepted.size ? 'Continue' : 'No thank you';
+    };
+    refreshFooter();
+
+    modalBody?.querySelectorAll('[data-upsell-action="add"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const row = btn.closest('[data-upsell-id]');
+        const id = row?.getAttribute('data-upsell-id');
+        if (!id) return;
+
+        const offer = offers.find(o => String(o.id) === String(id));
+        if (!offer) return;
+
+        const origQty = Math.max(0, Math.floor(Number(row?.getAttribute('data-orig-qty') || offer.qty || 0)));
+        const nextQty = Math.max(0, Math.floor(Number(row?.getAttribute('data-next-qty') || offer.nextQty || 0)));
+        const addQty  = Math.max(0, Math.floor(Number(row?.getAttribute('data-add') || offer.add || 0)));
+        const nextUnit = Number(row?.getAttribute('data-unit-next') || offer.unitNext || 0);
+
+        const qtyEl = row?.querySelector('.uNowQty');
+        const unitEl = row?.querySelector('.uNowUnit');
+        const addedEl = row?.querySelector('.uAdded');
+        const addEl = row?.querySelector('.uAdd');
+
+        // Toggle behavior: clicking again undoes the change back to original qty.
+        if (accepted.has(id)){
+          setQty(id, origQty);
+          accepted.delete(id);
+
+          btn.textContent = `Yes, add ${addQty} more`;
+          if (addedEl) addedEl.style.display = 'none';
+          if (qtyEl) qtyEl.textContent = String(origQty);
+          if (unitEl) unitEl.textContent = money(offer.unitNow);
+          if (addEl) addEl.textContent = String(addQty);
+          refreshFooter();
+          return;
+        }
+
+        // Apply the quantity change and persist.
+        setQty(id, nextQty);
+        accepted.add(id);
+
+        // UI update: show check, update qty + current rate, allow undo.
+        btn.textContent = 'Undo';
+        if (addedEl) addedEl.style.display = 'block';
+        if (qtyEl) qtyEl.textContent = String(nextQty);
+        if (unitEl) unitEl.textContent = money(nextUnit);
+        if (addEl) addEl.textContent = '0';
+
+        refreshFooter();
+      });
+    });
+return true;
   }
 
   btnContinue.onclick = () => {
@@ -488,7 +700,7 @@ export function initInventory({ gotoLanding, gotoCalendar, softRefresh=false } =
             <div class="inv-controls">
               <div class="qty-controls">
                 <button class="inv-btn inv-minus qty-btn" type="button" ${disabledAttr}>(-${increment})</button>
-                <div class="inv-qty inv-qty-read qty-value" aria-label="Quantity">${selected ? current : 0}</div>
+                <input class="inv-qty inv-qty-input qty-value" aria-label="Quantity" inputmode="numeric" pattern="[0-9]*" value="${selected ? current : 0}">
                 <button class="inv-btn inv-plus qty-btn" type="button" ${disabledAttr}>(+${increment})</button>
               </div>
               <div class="inv-maxhint">${comingSoon ? 'Not available yet' : `Max: ${qtyAvail}`}</div>
@@ -507,6 +719,7 @@ export function initInventory({ gotoLanding, gotoCalendar, softRefresh=false } =
       const thumb = card.querySelector('.inv-thumb');
       const minus = card.querySelector('.inv-minus');
       const plus = card.querySelector('.inv-plus');
+      const qtyInput = card.querySelector('.inv-qty-input');
 
       thumb?.addEventListener('click', () => {
         if (card.classList.contains('is-soon')) return;
@@ -521,13 +734,47 @@ export function initInventory({ gotoLanding, gotoCalendar, softRefresh=false } =
 
       minus?.addEventListener('click', () => {
         if (card.classList.contains('is-soon')) return;
+        if (qtyInput) qtyInput.blur();
         handleDec(eq);
       });
       plus?.addEventListener('click', () => {
         if (card.classList.contains('is-soon')) return;
+        if (qtyInput) qtyInput.blur();
         handleInc(eq);
       });
-    });
+    
+// Allow typing a quantity directly. Rounds UP to the nearest increment.
+if (qtyInput){
+  qtyInput.addEventListener('focus', () => { qtyInput.select?.(); });
+
+  qtyInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter'){
+      e.preventDefault();
+      const desired = desiredQtyFromTyped(eq, qtyInput.value);
+      setQty(String(eq.id), desired);
+      qtyInput.blur();
+    }
+    if (e.key === 'Escape'){
+      e.preventDefault();
+      qtyInput.value = String(cartQty(String(eq.id)) || 0);
+      qtyInput.blur();
+    }
+  });
+
+  qtyInput.addEventListener('blur', async () => {
+    const desired = desiredQtyFromTyped(eq, qtyInput.value);
+    if (desired === 0){
+      const cur0 = cartQty(String(eq.id));
+      if (cur0 > 0){
+        const ok = await confirmRemove(eq);
+        if (!ok) { qtyInput.value = String(cur0); return; }
+      }
+    }
+    setQty(String(eq.id), desired);
+    qtyInput.value = String(cartQty(String(eq.id)) || 0);
+  });
+}
+});
 
     renderContinueState();
     renderSummaryAndTotals();

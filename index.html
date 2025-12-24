@@ -4,10 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Rent Some Chairs</title>
-  <link rel="stylesheet" href="styles.css?v=fix19" />
+  <link rel="stylesheet" href="styles.css?v=fix34" />
 </head>
 <body>
-  <div id="buildTag" style="position:fixed;bottom:10px;right:10px;z-index:9999;font-size:12px;opacity:.7;pointer-events:none;">fix17</div>
+  <div id="buildTag" style="position:fixed;bottom:10px;right:10px;z-index:9999;font-size:12px;opacity:.7;pointer-events:none;">fix23</div>
 
   <!-- DEV: Reset Session Button -->
   <button id="devResetSession" class="dev-reset" title="Dev: Reset session">
@@ -30,16 +30,6 @@
           <div class="brand-subtitle">Local chair rentals</div>
         </div>
       </div>
-
-      <div class="flowbar-right">
-        <button class="btn btn-ghost topbar-btn" id="btnFlowLogin" type="button">Login</button>
-        <button class="btn btn-ghost topbar-btn hidden" id="btnFlowProfile" type="button">Profile</button>
-        <button class="btn btn-ghost topbar-btn hidden" id="btnFlowSignOut" type="button">Sign out</button>
-        <button class="btn btn-ghost topbar-btn hidden" id="btnFlowAdmin" type="button">Admin</button>
-        <div class="status-pill" id="statusPill">
-          <span class="status-dot"></span>
-          <span id="statusText">Not signed in</span>
-        </div>
       </div>
     </div>
 
@@ -51,7 +41,19 @@
         <button class="flowstep" data-step="review" type="button"><span class="dot"></span>Review</button>
       </nav>
 
-      <aside class="flowsummary" aria-label="Order summary">
+
+
+      <div class="flowbar-right">
+        <button class="btn btn-ghost topbar-btn" id="btnFlowLogin" type="button">Login</button>
+        <button class="btn btn-ghost topbar-btn hidden" id="btnFlowProfile" type="button">Profile</button>
+        <button class="btn btn-ghost topbar-btn hidden" id="btnFlowSignOut" type="button">Sign out</button>
+        <button class="btn btn-ghost topbar-btn hidden" id="btnFlowAdmin" type="button">Admin</button>
+        <div class="status-pill" id="statusPill">
+          <span class="status-dot"></span>
+          <span id="statusText">Not signed in</span>
+        </div>
+
+  <aside class="flowsummary" aria-label="Order summary">
         <div class="flowsummary-title">Order Summary</div>
         <div class="flowsummary-lines" id="flowSummaryLines">No items selected.</div>
         <div class="flowsummary-meta">
@@ -792,7 +794,7 @@
 
   </main>
 
-  <script type="module" src="js/app.js?v=fix19"></script>
+  <script type="module" src="js/app.js?v=fix36"></script>
 
     <!-- Annual Date Picker Modal -->
     <div class="modal hidden" id="annualModal" aria-hidden="true">

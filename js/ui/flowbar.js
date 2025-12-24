@@ -100,7 +100,7 @@ export function updateFlowSummary(){
 
   // Control which flow steps are clickable based on progress.
   const cartHasQty = cart.some(ci => Number(ci.qty || 0) > 0);
-  const hasDate = dates.length > 0;
+  const hasDate = annual ? (dates.length === 5) : (dates.length > 0);
   const addr = checkout?.address || null;
   const hasAddress = !!(addr && (addr.street || addr.address1 || '').trim());
   const canDate = cartHasQty;
