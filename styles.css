@@ -220,6 +220,14 @@ label{
   cursor:pointer;
   transition: transform .06s ease, border-color .15s ease, background .15s ease;
 }
+
+/* Landing: make "View Catalog & Pricing" more prominent */
+.btn.btn-catalog{
+  padding: 14px 18px;
+  font-size: 16px;
+  font-weight: 800;
+  border-radius: 14px;
+}
 .btn:hover{ border-color: rgba(122,162,255,.55); background: rgba(122,162,255,.10); }
 .btn:active{ transform: translateY(1px); }
 .btn:disabled{ opacity:.55; cursor:not-allowed; }
@@ -663,6 +671,47 @@ label{
   font-size: 12px;
   line-height: 1.4;
   opacity: .9;
+}
+
+/* Member pricing upsell block (used inside the page-level summaries) */
+.inv-member{
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,.10);
+}
+.inv-member-row{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:10px;
+}
+.inv-member-label{ color: var(--muted); font-size: 12px; font-weight: 850; }
+.inv-member-value{ font-weight: 980; font-size: 16px; letter-spacing: -.2px; }
+.inv-member-save{
+  margin-top: 8px;
+  color: rgba(255,255,255,.86);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* Shared side-by-side layout for step pages (Calendar / Address) */
+.step-layout{
+  display:flex;
+  align-items:flex-start;
+  gap:18px;
+}
+.step-layout > :first-child{
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.step-layout .inv-side{
+  width: 340px;
+  position: sticky;
+  top: 92px;
+}
+@media (max-width: 980px){
+  .step-layout{ flex-direction: column; }
+  .step-layout .inv-side{ width:auto; position: static; }
 }
 
 @media (max-width: 980px){
@@ -2260,6 +2309,11 @@ body.is-admin
   margin-top: 12px;
 }
 
+/* Password input row with show/hide toggle (signup modal) */
+.pw-row{ display:flex; align-items:center; gap:8px; }
+.pw-row .input{ flex:1 1 auto; }
+.pw-toggle{ padding:10px 12px; border-radius:12px; width:auto; }
+
 /* Generic UI modal: keep actions visible even when content is long */
 #uiModal .modal-card{
   max-height: 88vh;
@@ -2690,8 +2744,8 @@ body.is-admin
 /* Categories */
 .cat-preview{margin-top:8px;display:flex;align-items:center;gap:10px;}
 .cat-preview img{width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid rgba(255,255,255,.12);} 
-.inv-cats{display:flex;gap:10px;overflow:auto;padding:10px 2px 14px 2px;margin-bottom:10px;}
-.inv-cat-btn{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);cursor:pointer;}
+.inv-cats{display:flex;gap:6px;overflow:auto;padding:6px 2px 0 2px;margin-bottom:14px;border-bottom:1px solid rgba(255,255,255,.14);}
+.inv-cat-btn{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:14px 14px 0 0;border:1px solid rgba(255,255,255,.14);border-bottom:none;background:rgba(255,255,255,.04);cursor:pointer;position:relative;top:1px;}
 .inv-cat-btn.active{border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.10);} 
 .inv-cat-img{width:28px;height:28px;border-radius:10px;object-fit:cover;border:1px solid rgba(255,255,255,.12);} 
 .inv-cat-name{font-weight:700;font-size:.95rem;white-space:nowrap;}
@@ -2727,3 +2781,24 @@ select.input option{
   background: rgb(10,10,18);
   color: var(--text);
 }
+
+/* --- Catalog (public gallery) --- */
+.hero-cta-row{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;}
+
+.cat-wrap{padding:10px 0;}
+.cat-header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:6px 0 14px;}
+.cat-title{font-size:22px;font-weight:800;}
+.cat-sub{color: var(--muted);font-size:14px;max-width:620px;}
+.cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;}
+.cat-card{background: rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);border-radius:14px;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;}
+.cat-card:focus{outline:2px solid rgba(255,255,255,.30);outline-offset:2px;}
+.cat-thumb{height:160px;background: rgba(255,255,255,.04);display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.cat-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.cat-ph{font-size:40px;opacity:.85;}
+.cat-body{padding:12px;display:flex;flex-direction:column;gap:10px;}
+.cat-name{font-weight:800;}
+.cat-prices{display:flex;flex-direction:column;gap:2px;}
+.cat-price-main{font-size:16px;font-weight:800;}
+.cat-price-sub{font-size:14px;color: var(--muted);}
+/* Gallery CTA: slightly smaller so the card breathes */
+.cat-cta{width:100%;padding:9px 12px;font-size:13px;}

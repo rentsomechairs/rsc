@@ -59,6 +59,9 @@
         <div class="flowsummary-meta">
           <div><span class="muted">Date:</span> <span id="flowSummaryDate">—</span></div>
           <div class="flowsummary-total"><span class="muted">Total:</span> <span id="flowSummaryTotal">$0.00</span></div>
+          <div id="flowSummaryMemberWrap" class="flowsummary-total hidden" style="margin-top:6px;">
+            <span class="muted">Member total:</span> <span id="flowSummaryMember">$0.00</span>
+          </div>
         </div>
       </aside>
     </div>
@@ -76,6 +79,10 @@
           <p class="subhead">
             Reserve what you need in minutes. We’ll handle delivery and pickup so you can focus on your event.
           </p>
+
+          <div class="hero-cta-row">
+            <button class="btn btn-primary btn-catalog" id="btnViewCatalog" type="button">View Catalog &amp; Pricing</button>
+          </div>
 
           <div class="feature-row" aria-label="Highlights">
             <div class="feature-line">
@@ -134,21 +141,19 @@
                   <label>Password</label>
                   <input class="input" id="passInput" type="password" placeholder="••••••••" />
                 </div>
+                <div>
+                  <label>Confirm password <span class="muted" style="font-size:11px;">(sign up)</span></label>
+                  <input class="input" id="passConfirmInput" type="password" placeholder="••••••••" />
+                </div>
               </div>
               <button class="btn btn-good" id="btnEmailLogin">Continue</button>
 
               <div class="divider"><span>or</span></div>
 
               <div class="section-title">Continue as Guest</div>
-              <button class="btn btn-ghost" id="btnGuestToggle" type="button" aria-expanded="false">
-                Continue as Guest <span class="chev" aria-hidden="true">▾</span>
+              <button class="btn btn-ghost" id="btnGuestToggle" type="button">
+                Continue as Guest
               </button>
-
-              <div class="guest-panel" id="guestPanel">
-                <label>Email for confirmation</label>
-                <input class="input" id="guestEmail" type="email" placeholder="guest@example.com" />
-                <button class="btn btn-good" id="btnGuestContinue" type="button">Continue</button>
-              </div>
 
               <div id="gmailHelper" class="helper subtle"></div>
             </div>
@@ -157,8 +162,24 @@
       </section>
     </section>
 
+    <!-- CATALOG (public) -->
+    <section id="pageCatalog" class="hidden">
+      <section class="cat-wrap">
+        <div class="cat-header">
+          <div>
+            <div class="cat-title">Catalog</div>
+            <div class="cat-sub">Browse inventory first — you can enter your details at checkout.</div>
+          </div>
+          <div class="cat-actions">
+            <button class="btn btn-ghost" id="btnCatBack" type="button">Back</button>
+          </div>
+        </div>
+
+        <div class="cat-grid" id="catGrid"></div>
+      </section>
+    </section>
+
     <!-- INVENTORY -->
-    
 <section id="pageInventory" class="hidden">
   <section class="inv-wrap">
     <div class="inv-header">
@@ -189,6 +210,15 @@
           <div class="inv-side-total">
             <div class="inv-side-total-label">Estimated total</div>
             <div class="inv-side-total-value" id="invTotal">$0.00</div>
+          </div>
+
+          <div class="inv-member hidden" id="invMemberWrap">
+            <div class="inv-member-row">
+              <div class="inv-member-label">Member total</div>
+              <div class="inv-member-value" id="invMemberTotal">$0.00</div>
+            </div>
+            <div class="inv-member-save" id="invMemberSaveText">Sign up to unlock member pricing.</div>
+            <button class="btn btn-good" id="btnInvSignup" type="button" style="width:100%; margin-top:10px;">Sign up</button>
           </div>
 
           <div class="inv-side-note">
@@ -226,7 +256,8 @@
           </div>
         </div>
 
-        <div class="cal-shell">
+        <div class="step-layout">
+          <div class="cal-shell">
           <div class="cal-topbar">
             <button class="cal-nav" id="btnCalPrev" type="button">‹</button>
             <div class="cal-month" id="calMonthLabel">Month</div>
@@ -250,6 +281,34 @@
           </div>
         </div>
 <div class="cal-grid" id="calGrid"></div>
+          </div>
+
+          <aside class="inv-side" aria-label="Order summary">
+            <div class="inv-side-card">
+              <div class="inv-side-title">Order Summary</div>
+              <div class="inv-side-sub" id="calSideHint">Your selections so far.</div>
+
+              <div class="inv-side-lines" id="calSideLines"></div>
+
+              <div class="inv-side-total">
+                <div class="inv-side-total-label">Estimated total</div>
+                <div class="inv-side-total-value" id="calSideTotal">$0.00</div>
+              </div>
+
+              <div class="inv-member hidden" id="calMemberWrap">
+                <div class="inv-member-row">
+                  <div class="inv-member-label">Member total</div>
+                  <div class="inv-member-value" id="calMemberTotal">$0.00</div>
+                </div>
+                <div class="inv-member-save" id="calMemberSaveText">Sign up to unlock member pricing.</div>
+                <button class="btn btn-good" id="btnCalSignup" type="button" style="width:100%; margin-top:10px;">Sign up</button>
+              </div>
+
+              <div class="inv-side-note">
+                Taxes, delivery, and coupons apply later at checkout.
+              </div>
+            </div>
+          </aside>
         </div>
 
         
@@ -278,8 +337,9 @@
           </div>
         </div>
 
-        <div class="addr-card">
-          <div class="addr-grid">
+        <div class="step-layout">
+          <div class="addr-card">
+            <div class="addr-grid">
             <label class="field">
               <span class="label">Street address</span>
               <input id="addrStreet" class="input" placeholder="123 Main St" autocomplete="street-address">
@@ -304,7 +364,35 @@
               <span class="label">Notes for delivery (optional)</span>
               <input id="addrNotes" class="input" placeholder="Gate code, back entrance, etc.">
             </label>
+            </div>
           </div>
+
+          <aside class="inv-side" aria-label="Order summary">
+            <div class="inv-side-card">
+              <div class="inv-side-title">Order Summary</div>
+              <div class="inv-side-sub" id="addrSideHint">Your selections so far.</div>
+
+              <div class="inv-side-lines" id="addrSideLines"></div>
+
+              <div class="inv-side-total">
+                <div class="inv-side-total-label">Estimated total</div>
+                <div class="inv-side-total-value" id="addrSideTotal">$0.00</div>
+              </div>
+
+              <div class="inv-member hidden" id="addrMemberWrap">
+                <div class="inv-member-row">
+                  <div class="inv-member-label">Member total</div>
+                  <div class="inv-member-value" id="addrMemberTotal">$0.00</div>
+                </div>
+                <div class="inv-member-save" id="addrMemberSaveText">Sign up to unlock member pricing.</div>
+                <button class="btn btn-good" id="btnAddrSignup" type="button" style="width:100%; margin-top:10px;">Sign up</button>
+              </div>
+
+              <div class="inv-side-note">
+                Taxes, delivery, and coupons apply later at checkout.
+              </div>
+            </div>
+          </aside>
         </div>
 
         <div class="addr-footnote" id="addrFootnote">

@@ -10,6 +10,17 @@ export const ADMIN = { email: "r@g.com", password: "1" };
 function nowIso(){ return new Date().toISOString(); }
 function uid(prefix){ return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`; }
 
+// Guest sessions are anonymous and should not require an email up-front.
+// We generate a unique userId (scopes cart/checkout keys) plus a friendly label.
+export function createGuestSession(){
+  const userId = uid('guest');
+  const short = Math.random().toString(36).slice(2,8).toUpperCase();
+  const label = `Guest#${short}`;
+  const sess = { userId, email: label, role: 'guest' };
+  setSession(sess);
+  return sess;
+}
+
 function seedDb(){
   return {
     users: [{ id:"admin_1", email: ADMIN.email, password: ADMIN.password, role:"admin", createdAt: nowIso() }],
@@ -492,4 +503,37 @@ export function patchPrefs(patch, session){
 
 export function clearCheckout(session){
   localStorage.removeItem(scopedKey(CHECKOUT_KEY, session));
+}
+
+/* ---------- Guest → User upgrade (preserve in-progress order) ---------- */
+export function migrateSessionData(fromSession, toSession){
+  if (!fromSession || !toSession) return;
+  // Copy scoped cart/checkout/prefs from one session keyspace to another.
+  try {
+    const cart = getCart(fromSession);
+    if (Array.isArray(cart)) setCart(cart, toSession);
+  } catch {}
+  try {
+    const checkout = getCheckout(fromSession);
+    if (checkout && typeof checkout === 'object') setCheckout(checkout, toSession);
+  } catch {}
+  try {
+    const prefs = getPrefs(fromSession);
+    if (prefs && typeof prefs === 'object') setPrefs(prefs, toSession);
+  } catch {}
+
+  // Clean up the old scoped keys (optional but prevents orphaned storage).
+  try { clearCart(fromSession); } catch {}
+  try { clearCheckout(fromSession); } catch {}
+  try { localStorage.removeItem(scopedKey(PREF_KEY, fromSession)); } catch {}
+}
+
+export function upgradeGuestToUser(email, password){
+  const cur = getSession();
+  if (!cur || cur.role !== 'guest') return null;
+  const u = upsertUser(String(email||'').trim(), String(password||''), 'user');
+  const next = { userId: u.id, email: u.email, role: 'user' };
+  migrateSessionData(cur, next);
+  setSession(next);
+  return next;
 }

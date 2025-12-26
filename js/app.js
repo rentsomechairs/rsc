@@ -1,5 +1,6 @@
-export const BUILD_TAG = '3.6.1-fix19';
+export const BUILD_TAG = '3.6.1-fix20';
 import { initLanding } from './pages/landing.js';
+import { initCatalog } from './pages/catalog.js';
 import { initAdmin } from './pages/admin.js';
 import { initInventory } from './pages/inventory.js';
 import { initCalendar } from './pages/calendar.js';
@@ -12,6 +13,7 @@ import { setActiveStep, updateFlowSummary, wireFlowbarNav } from './ui/flowbar.j
 const landing = document.getElementById('pageLanding');
 const admin = document.getElementById('pageAdmin');
 const inventory = document.getElementById('pageInventory');
+const catalog = document.getElementById('pageCatalog');
 const calendar = document.getElementById('pageCalendar');
 const address = document.getElementById('pageAddress');
 const review = document.getElementById('pageReview');
@@ -45,6 +47,7 @@ let adminInitialized = false;
 
 function route(page){
   landing.classList.toggle('hidden', page !== 'landing');
+  catalog?.classList.toggle('hidden', page !== 'catalog');
   admin.classList.toggle('hidden', page !== 'admin');
   inventory.classList.toggle('hidden', page !== 'inventory');
   calendar.classList.toggle('hidden', page !== 'calendar');
@@ -56,6 +59,7 @@ function route(page){
 }
 
 function gotoLanding(){ location.hash = ''; showLanding(); }
+function gotoCatalog(){ location.hash = '#catalog'; showCatalog(); }
 function gotoAdmin(){ location.hash = '#admin'; showAdmin(); }
 function gotoInventory(){ location.hash = '#inventory'; showInventory(); }
 function gotoCalendar(){ location.hash = '#calendar'; showCalendar(); }
@@ -68,7 +72,14 @@ function showLanding(){
   route('landing');
   setActiveStep('');
   updateFlowSummary();
-  initLanding({ gotoAdmin, gotoInventory });
+  initLanding({ gotoAdmin, gotoInventory, gotoCatalog });
+}
+
+function showCatalog(){
+  route('catalog');
+  setActiveStep('');
+  updateFlowSummary();
+  initCatalog({ gotoLanding, gotoInventory, gotoCatalog });
 }
 
 function showAdmin(){
@@ -83,7 +94,8 @@ function showInventory(){
   route('inventory');
   setActiveStep('inventory');
   updateFlowSummary();
-  initInventory({ gotoLanding, gotoCalendar, softRefresh: true });
+  // Back from inventory returns to the catalog/gallery.
+  initInventory({ gotoLanding: gotoCatalog, gotoCalendar, softRefresh: true });
 }
 
 function showCalendar(){
@@ -104,7 +116,14 @@ function showReview(){
   route('review');
   setActiveStep('review');
   updateFlowSummary();
-  initReview({ gotoAddress, gotoDone: gotoLanding });
+  initReview({
+    gotoAddress,
+    gotoDone: () => {
+      try { sessionStorage.setItem('rsc_profile_tab', 'orders'); } catch {}
+      location.hash = '#profile';
+      showProfile();
+    }
+  });
 }
 
 function showProfile(){
@@ -167,6 +186,16 @@ function handleRoute(){
     return;
   }
 
+  if (hash === '#catalog') {
+    // Catalog is publicly viewable; selecting an item will create a guest session.
+    return showCatalog();
+  }
+
+  if (hash === '#catalog') {
+    // Catalog is public; it can create a guest session when the user picks an item.
+    return showCatalog();
+  }
+
   if (hash === '#inventory') {
     if (needsAuth(session)) return showInventory();
     location.hash = '';
@@ -196,7 +225,8 @@ function handleRoute(){
     showAddress();
     return;
   }
-  if (needsAuth(session) && !hash) return showProfile();
+  // Default signed-in landing is the catalog/gallery (profile is reachable via flowbar)
+  if (needsAuth(session) && !hash) return showCatalog();
   showLanding();
 }
 

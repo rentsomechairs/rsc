@@ -1,5 +1,6 @@
-import { listEquipment, listCategories, readDb, writeDb, getCart, getCheckout, setCheckout, getPrefs, patchPrefs } from '../db.js';
+import { listEquipment, listCategories, readDb, writeDb, getCart, getCheckout, setCheckout, getPrefs, patchPrefs, getSession } from '../db.js';
 import { updateFlowSummary } from '../ui/flowbar.js';
+import { computeTotals, wireGuestSignup } from '../ui/memberUpsell.js';
 
 function esc(s){
   return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -167,6 +168,8 @@ function calcAnnualSavings(){
 }
 
 export function initCalendar({ gotoInventory, gotoNext } = {}){
+  let session = getSession();
+  let isGuest = session?.role === 'guest';
   // Main refs
   const weekdays = document.getElementById('calWeekdays');
   const grid = document.getElementById('calGrid');
@@ -179,6 +182,14 @@ export function initCalendar({ gotoInventory, gotoNext } = {}){
   const btnContinueBottom = document.getElementById('btnCalContinueBottom');
   const foot = document.getElementById('calFootnote');
   const shell = document.querySelector('.cal-shell');
+
+  // Side summary refs (right column)
+  const sideLines = document.getElementById('calSideLines');
+  const sideTotal = document.getElementById('calSideTotal');
+  const memberWrap = document.getElementById('calMemberWrap');
+  const memberTotalEl = document.getElementById('calMemberTotal');
+  const memberSaveTextEl = document.getElementById('calMemberSaveText');
+  const btnSignup = document.getElementById('btnCalSignup');
 
   // Wire bottom nav buttons to match top buttons
   if (btnBackBottom) btnBackBottom.onclick = () => btnBack?.click();
@@ -198,6 +209,73 @@ export function initCalendar({ gotoInventory, gotoNext } = {}){
   const annualSavings = document.getElementById('calAnnualSavings');
   const annualDates = document.getElementById('calAnnualDates');
   const annualSaveInline = document.getElementById('annualSaveInline');
+
+  function renderSideSummary(){
+    if (!sideLines || !sideTotal) return;
+    const cart = getCart(session);
+    const equipment = listEquipment();
+    const parts = [];
+    sideLines.innerHTML = '';
+    for (const ci of cart){
+      const eq = equipment.find(e => String(e.id)===String(ci.id));
+      if (!eq) continue;
+      const qty = Number(ci.qty||0);
+      const row = document.createElement('div');
+      row.className = 'inv-line';
+      row.innerHTML = `<div class="inv-line-top"><div><div class="inv-line-name">${esc(eq.name)}</div><div class="inv-line-qty">Qty: <strong>${qty}</strong></div></div></div>`;
+      sideLines.appendChild(row);
+      parts.push(`${eq.name}: ${qty}`);
+    }
+
+    const totals = (isGuest ? computeTotals({ roleOverride: 'guest' }) : computeTotals({ roleOverride: session?.role || 'user' }));
+    sideTotal.textContent = money(isGuest ? totals.guestTotal : totals.memberTotal);
+
+    if (memberWrap && memberTotalEl && memberSaveTextEl){
+      if (isGuest && cart.length){
+        memberWrap.classList.remove('hidden');
+        memberTotalEl.textContent = money(totals.memberTotal);
+        memberSaveTextEl.innerHTML = totals.save > 0
+          ? `Sign up for free now and save <strong>${money(totals.save)}</strong> on this order.`
+          : `Sign up for free to unlock member pricing and order tracking.`;
+      } else {
+        memberWrap.classList.add('hidden');
+      }
+    }
+  }
+
+  // Guest signup (order preserved; pricing updates in-place)
+  wireGuestSignup({
+    button: btnSignup,
+    onUpgraded: () => {
+      session = getSession();
+      isGuest = session?.role === 'guest';
+      // If user just upgraded, unhide the annual option.
+      if (!isGuest && chkAnnual){
+        const host = chkAnnual.closest('.cal-annual-toggle') || chkAnnual.parentElement;
+        if (host) host.style.display = '';
+      }
+      updateFlowSummary();
+      renderSideSummary();
+    }
+  });
+
+  // Guests cannot book 5-year/annual yet (signup required)
+  if (isGuest && chkAnnual){
+    // Hide the annual checkbox entirely for guests.
+    chkAnnual.checked = false;
+    const host = chkAnnual.closest('.cal-annual-toggle') || chkAnnual.parentElement;
+    if (host) host.style.display = 'none';
+    // Replace with a simple note.
+    if (shell && !shell.querySelector('.guest-annual-note')){
+      const note = document.createElement('div');
+      note.className = 'guest-annual-note muted';
+      note.style.fontSize = '12px';
+      note.style.marginTop = '10px';
+      note.textContent = 'Sign up to unlock a 5-year booking option with a larger discount.';
+      // Place near the footer so it reads like an informational constraint.
+      (foot || shell).appendChild(note);
+    }
+  }
 
   // Modal refs
   const modal = document.getElementById('annualModal');
@@ -364,6 +442,7 @@ setTimeout(() => {
       timesByDate: timesByDate || {}
     });
     updateFlowSummary?.();
+    renderSideSummary?.();
   }
 
   function setAnnualShell(){
@@ -372,6 +451,13 @@ setTimeout(() => {
   }
 
   function renderAnnualInline(){
+    if (isGuest){
+      if (annualSaveInline) annualSaveInline.textContent = '$—';
+      if (annualSavings){
+        annualSavings.textContent = 'Sign up now to see an option to book for 5 years for a larger discount.';
+      }
+      return;
+    }
     const save = calcAnnualSavings();
     if (annualSaveInline){
       annualSaveInline.textContent = save ? money(save.save) : '$—';
@@ -462,6 +548,9 @@ setTimeout(() => {
     // If we're already in annual mode, just proceed (annual flow continues through the steps)
     if (annualMode) return proceedToNext();
 
+    // Guests cannot book the 5-year option yet; skip the annual prompt entirely.
+    if (isGuest) return proceedToNext();
+
     // Prompt for the 5-year promo right before leaving the calendar (after date + time selection)
     const prefs = getPrefs();
     if (prefs?.annualUpsellOff) return proceedToNext();
@@ -469,6 +558,8 @@ setTimeout(() => {
     const saveObj = calcAnnualSavings();
     const save = Number(saveObj?.save || 0);
     if (save <= 0) return proceedToNext();
+
+    // (guest handled above)
 
     openUiModal({
       title: 'Annual event?',
@@ -711,6 +802,7 @@ el.addEventListener('mouseleave', hideTip);
           const saveObj = calcAnnualSavings();
           const save = Number(saveObj?.save || 0);
           if (save <= 0) return proceedToNext();
+          if (isGuest) return proceedToNext();
           openUiModal({
             title: 'Annual event?',
             bodyHtml: `Is your event annual? Save <strong>${money(save)}</strong> by booking the next 5 years.<div style="margin-top:10px;display:flex;gap:10px;align-items:center;"><input type="checkbox" id="annualDontShow"/><label for="annualDontShow" class="muted-inline">Do not show this again</label></div>`,
@@ -904,6 +996,7 @@ el.addEventListener('mouseleave', hideTip);
           const saveObj = calcAnnualSavings();
           const save = Number(saveObj?.save || 0);
           if (save <= 0) return proceedToNext();
+          if (isGuest) return proceedToNext();
           openUiModal({
             title: 'Annual event?',
             bodyHtml: `Is your event annual? Save <strong>${money(save)}</strong> by booking the next 5 years.<div style="margin-top:10px;display:flex;gap:10px;align-items:center;"><input type="checkbox" id="annualDontShow"/><label for="annualDontShow" class="muted-inline">Do not show this again</label></div>`,
@@ -959,6 +1052,18 @@ el.addEventListener('mouseleave', hideTip);
   if (chkAnnual){
     chkAnnual.checked = annualMode;
     chkAnnual.addEventListener('change', () => {
+      if (isGuest){
+        // Guests can't enable annual mode yet
+        chkAnnual.checked = false;
+        annualMode = false;
+        openUiModal({
+          title: '5-year booking',
+          bodyHtml: `Sign up now to see an option to book for 5 years for a larger discount.`,
+          actions: [ { label: 'OK', className: 'btn btn-primary' } ]
+        });
+        renderAll();
+        return;
+      }
       annualMode = chkAnnual.checked;
 
       // When turning annual ON, keep the currently selected first date (and times) if possible.
@@ -992,6 +1097,9 @@ el.addEventListener('mouseleave', hideTip);
   renderAnnualInline();
   renderAnnualPickers();
   updateContinue();
+
+  updateFlowSummary();
+  renderSideSummary();
 
   if (!annualMode) renderMain();
   else foot.textContent = 'Pick your annual dates below.';

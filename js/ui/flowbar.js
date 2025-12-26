@@ -1,4 +1,4 @@
-import { listEquipment, getCart, getCheckout } from '../db.js';
+import { listEquipment, getCart, getCheckout, getSession, upgradeGuestToUser } from '../db.js';
 
 function formatDateDisplay(iso){
   if (!iso) return '—';
@@ -86,7 +86,13 @@ export function updateFlowSummary(){
   const lines = document.getElementById('flowSummaryLines');
   const dateEl = document.getElementById('flowSummaryDate');
   const totalEl = document.getElementById('flowSummaryTotal');
+  const memberWrap = document.getElementById('flowSummaryMemberWrap');
+  const memberEl = document.getElementById('flowSummaryMember');
+  // Signup/upsell is no longer shown in the flowbar summary.
+  const upsellBox = document.getElementById('flowSummaryUpsell');
   if (!lines || !dateEl || !totalEl) return;
+
+  const sess = getSession();
 
   const checkout = getCheckout();
   const annual = !!checkout?.annual;
@@ -122,6 +128,8 @@ export function updateFlowSummary(){
   if (!cart.length){
     lines.textContent = 'No items selected.';
     totalEl.textContent = money(0);
+    if (memberWrap) memberWrap.classList.add('hidden');
+    if (upsellBox) upsellBox.classList.add('hidden');
     return;
   }
 
@@ -142,17 +150,41 @@ export function updateFlowSummary(){
   }
 const parts = [];
   let perDateTotal = 0;
+  let guestPerDateTotal = 0;
   for (const ci of cart){
     const eq = equipment.find(e => String(e.id) === String(ci.id));
     if (!eq) continue;
     const qty = Number(ci.qty||0);
     parts.push(`${eq.name}: ${qty}`);
-    const unit = unitPriceForQty(eq.pricingTiers, qty);
+    const unit = unitPriceForQty(eq.pricingTiers, qty); // member tier pricing
     if (unit != null) perDateTotal += unit * qty;
+    // Guest pricing = highest tier (flat)
+    const tiers = normalizeTiers(eq.pricingTiers);
+    const guestUnit = tiers.length ? tiers[0].priceEach : null;
+    if (guestUnit != null) guestPerDateTotal += guestUnit * qty;
   }
 
   lines.textContent = parts.join(' • ');
-    if (annual){
+
+  // Totals & guest upsell block
+  if (sess?.role === 'guest'){
+    // Guest total displayed as the primary total.
+    const guestTotal = annual ? (annualPromoTotal(cart, equipment, 5).promo) : guestPerDateTotal;
+    const memberTotal = annual ? (annualPromoTotal(cart, equipment, 5).normal) : perDateTotal;
+    totalEl.textContent = money(guestTotal);
+    if (memberWrap && memberEl){
+      memberWrap.classList.remove('hidden');
+      memberEl.textContent = money(memberTotal);
+    }
+    // No signup prompt here (moved to page-level summaries).
+    if (upsellBox) upsellBox.classList.add('hidden');
+    return;
+  }
+
+  // Non-guest (member/admin): show tier totals only
+  if (memberWrap) memberWrap.classList.add('hidden');
+  if (upsellBox) upsellBox.classList.add('hidden');
+  if (annual){
     const promo = annualPromoTotal(cart, equipment, 5);
     totalEl.textContent = money(promo.promo);
   } else {

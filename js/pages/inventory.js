@@ -1,5 +1,6 @@
 import { listEquipment, listCategories, getCart, setCart, getSession, getPrefs, patchPrefs } from '../db.js';
 import { updateFlowSummary } from '../ui/flowbar.js';
+import { computeTotals, wireGuestSignup } from '../ui/memberUpsell.js';
 
 function esc(s){
   return String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -52,6 +53,17 @@ function unitPriceForQty(pricingTiers, qty){
   // If qty is smaller than the smallest tier's minQty, use the smallest tier as base price.
   if (!chosen && tiers.length) chosen = tiers[0];
   return chosen ? chosen.priceEach : null;
+}
+
+function unitPriceForQtyGuestFlat(pricingTiers){
+  const mm = minMaxPrice(pricingTiers);
+  return mm ? mm.max : null;
+}
+
+function unitPriceForSession(pricingTiers, qty, session){
+  const role = session?.role || '';
+  if (role === 'guest') return unitPriceForQtyGuestFlat(pricingTiers);
+  return unitPriceForQty(pricingTiers, qty);
 }
 
 function minMaxPrice(pricingTiers){
@@ -138,12 +150,17 @@ export function initInventory({ gotoLanding, gotoCalendar, softRefresh=false } =
   const upsellBox = document.getElementById('invUpsell');
   const catsBar = document.getElementById('invCats');
 
+  const memberWrap = document.getElementById('invMemberWrap');
+  const memberTotalEl = document.getElementById('invMemberTotal');
+  const memberSaveTextEl = document.getElementById('invMemberSaveText');
+  const btnSignup = document.getElementById('btnInvSignup');
+
   const btnBackBottom = document.getElementById('btnInvBackBottom');
   const btnContinueBottom = document.getElementById('btnInvContinueBottom');
 
   if (!grid || !summary || !btnBack || !btnContinue) return;
 
-  const session = getSession() || undefined;
+  let session = getSession() || undefined;
   const categories = listCategories();
   const equipment = listEquipment();
   let cart = getCart(session);
@@ -151,7 +168,12 @@ export function initInventory({ gotoLanding, gotoCalendar, softRefresh=false } =
   // category filter
   let activeCatId = (getPrefs()?.inventoryCategoryId) || '';
 
-
+  // Inventory is organized into category tabs. If no category is selected yet,
+  // default to the first available category.
+  if (!activeCatId && categories.length){
+    activeCatId = String(categories[0].id);
+    patchPrefs({ inventoryCategoryId: activeCatId });
+  }
 
   function inferCatIdFromLegacy(legacy){
     const v = String(legacy||"").toLowerCase();
@@ -167,23 +189,42 @@ export function initInventory({ gotoLanding, gotoCalendar, softRefresh=false } =
   function eqCatId(eq){
     return eq.categoryId || inferCatIdFromLegacy(eq.category);
   }
+
+  // If we arrived from the public catalog, auto-select the chosen item once.
+  let preselectId = null;
+  try { preselectId = sessionStorage.getItem('rsc_preselect_item'); } catch {}
+  if (preselectId){
+    const target = equipment.find(e => String(e.id) === String(preselectId));
+    if (target){
+      const cid = eqCatId(target);
+      if (cid) {
+        activeCatId = cid;
+        patchPrefs({ inventoryCategoryId: activeCatId });
+      }
+      const qtyAvail = Math.max(0, Math.floor(Number(target.quantity || 0)));
+      const increment = Math.max(1, Math.floor(Number(target.maxPerOrder || 1)));
+      const desired = Math.min(qtyAvail, increment);
+      if (desired > 0 && cartQty(String(target.id)) === 0){
+        cart = [...cart.filter(x => String(x.id) !== String(target.id)), { id: String(target.id), qty: desired }];
+        setCart(cart, session);
+      }
+    }
+    try { sessionStorage.removeItem('rsc_preselect_item'); } catch {}
+  }
+
   function renderCategoriesBar(){
     if (!catsBar) return;
     const cats = categories;
-    const allId = "__all__";
-    const buttons = [
-      { id: allId, name: "All", imageUrl: "" },
-      ...cats
-    ];
-    catsBar.innerHTML = buttons.map(c => {
-      const active = (activeCatId || allId) === c.id;
+    catsBar.setAttribute('role','tablist');
+    catsBar.innerHTML = cats.map(c => {
+      const active = String(activeCatId) === String(c.id);
       const img = c.imageUrl ? `<img class="inv-cat-img" src="${esc(c.imageUrl)}" alt="" />` : "";
-      return `<button class="inv-cat-btn ${active ? "active":""}" data-cat="${esc(c.id)}">${img}<span class="inv-cat-name">${esc(c.name)}</span></button>`;
+      return `<button role="tab" aria-selected="${active ? 'true':'false'}" class="inv-cat-btn ${active ? "active":""}" data-cat="${esc(c.id)}">${img}<span class="inv-cat-name">${esc(c.name)}</span></button>`;
     }).join("");
     catsBar.querySelectorAll("[data-cat]").forEach(btn => {
       btn.addEventListener("click", () => {
         const id = btn.getAttribute("data-cat");
-        activeCatId = (id === allId) ? "" : id;
+        activeCatId = id;
         patchPrefs({ inventoryCategoryId: activeCatId });
         renderCategoriesBar();
         render();
@@ -204,6 +245,18 @@ export function initInventory({ gotoLanding, gotoCalendar, softRefresh=false } =
   btnBack.onclick = () => gotoLanding?.();
   if (btnBackBottom) btnBackBottom.onclick = () => btnBack.click();
   if (btnContinueBottom) btnContinueBottom.onclick = () => btnContinue.click();
+
+  // Guest signup (order is preserved and pricing updates in-place)
+  wireGuestSignup({
+    button: btnSignup,
+    onUpgraded: () => {
+      session = getSession() || undefined;
+      cart = getCart(session);
+      updateFlowSummary();
+      renderSummaryAndTotals();
+      render();
+    }
+  });
 
   // ---- modal helper ----
   function openModal({ title, bodyHtml, actions=[] }){
@@ -322,6 +375,8 @@ export function initInventory({ gotoLanding, gotoCalendar, softRefresh=false } =
 
   function showUpsellOnContinue(){
     if (hideUpsell) return false;
+    // Guests do not receive tier pricing. We avoid signup popups here.
+    if (session?.role === 'guest') return false;
     const categories = listCategories();
 // Build a list of "next tier" offers for every cart item that can unlock a better unit price.
     const offers = [];
@@ -540,6 +595,7 @@ return true;
       if (linesWrap) linesWrap.innerHTML = '';
       if (totalEl) totalEl.textContent = money(0);
       if (sideHint) sideHint.textContent = 'Pick quantities to see totals.';
+      if (memberWrap) memberWrap.classList.add('hidden');
       return;
     }
 
@@ -556,13 +612,13 @@ return true;
       const maxSelectable = qtyAvail;
 
       const qty = Number(ci.qty || 0);
-      const unit = unitPriceForQty(eq.pricingTiers, qty);
+      const unit = unitPriceForSession(eq.pricingTiers, qty, session);
       const lineTotal = unit != null ? (unit * qty) : 0;
       total += lineTotal;
 
       parts.push(`${eq.name}: ${qty}`);
 
-      const upsell = computeUpsell(eq, qty, increment, maxSelectable);
+      const upsell = (session?.role === 'guest') ? null : computeUpsell(eq, qty, increment, maxSelectable);
 
       if (linesWrap){
         const div = document.createElement('div');
@@ -594,6 +650,20 @@ return true;
     summary.textContent = `Selected: ${parts.join(' • ')}`;
     if (totalEl) totalEl.textContent = money(total);
     if (sideHint) sideHint.textContent = 'Estimated item total (delivery/coupons later).';
+
+    // Guest: show member pricing preview + signup CTA in the page-level summary.
+    if (session?.role === 'guest'){
+      const totals = computeTotals({ roleOverride: 'guest' });
+      if (memberWrap && memberTotalEl && memberSaveTextEl){
+        memberWrap.classList.remove('hidden');
+        memberTotalEl.textContent = money(totals.memberTotal);
+        memberSaveTextEl.innerHTML = totals.save > 0
+          ? `Sign up for free now and save <strong>${money(totals.save)}</strong> on this order.`
+          : `Sign up for free to unlock member pricing and order tracking.`;
+      }
+    } else {
+      if (memberWrap) memberWrap.classList.add('hidden');
+    }
   }
 
   async function handleToggleSelect(eq){
@@ -669,7 +739,11 @@ return true;
       const mm = minMaxPrice(eq.pricingTiers);
       const badge = comingSoon
         ? `<span class="inv-badge soon">Coming Soon</span>`
-        : (mm ? `<span class="inv-badge">${money(mm.max)}/ea • As low as ${money(mm.min)}/ea</span>` : `<span class="inv-badge">Price TBD</span>`);
+        : (mm ? (
+            (session?.role === 'guest')
+              ? `<span class="inv-badge">${money(mm.max)}/ea <span class="muted">as a guest</span><br><span class="muted">As low as ${money(mm.min)}/ea when logged in</span></span>`
+              : `<span class="inv-badge">${money(mm.max)}/ea • As low as ${money(mm.min)}/ea</span>`
+          ) : `<span class="inv-badge">Price TBD</span>`);
 
       const img = eq.imageUrl
         ? `<img src="${esc(eq.imageUrl)}" alt="">`
@@ -781,6 +855,8 @@ if (qtyInput){
     renderUpsellCta();
   }
 
+  // Render category tabs before the grid so users can switch categories.
+  renderCategoriesBar();
   render();
   if (!softRefresh) updateFlowSummary();
 }

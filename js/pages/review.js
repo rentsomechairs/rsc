@@ -1,4 +1,4 @@
-import { listEquipment, getCart, clearCart, readDb, writeDb, getSession, getCheckout, clearCheckout } from '../db.js';
+import { listEquipment, getCart, clearCart, readDb, writeDb, getSession, getCheckout, clearCheckout, patchCheckout, upsertUser, setSession } from '../db.js';
 import { updateFlowSummary } from '../ui/flowbar.js';
 
 function formatDateDisplay(iso){
@@ -55,7 +55,23 @@ function unitPriceForQty(pricingTiers, qty){
   return chosen ? chosen.priceEach : null;
 }
 
-function annualPromoTotals(cart, equipment, datesCount){
+function minMaxPrice(pricingTiers){
+  const tiers = normalizeTiers(pricingTiers);
+  if (!tiers.length) return null;
+  const max = tiers[0].priceEach;
+  const min = tiers[tiers.length-1].priceEach;
+  return { min, max };
+}
+
+function unitPriceForSession(pricingTiers, qty, session){
+  if (session?.role === 'guest'){
+    const mm = minMaxPrice(pricingTiers);
+    return mm ? mm.max : null;
+  }
+  return unitPriceForQty(pricingTiers, qty);
+}
+
+function annualPromoTotals(cart, equipment, datesCount, unitPriceFn){
   const PROMO = 0.75;
   let normalPerDate = 0;
   let promoPerDate = 0;
@@ -64,7 +80,7 @@ function annualPromoTotals(cart, equipment, datesCount){
     const eq = equipment.find(e => String(e.id) === String(ci.id));
     if (!eq) continue;
     const qty = Number(ci.qty||0);
-    const unit = unitPriceForQty(eq.pricingTiers, qty);
+    const unit = unitPriceFn(eq.pricingTiers, qty);
     if (unit != null) normalPerDate += unit * qty;
 
     const name = (eq.name||'').toLowerCase();
@@ -94,6 +110,70 @@ export function initReview({ gotoAddress, gotoDone } = {}){
 
   if (!itemsEl || !dateEl || !addrEl || !totalEl || !btnBack || !btnPlace) return;
 
+  // ---- modal helper (shared global modal) ----
+  function openModal({ title, bodyHtml, actions=[] }){
+    const modal = document.getElementById('uiModal');
+    const backdrop = document.getElementById('uiModalBackdrop');
+    const closeBtn = document.getElementById('uiModalClose');
+    const t = document.getElementById('uiModalTitle');
+    const body = document.getElementById('uiModalBody');
+    const act = document.getElementById('uiModalActions');
+    if (!modal || !backdrop || !closeBtn || !t || !body || !act) return;
+
+    t.textContent = title || 'Modal';
+    body.innerHTML = bodyHtml || '';
+    act.innerHTML = '';
+
+    const close = () => {
+      modal.classList.add('hidden');
+      modal.setAttribute('aria-hidden','true');
+      closeBtn.onclick = null;
+      backdrop.onclick = null;
+    };
+
+    for (const a of actions){
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = a.className || 'btn btn-ghost';
+      b.textContent = a.label || 'OK';
+      b.onclick = () => {
+        try { a.onClick?.(); } finally { close(); }
+      };
+      act.appendChild(b);
+    }
+
+    closeBtn.onclick = close;
+    backdrop.onclick = close;
+
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden','false');
+  }
+
+  function promptGuestEmail(){
+    return new Promise(resolve => {
+      const existing = (getCheckout() || {}).guestEmail || '';
+      openModal({
+        title: 'Email for confirmation',
+        bodyHtml: `
+          <div style="margin-bottom:10px;">You’re checking out as a guest. Enter an email so we can send confirmation.</div>
+          <label>Email</label>
+          <input id="guestEmailFinal" class="input" type="email" placeholder="you@example.com" value="${existing.replace(/"/g,'&quot;')}">
+          <div class="muted" style="margin-top:8px;font-size:12px;">No password required for guest checkout.</div>
+        `,
+        actions: [
+          { label: 'Cancel', className: 'btn btn-ghost', onClick: () => resolve(null) },
+          { label: 'Continue', className: 'btn btn-good', onClick: () => {
+              const v = (document.getElementById('guestEmailFinal')?.value || '').trim();
+              if (!v || !v.includes('@')) { alert('Please enter a valid email.'); resolve(null); return; }
+              resolve(v);
+            } }
+        ]
+      });
+    });
+  }
+
+  // Signup prompts removed from review. Guests can upgrade any time from the order summary.
+
   const backHtml = `<div class="btn-main">Back</div><div class="btn-sub">to Address</div>`;
   const placeHtml = `<div class="btn-main">Place booking</div><div class="btn-sub">submit order</div>`;
   btnBack.innerHTML = backHtml;
@@ -106,6 +186,7 @@ export function initReview({ gotoAddress, gotoDone } = {}){
   if (btnPlaceBottom) btnPlaceBottom.onclick = () => btnPlace.click();
 
   const db = readDb();
+  const session = getSession();
   const cart = getCart();
   const equipment = listEquipment();
 
@@ -144,7 +225,7 @@ export function initReview({ gotoAddress, gotoDone } = {}){
       const eq = equipment.find(e => String(e.id) === String(ci.id));
       if (!eq) continue;
       const qty = Number(ci.qty||0);
-      const unit = unitPriceForQty(eq.pricingTiers, qty);
+      const unit = unitPriceForSession(eq.pricingTiers, qty, session);
       const lineTotal = unit != null ? unit * qty : 0;
       perDateTotal += lineTotal;
 
@@ -187,7 +268,7 @@ export function initReview({ gotoAddress, gotoDone } = {}){
     if (applySameDay) total += sameDayFee;
 
     if (annual){
-      const promo = annualPromoTotals(cart, equipment, 5);
+      const promo = annualPromoTotals(cart, equipment, 5, (tiers,qty) => unitPriceForSession(tiers, qty, session));
 
       const row = document.createElement('div');
       row.className = 'rev-item';
@@ -245,7 +326,7 @@ export function initReview({ gotoAddress, gotoDone } = {}){
     updateFlowSummary?.();
   }
 
-  btnPlace.onclick = () => {
+  async function placeBookingWithSession(sessionForPricing){
     const db2 = readDb();
     const checkout2 = getCheckout() || {};
     const annual2 = !!checkout2.annual;
@@ -253,21 +334,20 @@ export function initReview({ gotoAddress, gotoDone } = {}){
 
     if (!cart.length || !dates2.length || !checkout2.address){
       alert('Missing items, date(s), or address.');
-      return;
+      return false;
     }
     if (annual2 && dates2.length !== 5){
       alert('Annual deal requires 5 dates.');
-      return;
+      return false;
     }
 
-    
     // Compute totals snapshot for booking record(s)
     let perDateTotalPlaced = 0;
     for (const ci of cart){
       const eq = equipment.find(e => String(e.id) === String(ci.id));
       if (!eq) continue;
       const qty = Number(ci.qty||0);
-      const unit = unitPriceForQty(eq.pricingTiers, qty);
+      const unit = unitPriceForSession(eq.pricingTiers, qty, sessionForPricing);
       perDateTotalPlaced += (unit != null ? unit * qty : 0);
     }
 
@@ -275,7 +355,7 @@ export function initReview({ gotoAddress, gotoDone } = {}){
     let promoTotalPlaced = null;
 
     if (annual2){
-      const promo = annualPromoTotals(cart, equipment, 5);
+      const promo = annualPromoTotals(cart, equipment, 5, (tiers,qty) => unitPriceForSession(tiers, qty, sessionForPricing));
       normalTotalPlaced = promo.normal;
       promoTotalPlaced = promo.promo;
     }
@@ -295,19 +375,21 @@ export function initReview({ gotoAddress, gotoDone } = {}){
 
     const finalTotalPlaced = totalBeforeCouponPlaced - discountPlaced;
 
-const session = getSession();
     db2.bookings = db2.bookings || [];
-
     const bookingId = 'bk_' + Math.random().toString(36).slice(2,10);
-
     const firstDt = dates2[0];
+
+    // For guests, use the email captured at checkout (not the Guest# label)
+    const customerEmail = (sessionForPricing?.role === 'guest')
+      ? (String(checkout2.guestEmail || '').trim() || 'guest')
+      : (sessionForPricing?.email || 'guest');
 
     for (const dt of (annual2 ? dates2 : [dates2[0]])){
       const booking = {
         id: 'b_' + Math.random().toString(36).slice(2,10),
         bookingId,
         createdAt: new Date().toISOString(),
-        customerEmail: session?.email || 'guest',
+        customerEmail,
         date: dt,
         address: checkout2.address,
         items: Object.fromEntries(cart.map(c => [c.id, c.qty])),
@@ -318,7 +400,6 @@ const session = getSession();
         promoTotal: (annual2 && dt === firstDt) ? promoTotalPlaced : null,
         normalTotal: (annual2 && dt === firstDt) ? normalTotalPlaced : null,
         discount: (dt === firstDt) ? discountPlaced : null
-
       };
       db2.bookings.push(booking);
     }
@@ -328,8 +409,35 @@ const session = getSession();
     clearCart();
     updateFlowSummary?.();
 
+    // After placing an order, land on the profile Orders tab.
+    try { sessionStorage.setItem('rsc_profile_tab', 'orders'); } catch {}
+
     alert(annual2 ? '5 bookings placed! (Prototype stored locally)' : 'Booking placed! (Prototype stored locally)');
     gotoDone?.();
+    return true;
+  }
+
+  btnPlace.onclick = async () => {
+    const checkout2 = getCheckout() || {};
+    const sessionNow = getSession();
+
+    if (sessionNow?.role === 'guest'){
+      // Ask for email at the end (not at the start)
+      let guestEmail = String(checkout2.guestEmail || '').trim();
+      if (!guestEmail){
+        guestEmail = await promptGuestEmail();
+        if (!guestEmail) return;
+        // save into checkout state so the booking record uses it
+        patchCheckout({ guestEmail });
+      }
+
+      // Continue as guest with flat pricing (upgrade is available via the order summary at any time).
+      await placeBookingWithSession(getSession());
+      return;
+    }
+
+    // Logged-in user/admin flow
+    await placeBookingWithSession(sessionNow);
   };
 
   render();

@@ -98,8 +98,16 @@ export function initProfile({ gotoLanding, gotoInventory } = {}){
       showTab(btn.dataset.tab || 'account');
     });
   }
-  // default
-  showTab('account');
+  // default (allow other pages to request a landing tab)
+  let defaultTab = 'account';
+  try {
+    const t = sessionStorage.getItem('rsc_profile_tab');
+    if (t) {
+      defaultTab = t;
+      sessionStorage.removeItem('rsc_profile_tab');
+    }
+  } catch {}
+  showTab(defaultTab);
 
 
   const promoToggle = document.getElementById('profileToggleUpsell');
