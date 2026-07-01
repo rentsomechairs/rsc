@@ -9,8 +9,11 @@ const state = {
   costs: [],
   numbersTab: 'costs',
   earningsView: 'monthly',
+  expandedEarningsPeriod: '',
+  highlightedOrderDates: {},
   collapsedCostCategories: {},
   recurringEditorCostId: null,
+  averages: [],
   routeDate: new Date().toISOString().slice(0, 10),
   activeTab: 'orders',
   editingOrderId: null,
@@ -32,7 +35,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'deposit-paid-lock-v1';
+const ADMIN_VERSION = 'order-numbers-final-patch-v3';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -313,6 +316,10 @@ function cacheEls() {
     earningsSummary: document.getElementById('earningsSummary'),
     earningsBreakdown: document.getElementById('earningsBreakdown'),
     earningsViewSelect: document.getElementById('earningsViewSelect'),
+    averagesSummary: document.getElementById('averagesSummary'),
+    averagesList: document.getElementById('averagesList'),
+    addAverageTaskBtn: document.getElementById('addAverageTaskBtn'),
+    saveAveragesBtn: document.getElementById('saveAveragesBtn'),
     orderModalWrap: document.getElementById('orderModalWrap'),
     orderModalTitle: document.getElementById('orderModalTitle'),
     orderForm: document.getElementById('orderForm'),
@@ -436,23 +443,28 @@ function bindApp() {
   els.reminderModalWrap?.addEventListener('click', (e) => { if (e.target === els.reminderModalWrap) closeReminderComposer(); });
   els.reminderTabButtons?.forEach((btn) => btn.addEventListener('click', () => setReminderComposerTab(btn.dataset.reminderTab || 'details')));
   [els.reminderVerbalCheckbox, els.reminderDepositWaivedCheckbox, els.reminderEquipmentDiscussionCheckbox, els.reminderFriendlyIntroCheckbox, els.reviewOlderCustomerCheckbox].forEach((input) => input?.addEventListener('change', handleReminderComposerFieldChange));
-  els.reminderUpdatesList?.addEventListener('change', handleReminderComposerFieldChange);
+  els.reminderUpdatesList?.addEventListener('change', () => copyReminderComposerPreview(false));
   els.reminderUpdatesList?.addEventListener('click', handleReminderUpdatesListClick);
   els.copyReminderPreviewBtn?.addEventListener('click', () => copyReminderComposerPreview(true));
   els.numbersTabButtons?.forEach((btn) => btn.addEventListener('click', () => setNumbersTab(btn.dataset.numbersTab || 'costs')));
   els.addCostRowBtn?.addEventListener('click', () => addCostRow());
   els.saveCostsBtn?.addEventListener('click', handleSaveCosts);
+  els.addAverageTaskBtn?.addEventListener('click', () => addAverageTask());
+  els.saveAveragesBtn?.addEventListener('click', handleSaveAverages);
+  els.averagesList?.addEventListener('click', handleAveragesListClick);
+  els.averagesList?.addEventListener('change', handleAveragesListChange);
   els.costsList?.addEventListener('click', handleCostsListClick);
   els.costsList?.addEventListener('change', handleCostsListChange);
-  els.earningsViewSelect?.addEventListener('change', () => { state.earningsView = els.earningsViewSelect.value || 'monthly'; renderEarnings(); });
+  els.earningsViewSelect?.addEventListener('change', () => { state.earningsView = els.earningsViewSelect.value || 'monthly'; state.expandedEarningsPeriod = ''; renderEarnings(); });
   els.inventoryModalWrap.addEventListener('click', (e) => { if (e.target === els.inventoryModalWrap) closeModals(); });
   els.orderForm.addEventListener('submit', handleOrderSave);
   initOrderTimeControls();
   els.orderForm.elements.exchangeDate?.addEventListener('change', () => setReturnDateFromExchange(false));
   els.orderForm.elements.returnDate?.addEventListener('change', () => { els.orderForm.elements.returnDate.dataset.userEdited = 'true'; });
-  ['deliveryFee', 'setupFee', 'tipAmount', 'adjustedTotal'].forEach((name) => {
+  ['deliveryFee', 'setupFee', 'tipAmount'].forEach((name) => {
     els.orderForm.elements[name]?.addEventListener('input', syncOrderTotalsPreview);
   });
+  els.orderForm.elements.total?.addEventListener('input', () => { els.orderForm.elements.total.dataset.userAdjusted = 'true'; syncDepositPreview(); });
   els.orderForm.elements.eventDate?.addEventListener('input', () => setExchangeAndReturnFromEventDate(false));
   ['exchangeDate', 'returnDate'].forEach((name) => {
     els.orderForm.elements[name]?.addEventListener('input', () => { els.orderForm.elements[name].dataset.userEdited = 'true'; });
@@ -678,6 +690,7 @@ async function loadData() {
   const paymentMigrated = syncAllOrdersToDepositRule();
   state.reviews = await getPublicReviews().catch(() => []);
   state.costs = await getCostRecords().catch(() => []);
+  state.averages = Array.isArray(state.settings?.averageTasks) ? state.settings.averageTasks : [];
   if (tracked.changed || paymentMigrated) await saveOrders(state.orders, { actor: tracked.changed ? 'tracking-payment-backfill' : 'deposit-paid-lock-migration' });
 }
 function setBusyState(isBusy, message = 'Saving…') {
@@ -744,7 +757,7 @@ function renderTabs() {
 }
 
 function setNumbersTab(tab = 'costs') {
-  state.numbersTab = tab === 'earnings' ? 'earnings' : 'costs';
+  state.numbersTab = ['earnings', 'averages'].includes(tab) ? tab : 'costs';
   renderNumbersTabs();
 }
 function renderNumbersTabs() {
@@ -788,7 +801,14 @@ function getInventoryCostOptions() {
   return out;
 }
 function getCostRowsForDisplay() {
-  return (state.costs || []).map(normalizeCostRecord).sort((a, b) => String(a.category || '').localeCompare(String(b.category || '')) || String(a.name || '').localeCompare(String(b.name || '')));
+  const categoryOrder = ['Inventory', 'Monthly Expenses', 'Recurring Expenses', 'Tools / Supplies', 'Repairs / Maintenance', 'Marketing', 'Fuel / Delivery', 'Labor / Payroll', 'Insurance / Legal', 'Other'];
+  return (state.costs || []).map(normalizeCostRecord).sort((a, b) => {
+    const ai = categoryOrder.indexOf(a.category || 'Other');
+    const bi = categoryOrder.indexOf(b.category || 'Other');
+    const ac = ai === -1 ? 999 : ai;
+    const bc = bi === -1 ? 999 : bi;
+    return ac - bc || String(a.name || '').localeCompare(String(b.name || ''));
+  });
 }
 function getCostTotal(record = {}) {
   if (record.type === 'Recurring') {
@@ -800,8 +820,6 @@ function getCostTotal(record = {}) {
 }
 function collectCostsFromTable() {
   return [...(els.costsList?.querySelectorAll('[data-cost-row]') || [])].map((row) => {
-    const selected = row.querySelector('[data-cost-field="name"]')?.value || '';
-    const opt = getInventoryCostOptions().find((entry) => entry.value === selected) || {};
     const existing = (state.costs || []).find((entry) => entry.id === row.dataset.costId) || {};
     const quantityValue = row.querySelector('[data-cost-field="quantity"]')?.value ?? '';
     const priceValue = row.querySelector('[data-cost-field="price"]')?.value ?? '';
@@ -810,9 +828,9 @@ function collectCostsFromTable() {
       id: row.dataset.costId || uid('cost'),
       category: row.querySelector('[data-cost-field="category"]')?.value || 'Inventory',
       type: row.querySelector('[data-cost-field="type"]')?.value || 'One-Time',
-      inventoryId: opt.inventoryId || row.dataset.inventoryId || existing.inventoryId || '',
-      accessoryId: opt.accessoryId || row.dataset.accessoryId || existing.accessoryId || '',
-      name: row.querySelector('[data-cost-field="name"] option:checked')?.textContent || row.querySelector('[data-cost-field="name"]')?.value || existing.name || '',
+      inventoryId: '',
+      accessoryId: '',
+      name: row.querySelector('[data-cost-field="name"]')?.value || existing.name || '',
       quantity: quantityValue === '' ? '' : Number(quantityValue || 0),
       price: priceValue === '' ? '' : Number(priceValue || 0),
       recurringEntries: existing.recurringEntries || [],
@@ -830,54 +848,53 @@ function renderCosts() {
   if (!els.costsList) return;
   const rows = getCostRowsForDisplay();
   const totalSpent = rows.reduce((sum, row) => sum + getCostTotal(row), 0);
-  const totalUnits = rows.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+  const oneTimeTotal = rows.filter((row) => row.type !== 'Recurring').reduce((sum, row) => sum + getCostTotal(row), 0);
   const recurringTotal = rows.filter((row) => row.type === 'Recurring').reduce((sum, row) => sum + getCostTotal(row), 0);
+  const recurringRows = rows.filter((row) => row.type === 'Recurring').length;
   if (els.costsSummary) {
     els.costsSummary.innerHTML = `
-      <div class="numbers-metric"><div class="metric-label">Saved cost rows</div><div class="metric-value">${rows.length}</div></div>
-      <div class="numbers-metric"><div class="metric-label">Units entered</div><div class="metric-value">${Number(totalUnits || 0).toLocaleString()}</div></div>
-      <div class="numbers-metric"><div class="metric-label">Total spent</div><div class="metric-value">${currency(totalSpent)}</div></div>
-      <div class="numbers-metric"><div class="metric-label">Recurring total</div><div class="metric-value">${currency(recurringTotal)}</div></div>
+      <div class="numbers-metric"><div class="metric-label">Total saved costs</div><div class="metric-value">${currency(totalSpent)}</div></div>
+      <div class="numbers-metric"><div class="metric-label">One-time purchases</div><div class="metric-value">${currency(oneTimeTotal)}</div></div>
+      <div class="numbers-metric"><div class="metric-label">Recurring charges logged</div><div class="metric-value">${currency(recurringTotal)}</div></div>
+      <div class="numbers-metric"><div class="metric-label">Cost lines</div><div class="metric-value">${rows.length}</div><div class="small muted">${recurringRows} recurring</div></div>
     `;
   }
-  const options = getInventoryCostOptions();
+  const costCategories = ['Inventory', 'Monthly Expenses', 'Recurring Expenses', 'Tools / Supplies', 'Repairs / Maintenance', 'Marketing', 'Fuel / Delivery', 'Labor / Payroll', 'Insurance / Legal', 'Other'];
   const grouped = new Map();
+  costCategories.forEach((cat) => grouped.set(cat, []));
   rows.forEach((row) => {
-    const key = row.category || 'Inventory';
+    const key = costCategories.includes(row.category) ? row.category : 'Other';
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(row);
   });
-  if (!rows.length) grouped.set('Inventory', []);
   els.costsList.innerHTML = [...grouped.entries()].map(([category, groupRows]) => {
     const collapsed = Boolean(state.collapsedCostCategories[category]);
     const groupTotal = groupRows.reduce((sum, row) => sum + getCostTotal(row), 0);
     return `<div class="numbers-source-card cost-category-card" data-cost-category-card="${safeText(category)}">
       <button type="button" class="cost-category-head" data-toggle-cost-category="${safeText(category)}">
-        <span><strong>${safeText(category)}</strong><span class="small muted"> ${groupRows.length} row${groupRows.length === 1 ? '' : 's'}</span></span>
+        <span><strong>${safeText(category)}</strong><span class="small muted"> ${groupRows.length} line${groupRows.length === 1 ? '' : 's'}</span></span>
         <span class="badge badge-green">${currency(groupTotal)}</span>
       </button>
-      <div class="${collapsed ? 'hidden' : ''}">
-        <table class="numbers-table cost-entry-table">
-          <thead><tr><th>Category</th><th>Item</th><th>Type</th><th>Quantity</th><th>Amount</th><th>Total Cost</th><th></th></tr></thead>
-          <tbody>
-            ${groupRows.map((row) => {
-              const selectedValue = findCostOptionValue(row);
-              const isRecurring = row.type === 'Recurring';
-              return `<tr data-cost-row data-cost-id="${safeText(row.id)}" data-inventory-id="${safeText(row.inventoryId || '')}" data-accessory-id="${safeText(row.accessoryId || '')}" data-created-at="${safeText(row.createdAt || '')}">
-                <td><select data-cost-field="category"><option value="Inventory" ${row.category === 'Inventory' ? 'selected' : ''}>Inventory</option>${row.category && row.category !== 'Inventory' ? `<option selected>${safeText(row.category)}</option>` : ''}</select></td>
-                <td><select data-cost-field="name"><option value="">Pick equipment/accessory</option>${options.map((opt) => `<option value="${safeText(opt.value)}" ${selectedValue === opt.value ? 'selected' : ''}>${safeText(opt.label)}</option>`).join('')}</select></td>
-                <td><select data-cost-field="type"><option ${!isRecurring ? 'selected' : ''}>One-Time</option><option ${isRecurring ? 'selected' : ''}>Recurring</option></select></td>
-                <td><input data-cost-field="quantity" type="number" min="0" step="1" value="${row.quantity === '' ? '' : safeText(row.quantity)}" ${isRecurring ? 'disabled' : ''} /></td>
-                <td><input data-cost-field="price" type="number" min="0" step="0.01" value="${row.price === '' ? '' : safeText(row.price)}" ${isRecurring ? 'disabled' : ''} /></td>
-                <td><strong>${currency(getCostTotal(row))}</strong>${isRecurring ? `<div class="small muted">${(row.recurringEntries || []).length} charge date${(row.recurringEntries || []).length === 1 ? '' : 's'}</div>` : ''}</td>
-                <td><div class="toolbar"><button type="button" class="btn btn-secondary btn-small" data-copy-cost-row="${safeText(row.id)}">+</button>${isRecurring ? `<button type="button" class="btn btn-primary btn-small" data-edit-recurring-cost="${safeText(row.id)}">Dates</button>` : ''}<button type="button" class="btn btn-ghost btn-small" data-delete-cost-row="${safeText(row.id)}">Delete</button></div></td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
+      <div class="cost-category-body ${collapsed ? 'hidden' : ''}">
+        ${groupRows.length ? groupRows.map((row) => renderCostEditorCard(row, costCategories)).join('') : `<div class="empty-state compact">No costs here yet. Use Add Cost Row, then choose this category.</div>`}
       </div>
     </div>`;
   }).join('');
+}
+function renderCostEditorCard(row = {}, costCategories = []) {
+  const isRecurring = row.type === 'Recurring';
+  const categoryOptions = costCategories.includes(row.category) ? costCategories : [row.category || 'Other', ...costCategories];
+  return `<div class="cost-editor-card" data-cost-row data-cost-id="${safeText(row.id)}" data-created-at="${safeText(row.createdAt || '')}">
+    <div class="cost-editor-main">
+      <label><span>Cost category</span><select data-cost-field="category">${categoryOptions.map((cat) => `<option value="${safeText(cat)}" ${row.category === cat ? 'selected' : ''}>${safeText(cat)}</option>`).join('')}</select></label>
+      <label class="cost-name-field"><span>What was it?</span><input data-cost-field="name" value="${safeText(row.name || '')}" placeholder="Chairs, gas, storage, insurance..." /></label>
+      <label><span>Type</span><select data-cost-field="type"><option ${!isRecurring ? 'selected' : ''}>One-Time</option><option ${isRecurring ? 'selected' : ''}>Recurring</option></select></label>
+      <label><span>Qty</span><input data-cost-field="quantity" type="number" min="0" step="1" value="${row.quantity === '' ? '' : safeText(row.quantity)}" ${isRecurring ? 'disabled' : ''} /></label>
+      <label><span>${isRecurring ? 'Amount' : 'Each'}</span><input data-cost-field="price" type="number" min="0" step="0.01" value="${row.price === '' ? '' : safeText(row.price)}" ${isRecurring ? 'disabled' : ''} /></label>
+      <div class="cost-total-pill"><span>Total</span><strong>${currency(getCostTotal(row))}</strong>${isRecurring ? `<small>${(row.recurringEntries || []).length} date${(row.recurringEntries || []).length === 1 ? '' : 's'}</small>` : ''}</div>
+    </div>
+    <div class="cost-editor-actions"><button type="button" class="btn btn-secondary btn-small" data-copy-cost-row="${safeText(row.id)}">Duplicate</button>${isRecurring ? `<button type="button" class="btn btn-primary btn-small" data-edit-recurring-cost="${safeText(row.id)}">Dates</button>` : ''}<button type="button" class="btn btn-ghost btn-small" data-delete-cost-row="${safeText(row.id)}">Delete</button></div>
+  </div>`;
 }
 function addCostRow(copyFrom = null) {
   const record = normalizeCostRecord(copyFrom || { id: uid('cost'), category: 'Inventory', type: 'One-Time', name: '', quantity: '', price: '' });
@@ -886,15 +903,8 @@ function addCostRow(copyFrom = null) {
 }
 function handleCostsListChange(event) {
   if (!event.target.closest('[data-cost-row]')) return;
-  const row = event.target.closest('[data-cost-row]');
-  const id = row.dataset.costId;
-  const records = collectCostsFromTable();
-  state.costs = records;
-  if (event.target.matches('[data-cost-field="type"]')) renderCosts();
-  else if (id) {
-    const next = state.costs.find((entry) => entry.id === id);
-    if (next) Object.assign(row.dataset, { inventoryId: next.inventoryId || '', accessoryId: next.accessoryId || '' });
-  }
+  state.costs = collectCostsFromTable();
+  renderCosts();
 }
 function handleCostsListClick(event) {
   const toggle = event.target.closest('[data-toggle-cost-category]');
@@ -988,9 +998,9 @@ function getPeriodKey(dateStr = '', view = state.earningsView) {
   if (view === 'weekly') {
     const start = new Date(d); start.setDate(d.getDate() - d.getDay());
     const end = new Date(start); end.setDate(start.getDate() + 6);
-    return `${start.toLocaleDateString()} - ${end.toLocaleDateString()}`;
+    return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
   }
-  if (view === 'quarterly') return `${y} Q${Math.floor(d.getMonth() / 3) + 1}`;
+  if (view === 'quarterly') return `${y} · Q${Math.floor(d.getMonth() / 3) + 1}`;
   if (view === 'yearly') return `${y}`;
   return `${d.toLocaleString('en-US', { month: 'long' })} ${y}`;
 }
@@ -1034,7 +1044,7 @@ function buildEarningsReport() {
   const totals = { orders: completed.length, gross: 0, itemRentals: 0, deliveryFees: 0, setupFees: 0, tips: 0, adjustments: 0 };
   completed.forEach((order) => {
     const period = getPeriodKey(getOrderReportDate(order));
-    if (!periodMap.has(period)) periodMap.set(period, { period, orders: 0, gross: 0, itemRentals: 0, deliveryFees: 0, setupFees: 0, tips: 0, adjustments: 0, items: new Map() });
+    if (!periodMap.has(period)) periodMap.set(period, { period, sortDate: getPeriodSortDate(getOrderReportDate(order)), orders: 0, gross: 0, itemRentals: 0, deliveryFees: 0, setupFees: 0, tips: 0, adjustments: 0, items: new Map(), orderLines: [] });
     const bucket = periodMap.get(period);
     const itemTotal = getChargedItemsSubtotal(order);
     const delivery = Number(order.deliveryFee || 0);
@@ -1042,6 +1052,7 @@ function buildEarningsReport() {
     const tips = Number(order.tipAmount || 0);
     const adjustment = sumOrderAdjustment(order);
     const gross = getEffectiveOrderTotal(order);
+    bucket.orderLines.push({ customer: order.customerName || order.name || 'Customer', date: getOrderReportDate(order), gross, items: itemTotal, delivery, setup, tips, adjustment });
     bucket.orders += 1; bucket.gross += gross; bucket.itemRentals += itemTotal; bucket.deliveryFees += delivery; bucket.setupFees += setup; bucket.tips += tips; bucket.adjustments += adjustment;
     totals.gross += gross; totals.itemRentals += itemTotal; totals.deliveryFees += delivery; totals.setupFees += setup; totals.tips += tips; totals.adjustments += adjustment;
     (order.items || []).forEach((item) => {
@@ -1055,6 +1066,10 @@ function buildEarningsReport() {
     });
   });
   return { completed, totals, periods: [...periodMap.values()], items: [...itemMap.values()].sort((a, b) => b.amount - a.amount) };
+}
+function getPeriodSortDate(dateStr = '') {
+  const d = new Date(`${dateStr}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
 }
 function renderEarnings() {
   if (!els.earningsSummary || !els.earningsBreakdown) return;
@@ -1074,19 +1089,158 @@ function renderEarnings() {
     els.earningsBreakdown.innerHTML = '<div class="empty-state">No completed orders yet.</div>';
     return;
   }
-  const itemsHtml = report.items.length ? `<div class="numbers-source-card"><strong>Items rented across completed orders</strong><table class="numbers-subtable"><thead><tr><th>Category</th><th>Item</th><th>Quantity Rented</th><th>Earnings</th></tr></thead><tbody>${report.items.map((item) => `<tr><td>${safeText(item.category)}</td><td>${safeText(item.name)}</td><td>${Number(item.quantity || 0).toLocaleString()}</td><td><strong>${currency(item.amount)}</strong></td></tr>`).join('')}</tbody></table></div>` : '';
-  const periodsHtml = report.periods.sort((a, b) => String(b.period).localeCompare(String(a.period))).map((period) => `<div class="numbers-source-card"><div class="section-header" style="margin-bottom:6px;"><div><strong>${safeText(period.period)}</strong><div class="small muted">${period.orders} completed order${period.orders === 1 ? '' : 's'}</div></div><div class="badge badge-green">${currency(period.gross)}</div></div><div class="numbers-summary-grid"><div class="numbers-metric"><div class="metric-label">Items</div><div class="metric-value">${currency(period.itemRentals)}</div></div><div class="numbers-metric"><div class="metric-label">Delivery</div><div class="metric-value">${currency(period.deliveryFees)}</div></div><div class="numbers-metric"><div class="metric-label">Setup</div><div class="metric-value">${currency(period.setupFees)}</div></div><div class="numbers-metric"><div class="metric-label">Tips</div><div class="metric-value">${currency(period.tips)}</div></div><div class="numbers-metric"><div class="metric-label">Adjustments</div><div class="metric-value">${currency(period.adjustments)}</div></div></div>${period.items.size ? `<table class="numbers-subtable"><thead><tr><th>Item</th><th>Qty</th><th>Earnings</th></tr></thead><tbody>${[...period.items.values()].sort((a, b) => b.amount - a.amount).map((item) => `<tr><td>${safeText(item.name)}</td><td>${Number(item.quantity || 0).toLocaleString()}</td><td>${currency(item.amount)}</td></tr>`).join('')}</tbody></table>` : ''}</div>`).join('');
-  els.earningsBreakdown.innerHTML = itemsHtml + periodsHtml;
+  const showOverview = state.earningsView === 'yearly';
+  els.earningsSummary.classList.toggle('hidden', !showOverview);
+  const periodsHtml = report.periods.sort((a, b) => a.sortDate - b.sortDate).map((period) => {
+    const open = state.expandedEarningsPeriod === period.period;
+    const details = open ? `<div class="numbers-summary-grid compact"><div class="numbers-metric"><div class="metric-label">Items</div><div class="metric-value">${currency(period.itemRentals)}</div></div><div class="numbers-metric"><div class="metric-label">Delivery</div><div class="metric-value">${currency(period.deliveryFees)}</div></div><div class="numbers-metric"><div class="metric-label">Setup</div><div class="metric-value">${currency(period.setupFees)}</div></div><div class="numbers-metric"><div class="metric-label">Tips</div><div class="metric-value">${currency(period.tips)}</div></div><div class="numbers-metric"><div class="metric-label">Adjustments</div><div class="metric-value">${currency(period.adjustments)}</div></div></div>${period.orderLines?.length ? `<table class="numbers-subtable"><thead><tr><th>Order</th><th>Date</th><th>Total</th></tr></thead><tbody>${period.orderLines.sort((a, b) => String(a.date).localeCompare(String(b.date))).map((line) => `<tr><td>${safeText(line.customer)}</td><td>${safeText(formatShortDate(line.date))}</td><td>${currency(line.gross)}</td></tr>`).join('')}</tbody></table>` : ''}${period.items.size ? `<table class="numbers-subtable"><thead><tr><th>Item</th><th>Qty</th><th>Earnings</th></tr></thead><tbody>${[...period.items.values()].sort((a, b) => b.amount - a.amount).map((item) => `<tr><td>${safeText(item.name)}</td><td>${Number(item.quantity || 0).toLocaleString()}</td><td>${currency(item.amount)}</td></tr>`).join('')}</tbody></table>` : ''}` : '';
+    return `<button type="button" class="numbers-period-card ${open ? 'open' : ''}" data-toggle-earnings-period="${safeText(period.period)}"><span><strong>${safeText(period.period)}</strong><span class="small muted">${period.orders} order${period.orders === 1 ? '' : 's'} · Items ${currency(period.itemRentals)}</span></span><span class="badge badge-green">${currency(period.gross)}</span></button>${open ? `<div class="numbers-source-card earnings-period-details">${details}</div>` : ''}`;
+  }).join('');
+  els.earningsBreakdown.innerHTML = periodsHtml;
 }
 function formatSourceName(source = '') {
   const value = String(source || 'admin').trim();
   const names = { admin: 'Admin-created orders', quick: 'Quick picker', quickPicker: 'Quick picker', gallery: 'Gallery', tracking: 'Tracking page', public: 'Public form' };
   return names[value] || value.replace(/[-_]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
+
+function normalizeAverageRef(ref = {}) {
+  return {
+    id: ref.id || uid('avgref'),
+    inventoryId: ref.inventoryId || '',
+    seconds: Number(ref.seconds || 0),
+    perQty: Math.max(1, Number(ref.perQty || 1))
+  };
+}
+function normalizeAverageTask(task = {}) {
+  const legacyRef = (task.inventoryId || task.seconds || task.perQty) ? [{ inventoryId: task.inventoryId || '', seconds: task.seconds || 0, perQty: task.perQty || 1 }] : [];
+  const refs = Array.isArray(task.refs) && task.refs.length ? task.refs : legacyRef;
+  return {
+    id: task.id || uid('avg'),
+    name: String(task.name || '').trim() || 'New task',
+    refs: (refs.length ? refs : [{ inventoryId: state.inventory[0]?.id || '', seconds: 60, perQty: 1 }]).map(normalizeAverageRef)
+  };
+}
+function getCompletedOrders() { return (state.orders || []).filter((order) => getOrderColumn(order.status) === 'completed'); }
+function getCompletedItemQuantityForInventory(inventoryId = '') {
+  return getCompletedOrders().reduce((sum, order) => sum + (order.items || []).reduce((itemSum, item) => (!inventoryId || item.inventoryId === inventoryId) ? itemSum + Number(item.quantity || 0) : itemSum, 0), 0);
+}
+function getCompletedItemRevenueForInventory(inventoryId = '') {
+  return getCompletedOrders().reduce((sum, order) => sum + (order.items || []).reduce((itemSum, item) => (!inventoryId || item.inventoryId === inventoryId) ? itemSum + Number(item.subtotal || 0) : itemSum, 0), 0);
+}
+function formatDuration(seconds = 0) {
+  const total = Math.round(Number(seconds || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+function getAverageGroupKeyForRef(ref = {}) {
+  const normalized = normalizeAverageRef(ref);
+  return normalized.inventoryId ? `inventory:${normalized.inventoryId}` : 'orders:all';
+}
+function getAverageGroupLabel(key = '') {
+  if (key === 'orders:all') return 'Whole completed order';
+  const inventoryId = String(key).replace(/^inventory:/, '');
+  return (state.inventory || []).find((item) => item.id === inventoryId)?.name || 'Inventory item';
+}
+function calculateAverageRefStats(ref = {}) {
+  const normalized = normalizeAverageRef(ref);
+  const qty = normalized.inventoryId ? getCompletedItemQuantityForInventory(normalized.inventoryId) : getCompletedOrders().length;
+  const runs = Math.ceil(qty / Math.max(1, normalized.perQty));
+  const seconds = runs * normalized.seconds;
+  const revenue = normalized.inventoryId ? getCompletedItemRevenueForInventory(normalized.inventoryId) : buildEarningsReport().totals.gross;
+  return { qty, runs, seconds, revenue };
+}
+function calculateAverageTaskStats(task = {}) {
+  const normalized = normalizeAverageTask(task);
+  return normalized.refs.reduce((acc, ref) => {
+    const stats = calculateAverageRefStats(ref);
+    acc.seconds += stats.seconds;
+    acc.refs.push({ ref, stats });
+    return acc;
+  }, { seconds: 0, refs: [] });
+}
+function calculateAverageGroups(tasks = []) {
+  const groups = new Map();
+  tasks.map(normalizeAverageTask).forEach((task) => {
+    task.refs.forEach((ref) => {
+      const key = getAverageGroupKeyForRef(ref);
+      const stats = calculateAverageRefStats(ref);
+      if (!groups.has(key)) groups.set(key, { key, label: getAverageGroupLabel(key), qty: stats.qty, revenue: stats.revenue, seconds: 0, lineCount: 0, taskNames: new Set() });
+      const group = groups.get(key);
+      group.seconds += stats.seconds;
+      group.lineCount += 1;
+      group.taskNames.add(task.name);
+    });
+  });
+  return [...groups.values()].map((group) => ({ ...group, taskCount: group.taskNames.size, hourly: group.seconds > 0 ? group.revenue / (group.seconds / 3600) : 0 }));
+}
+function renderAverages() {
+  if (!els.averagesList || !els.averagesSummary) return;
+  const tasks = (state.averages || []).map(normalizeAverageTask);
+  const groups = calculateAverageGroups(tasks);
+  const totals = groups.reduce((acc, group) => { acc.seconds += group.seconds; acc.revenue += group.revenue; return acc; }, { seconds: 0, revenue: 0 });
+  const hours = totals.seconds / 3600;
+  els.averagesSummary.innerHTML = `<div class="numbers-metric"><div class="metric-label">Estimated labor</div><div class="metric-value">${formatDuration(totals.seconds)}</div></div><div class="numbers-metric"><div class="metric-label">Tracked revenue</div><div class="metric-value">${currency(totals.revenue)}</div><div class="small muted">Sales are counted once per inventory item, even when several tasks use it.</div></div><div class="numbers-metric"><div class="metric-label">Estimated hourly</div><div class="metric-value">${hours > 0 ? currency(totals.revenue / hours) : '$0.00'}/hr</div></div>`;
+  const groupCards = groups.length ? `<div class="average-groups-summary">${groups.map((group) => `<div class="average-group-pill"><strong>${safeText(group.label)}</strong><span>${Number(group.qty).toLocaleString()} units/orders · ${formatDuration(group.seconds)} · ${currency(group.revenue)} sales · ${currency(group.hourly)}/hr</span></div>`).join('')}</div>` : '';
+  const invOptions = (selected = '') => `<option value=""${!selected ? ' selected' : ''}>Whole completed order</option>${(state.inventory || []).map((item) => `<option value="${safeText(item.id)}"${item.id === selected ? ' selected' : ''}>${safeText(item.name)}</option>`).join('')}`;
+  els.averagesList.innerHTML = groupCards + (tasks.length ? tasks.map((task) => {
+    const taskStats = calculateAverageTaskStats(task);
+    const refRows = task.refs.map((ref) => {
+      const stats = calculateAverageRefStats(ref);
+      const group = groups.find((item) => item.key === getAverageGroupKeyForRef(ref));
+      return `<div class="average-ref-row" data-average-ref="${safeText(ref.id)}"><label class="form-row"><span>Inventory reference</span><select data-average-ref-field="inventoryId">${invOptions(ref.inventoryId)}</select></label><label class="form-row"><span>Seconds</span><input type="number" min="0" step="1" data-average-ref-field="seconds" value="${safeText(ref.seconds)}" /></label><label class="form-row"><span>Per quantity</span><input type="number" min="1" step="1" data-average-ref-field="perQty" value="${safeText(ref.perQty)}" /></label><button type="button" class="btn btn-ghost btn-small" data-delete-average-ref="${safeText(ref.id)}">Remove line</button><div class="small muted average-ref-note">${Number(stats.qty).toLocaleString()} units/orders × ${ref.seconds}s per ${ref.perQty} = ${formatDuration(stats.seconds)} · ${currency(group?.hourly || 0)}/hr for ${safeText(group?.label || 'this group')}</div></div>`;
+    }).join('');
+    return `<div class="numbers-source-card average-task-card" data-average-task="${safeText(task.id)}"><label class="form-row"><span>Task group</span><input data-average-field="name" value="${safeText(task.name)}" /></label><div class="average-ref-list">${refRows}</div><div class="section-header" style="margin-top:8px;"><div class="small muted">Total task-group time: ${formatDuration(taskStats.seconds)}</div><div class="button-row"><button type="button" class="btn btn-secondary btn-small" data-add-average-ref="${safeText(task.id)}">Add equipment line</button><button type="button" class="btn btn-ghost btn-small" data-delete-average-task="${safeText(task.id)}">Delete group</button></div></div></div>`;
+  }).join('') : '<div class="empty-state">No average tasks yet. Add cleaning, loading, unloading, delivery prep, or any repeatable task.</div>');
+}
+function collectAverageTasksFromForm() {
+  return [...(els.averagesList?.querySelectorAll('[data-average-task]') || [])].map((row) => normalizeAverageTask({
+    id: row.dataset.averageTask,
+    name: row.querySelector('[data-average-field="name"]')?.value || '',
+    refs: [...row.querySelectorAll('[data-average-ref]')].map((refRow) => ({
+      id: refRow.dataset.averageRef,
+      inventoryId: refRow.querySelector('[data-average-ref-field="inventoryId"]')?.value || '',
+      seconds: refRow.querySelector('[data-average-ref-field="seconds"]')?.value || 0,
+      perQty: refRow.querySelector('[data-average-ref-field="perQty"]')?.value || 1
+    }))
+  }));
+}
+function addAverageTask() {
+  state.averages = [normalizeAverageTask({ name: 'New task group', refs: [{ seconds: 60, perQty: 1, inventoryId: state.inventory[0]?.id || '' }] }), ...(state.averages || [])];
+  renderAverages();
+}
+function handleAveragesListChange() { state.averages = collectAverageTasksFromForm(); renderAverages(); }
+function handleAveragesListClick(event) {
+  const deleteTaskBtn = event.target.closest('[data-delete-average-task]');
+  if (deleteTaskBtn) {
+    state.averages = collectAverageTasksFromForm().filter((task) => task.id !== deleteTaskBtn.dataset.deleteAverageTask);
+    renderAverages();
+    return;
+  }
+  const addRefBtn = event.target.closest('[data-add-average-ref]');
+  if (addRefBtn) {
+    state.averages = collectAverageTasksFromForm().map((task) => task.id === addRefBtn.dataset.addAverageRef ? { ...task, refs: [...task.refs, normalizeAverageRef({ inventoryId: state.inventory[0]?.id || '', seconds: 60, perQty: 1 })] } : task);
+    renderAverages();
+    return;
+  }
+  const deleteRefBtn = event.target.closest('[data-delete-average-ref]');
+  if (deleteRefBtn) {
+    state.averages = collectAverageTasksFromForm().map((task) => ({ ...task, refs: task.refs.filter((ref) => ref.id !== deleteRefBtn.dataset.deleteAverageRef) })).filter((task) => task.refs.length);
+    renderAverages();
+  }
+}
+async function handleSaveAverages() {
+  state.averages = collectAverageTasksFromForm();
+  state.settings = { ...state.settings, averageTasks: state.averages };
+  await withBusy(async () => { await saveSettings(state.settings); setNumbersSaved('Averages saved.'); }, 'Saving averages…');
+}
+
 function renderNumbers() {
   renderNumbersTabs();
   renderCosts();
   renderEarnings();
+  renderAverages();
 }
 
 function calculateOrderItemsSubtotal(items = []) {
@@ -1306,11 +1460,16 @@ function getOrderDepositAmount(order = {}) {
 }
 function formatOrderValueForUpdate(key, value) {
   if (key === 'exchangeDate' || key === 'returnDate' || key === 'eventDate') return formatFriendlyDate(value);
-  if (key === 'exchangeTime' || key === 'returnTime' || key === 'eventTime') return value || 'To Be Determined';
+  if (key === 'exchangeTime' || key === 'returnTime' || key === 'eventTime') return normalizeTbdLabel(value);
   if (key === 'deliveryFee' || key === 'total' || key === 'adjustedTotal') return currency(value || 0);
   if (key === 'items') return summarizeUpdateItems(value || []);
   if (key === 'verbalConfirmation') return value ? 'Yes' : 'No';
   return value || 'Not set';
+}
+function normalizeTbdLabel(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw || /^(tbd|to be determined|time tbd)$/i.test(raw)) return 'To Be Determined';
+  return raw;
 }
 function summarizeUpdateItems(items = []) {
   return (items || []).map((item) => {
@@ -1338,16 +1497,16 @@ function collectOrderChanges(previous = {}, next = {}) {
     const beforeFormatted = formatOrderValueForUpdate(key, previous?.[key]);
     const afterFormatted = formatOrderValueForUpdate(key, next?.[key]);
     if (beforeFormatted === afterFormatted) return;
-    changes.push(`${label} changed from "${beforeFormatted}" to "${afterFormatted}".`);
+    changes.push(`${label} changed to ${afterFormatted}.`);
   });
   if (Boolean(previous?.verbalConfirmation) !== Boolean(next?.verbalConfirmation)) {
     changes.push(next?.verbalConfirmation ? 'Received verbal confirmation of the order.' : 'Verbal confirmation was removed.');
   }
   if (String(previous?.paymentStatus || '') !== String(next?.paymentStatus || '')) {
-    changes.push(`Payment status changed from "${previous?.paymentStatus || 'Not set'}" to "${next?.paymentStatus || 'Not set'}".`);
+    changes.push(`Payment status changed to ${next?.paymentStatus || 'Not set'}.`);
   }
   if (String(previous?.fulfillmentType || '') !== String(next?.fulfillmentType || '')) {
-    changes.push(`Method changed from "${previous?.fulfillmentType || 'Not set'}" to "${next?.fulfillmentType || 'Not set'}".`);
+    changes.push(`Method changed to ${next?.fulfillmentType || 'Not set'}.`);
   }
   const prevItems = JSON.stringify(previous?.items || []);
   const nextItems = JSON.stringify(next?.items || []);
@@ -1355,13 +1514,13 @@ function collectOrderChanges(previous = {}, next = {}) {
     const beforeSummary = summarizeUpdateItems(previous?.items || []);
     const afterSummary = summarizeUpdateItems(next?.items || []);
     if (beforeSummary !== afterSummary) {
-      changes.push(`Equipment changed from ${beforeSummary} to ${afterSummary}.`);
+      changes.push(`Equipment changed to ${afterSummary}.`);
     }
   }
   const beforeTotal = getEffectiveOrderTotal(previous);
   const afterTotal = getEffectiveOrderTotal(next);
   if (Math.abs(beforeTotal - afterTotal) > 0.004) {
-    changes.push(`Order total changed from ${currency(beforeTotal)} to ${currency(afterTotal)}.`);
+    changes.push(`Order total changed to ${currency(afterTotal)}.`);
   }
   return changes;
 }
@@ -1377,9 +1536,27 @@ function appendOrderUpdate(order, changes = []) {
 }
 function buildOrderUpdateMessage(order, selectedIndexes = null) {
   const updates = Array.isArray(order?.updateHistory) ? order.updateHistory : [];
-  const filtered = Array.isArray(selectedIndexes) ? updates.filter((entry, index) => selectedIndexes.includes(index)) : updates;
-  const body = filtered.length
-    ? filtered.flatMap((entry) => (entry.changes || []).map((change) => `• ${change}`)).join('\n')
+  let selectedChanges = [];
+
+  if (Array.isArray(selectedIndexes)) {
+    selectedIndexes.forEach((selection) => {
+      const updateIndex = typeof selection === 'object' ? Number(selection.updateIndex) : Number(selection);
+      const changeIndex = typeof selection === 'object' ? Number(selection.changeIndex) : NaN;
+      const entry = updates[updateIndex];
+      if (!entry) return;
+      const changes = Array.isArray(entry.changes) && entry.changes.length ? entry.changes : ['Please check your latest order details.'];
+      if (Number.isInteger(changeIndex) && changeIndex >= 0 && changeIndex < changes.length) {
+        selectedChanges.push(changes[changeIndex]);
+      } else {
+        selectedChanges.push(...changes);
+      }
+    });
+  } else {
+    selectedChanges = updates.flatMap((entry) => Array.isArray(entry.changes) && entry.changes.length ? entry.changes : ['Please check your latest order details.']);
+  }
+
+  const body = selectedChanges.length
+    ? selectedChanges.map((change) => `• ${change}`).join('\n')
     : '• Please check your latest order details.';
   return `Hello ${order?.firstName || ''}! There has been an update to your order:
 
@@ -1451,16 +1628,24 @@ function syncOrderTotalsPreview() {
   const tipAmount = Number(els.orderForm.elements.tipAmount?.value || 0);
   const baseTotal = chargedItemsSubtotal + deliveryFee + setupFee + tipAmount;
   const listedTotal = listedItemsSubtotal + deliveryFee + setupFee + tipAmount;
-  if (els.orderForm.elements.total) els.orderForm.elements.total.value = baseTotal.toFixed(2);
-  const adjustedRaw = els.orderForm.elements.adjustedTotal?.value;
-  const adjustedHasValue = adjustedRaw !== '' && adjustedRaw != null;
-  const adjustedTotal = adjustedHasValue ? Number(adjustedRaw || 0) : baseTotal;
-  const discount = Math.max(0, listedTotal - adjustedTotal);
+  const totalField = els.orderForm.elements.total;
+  if (totalField && totalField.dataset.userAdjusted !== 'true') totalField.value = baseTotal.toFixed(2);
+  const finalTotal = Number(totalField?.value || baseTotal || 0);
+  const adjusted = Math.abs(finalTotal - baseTotal) > 0.004;
+  const discount = Math.max(0, listedTotal - finalTotal);
+  const badge = document.getElementById('orderAdjustedBadge');
+  if (badge) badge.textContent = adjusted ? '(adjusted)' : '';
+  syncDepositPreview();
   if (els.orderDiscountPreview) {
     const markdownActive = rows.some((row) => row.querySelector('[name="item_customUnitPrice"]')?.value !== '');
     const label = markdownActive ? 'Marked Down' : 'Small Discount Just To Say Thanks';
     els.orderDiscountPreview.textContent = discount > 0 ? `${label}: -${currency(discount)}` : '';
   }
+}
+function syncDepositPreview() {
+  const total = Number(els.orderForm?.elements?.total?.value || 0);
+  const deposit = total > getDepositMinimumOrder() ? roundDepositAmount(total * DEPOSIT_RATE) : 0;
+  if (els.orderForm?.elements?.depositPreview) els.orderForm.elements.depositPreview.value = deposit.toFixed(2);
 }
 function setExchangeAndReturnFromEventDate(force = false) {
   const eventDate = els.orderForm?.elements?.eventDate?.value;
@@ -1713,12 +1898,16 @@ function renderOrderGroups(orders, mode) {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(order);
   });
-  return [...groups.entries()].map(([date, groupOrders]) => `
-    <div class="order-date-group">
-      <div class="order-date-heading">${safeText(formatGroupHeading(date, mode, groupOrders))}</div>
+  return [...groups.entries()].map(([date, groupOrders]) => {
+    const highlight = Boolean(state.highlightedOrderDates?.[date]);
+    const upcoming = mode !== 'completed' && isDateInUpcomingBusinessWeek(date);
+    return `
+    <div class="order-date-group${highlight ? ' day-highlight-green' : ''}${upcoming ? ' week-highlight-purple' : ''}" data-order-date-group="${safeText(date)}">
+      <div class="order-date-heading-row">${formatGroupHeadingHtml(date, mode, groupOrders)}<button type="button" class="btn btn-ghost btn-small" data-toggle-day-highlight="${safeText(date)}">${highlight ? 'Unhighlight' : 'Highlight Day'}</button></div>
       ${groupOrders.map((order) => renderOrderAccordion(order, mode)).join('')}
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 function summarizeGroupEquipment(orders = []) {
   const totals = new Map();
@@ -1732,6 +1921,65 @@ function summarizeGroupEquipment(orders = []) {
   });
   return [...totals.entries()].map(([name, qty]) => `${qty} ${name}`).join(', ');
 }
+function getBusinessWeekRangeForDate(date = new Date()) {
+  const d = date instanceof Date ? new Date(date) : new Date(`${date}T12:00:00`);
+  const day = d.getDay();
+  const monday = new Date(d);
+  monday.setHours(0, 1, 0, 0);
+  monday.setDate(d.getDate() - ((day + 6) % 7));
+  const nextMonday = new Date(monday);
+  nextMonday.setDate(monday.getDate() + 7);
+  nextMonday.setHours(0, 0, 0, 0);
+  return { start: monday, end: nextMonday };
+}
+function isDateInUpcomingBusinessWeek(dateStr = '') {
+  const target = new Date(`${dateStr}T12:00:00`);
+  if (Number.isNaN(target.getTime())) return false;
+  const currentWeek = getBusinessWeekRangeForDate(new Date());
+  return target >= currentWeek.start && target < currentWeek.end;
+}
+function getBusinessWeekOfMonth(dateStr = '') {
+  const d = new Date(`${dateStr}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return 1;
+  const range = getBusinessWeekRangeForDate(d);
+  const nextMonday = new Date(range.start);
+  nextMonday.setDate(range.start.getDate() + 7);
+  const anchor = range.start.getMonth() !== nextMonday.getMonth() ? nextMonday : d;
+  const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1, 12);
+  const firstDay = first.getDay();
+  const firstMonday = new Date(first);
+  firstMonday.setDate(first.getDate() - ((firstDay + 6) % 7));
+  firstMonday.setHours(0, 1, 0, 0);
+  const diffDays = Math.max(0, Math.floor((range.start - firstMonday) / 86400000));
+  return Math.max(1, Math.floor(diffDays / 7) + 1);
+}
+
+function getDaysFromToday(dateStr = '') {
+  const target = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return 0;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  target.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.round((target - today) / 86400000));
+}
+
+function formatGroupHeadingHtml(date, mode, groupOrders = []) {
+  if (mode === 'completed') return `<div class=\"order-date-heading\">${safeText(formatGroupHeading(date, mode, groupOrders))}</div>`;
+  const d = new Date(`${date}T12:00:00`);
+  const week = getBusinessWeekOfMonth(date);
+  const dayCount = getDaysFromToday(date);
+  const dateText = Number.isNaN(d.getTime()) ? date : new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).format(d);
+  const equipment = summarizeGroupEquipment(groupOrders);
+  return `<div class=\"order-date-heading-parts\"><span class=\"heading-chip heading-week\">${dayCount} Day${dayCount === 1 ? '' : 's'} Away · Week ${week}</span><span class=\"heading-chip heading-date\">${safeText(dateText)}</span><span class=\"heading-chip heading-equipment\">${safeText(equipment || 'No equipment')}</span></div>`;
+}
+function getGroupDayCount(orders = []) {
+  return Math.max(1, ...(orders || []).map((order) => {
+    const start = new Date(`${order.exchangeDate || ''}T12:00:00`);
+    const end = new Date(`${order.returnDate || order.exchangeDate || ''}T12:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 1;
+    return Math.max(1, Math.round((end - start) / 86400000) + 1);
+  }));
+}
 function formatGroupHeading(date, mode, groupOrders = []) {
   if (mode === 'completed') {
     const stamp = new Date(date);
@@ -1743,9 +1991,10 @@ function formatGroupHeading(date, mode, groupOrders = []) {
       year: 'numeric'
     }).format(stamp);
   }
-  const base = formatDateWithDayCount(date);
+  const d = new Date(`${date}T12:00:00`);
+  const dateText = Number.isNaN(d.getTime()) ? date : new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).format(d);
   const equipment = summarizeGroupEquipment(groupOrders);
-  return equipment ? `${base}, ${equipment}` : base;
+  return `${getGroupDayCount(groupOrders)} Days, Week ${getBusinessWeekOfMonth(date)} · ${dateText}${equipment ? ` · ${equipment}` : ''}`;
 }
 function renderOrderAccordion(order, mode) {
   const isOpen = state.expandedOrderId === order.id;
@@ -1809,7 +2058,7 @@ function renderInlineOrderEditor(order) {
     <div class="form-row three"><div><label>Status</label><select data-inline-field="status">${ORDER_STATUSES.map((status) => `<option ${status === order.status ? 'selected' : ''}>${status}</option>`).join('')}</select></div><div><label>Payment</label><select data-inline-field="paymentStatus">${PAYMENT_STATUSES.map((status) => `<option ${status === order.paymentStatus ? 'selected' : ''}>${status}</option>`).join('')}</select></div><div><label>Pickup/Delivery</label><select data-inline-field="fulfillmentType"><option ${order.fulfillmentType === 'Pickup' ? 'selected' : ''}>Pickup</option><option ${order.fulfillmentType === 'Delivery' ? 'selected' : ''}>Delivery</option><option ${order.fulfillmentType === 'To Be Determined' ? 'selected' : ''}>To Be Determined</option></select></div></div>
     <div class="form-row three"><div><label>Event Date</label><input type="date" data-inline-field="eventDate" value="${safeText(order.eventDate || '')}" /></div><div><label>Event Time</label><input type="time" data-inline-field="eventTime" value="${safeText(normalizeInlineTimeValue(order.eventTime || ''))}" /></div><div><label>Verbal Confirmation</label><label class="check-pill"><input type="checkbox" data-inline-field="verbalConfirmation" ${order.verbalConfirmation ? 'checked' : ''}/> Confirmed</label></div></div>
     <div class="form-row four"><div><label>Exchange Date</label><input type="date" data-inline-field="exchangeDate" value="${safeText(order.exchangeDate || '')}" /></div><div><label>Exchange Time</label><input type="time" data-inline-field="exchangeTime" value="${safeText(normalizeInlineTimeValue(order.exchangeTime || ''))}" /></div><div><label>Return Date</label><input type="date" data-inline-field="returnDate" value="${safeText(order.returnDate || '')}" /></div><div><label>Return Time</label><input type="time" data-inline-field="returnTime" value="${safeText(normalizeInlineTimeValue(order.returnTime || ''))}" /></div></div>
-    <div class="form-row three"><div><label>Delivery Miles</label><input type="number" step="0.1" data-inline-field="deliveryMiles" value="${Number(order.deliveryMiles || 0)}" /></div><div><label>Delivery Fee</label><input type="number" step="0.01" data-inline-field="deliveryFee" value="${Number(order.deliveryFee || 0)}" /></div><div><label>Setup Fee</label><input type="number" step="0.01" data-inline-field="setupFee" value="${Number(order.setupFee || 0)}" /></div></div>
+    <div class="form-row two"><div><label>Delivery Fee</label><input type="number" step="0.01" data-inline-field="deliveryFee" value="${Number(order.deliveryFee || 0)}" /></div><div><label>Setup Fee</label><input type="number" step="0.01" data-inline-field="setupFee" value="${Number(order.setupFee || 0)}" /></div></div>
     <div class="form-row three"><div><label>Tip</label><input type="number" step="0.01" data-inline-field="tipAmount" value="${Number(order.tipAmount || 0)}" /></div><div><label>Adjusted Total</label><input type="number" step="0.01" data-inline-field="adjustedTotal" value="${order.adjustedTotal === '' || order.adjustedTotal == null ? '' : safeText(order.adjustedTotal)}" /></div><div><label>Total</label><input type="number" step="0.01" data-inline-field="total" value="${Number(getEffectiveOrderTotal(order) || 0)}" /></div></div>
     <div class="note-block small"><strong>Amount paid:</strong> ${currency(getOrderAmountPaid(order))} · <strong>Remaining balance:</strong> ${currency(getOrderAmountRemaining(order))}</div>
     <div class="form-row two"><div><label>Delivery Address</label><input data-inline-field="address" value="${safeText(order.address || '')}" /></div><div><label>Contact Text</label><input data-inline-field="contact_text" value="${safeText(order.contactMethods?.text || '')}" /></div></div>
@@ -1864,6 +2113,14 @@ function bindOrderCardActions() {
   if (!state.orderActionDelegatesBound) {
     state.orderActionDelegatesBound = true;
     document.addEventListener('click', (event) => {
+      const highlightBtn = event.target.closest('[data-toggle-day-highlight]');
+      if (highlightBtn) {
+        event.preventDefault();
+        const date = highlightBtn.dataset.toggleDayHighlight;
+        state.highlightedOrderDates[date] = !state.highlightedOrderDates[date];
+        renderOrders();
+        return;
+      }
       const expandBtn = event.target.closest('[data-expand-order]');
       if (expandBtn) {
         state.expandedOrderId = state.expandedOrderId === expandBtn.dataset.expandOrder ? null : expandBtn.dataset.expandOrder;
@@ -1930,6 +2187,13 @@ function bindOrderCardActions() {
         event.preventDefault();
         event.stopPropagation();
         deleteAdminReview(deleteReviewBtn.dataset.deleteReview);
+        return;
+      }
+      const earningsBtn = event.target.closest('[data-toggle-earnings-period]');
+      if (earningsBtn) {
+        event.preventDefault();
+        state.expandedEarningsPeriod = state.expandedEarningsPeriod === earningsBtn.dataset.toggleEarningsPeriod ? '' : earningsBtn.dataset.toggleEarningsPeriod;
+        renderEarnings();
         return;
       }
       const copyUpdateBtn = event.target.closest('[data-copy-update]');
@@ -2105,7 +2369,7 @@ function populateReminderComposerUpdates(order) {
   els.reminderUpdatesList.innerHTML = updates.flatMap((entry, index) => {
     const stamp = entry?.timestamp ? new Date(entry.timestamp).toLocaleString() : `Update ${index + 1}`;
     const changes = Array.isArray(entry?.changes) && entry.changes.length ? entry.changes : ['Please check your latest order details.'];
-    return changes.map((change, changeIndex) => `<label class="reminder-update-option"><div style="display:flex; gap:10px; align-items:flex-start; justify-content:space-between;"><div style="display:flex; gap:10px; align-items:flex-start; flex:1 1 auto;"><input type="checkbox" data-update-index="${index}" data-update-change-index="${changeIndex}" /><div><div><strong>${safeText(stamp)}</strong></div><div class="small muted">${safeText(change)}</div></div></div><button type="button" class="btn btn-ghost btn-small" data-delete-update-index="${index}">Delete</button></div></label>`);
+    return changes.map((change, changeIndex) => `<label class="reminder-update-option"><div style="display:flex; gap:10px; align-items:flex-start; justify-content:space-between;"><div style="display:flex; gap:10px; align-items:flex-start; flex:1 1 auto;"><input type="checkbox" data-update-index="${index}" data-update-change-index="${changeIndex}" /><div><div><strong>${safeText(stamp)}</strong></div><div class="small muted">${safeText(change)}</div></div></div><button type="button" class="btn btn-ghost btn-small" data-delete-update-index="${index}" data-delete-update-change-index="${changeIndex}">Delete</button></div></label>`);
   }).join('');
 }
 
@@ -2120,7 +2384,13 @@ async function handleReminderUpdatesListClick(event) {
   const index = Number(deleteButton.dataset.deleteUpdateIndex);
   if (!Number.isInteger(index) || index < 0 || index >= order.updateHistory.length) return;
   const before = JSON.parse(JSON.stringify(order));
-  order.updateHistory.splice(index, 1);
+  const changeIndex = Number(deleteButton.dataset.deleteUpdateChangeIndex);
+  if (Number.isInteger(changeIndex) && Array.isArray(order.updateHistory[index]?.changes)) {
+    order.updateHistory[index].changes.splice(changeIndex, 1);
+    if (!order.updateHistory[index].changes.length) order.updateHistory.splice(index, 1);
+  } else {
+    order.updateHistory.splice(index, 1);
+  }
   order.updatedAt = new Date().toISOString();
   await saveOrderOnly(order, before, 'admin-update-delete');
   populateReminderComposerUpdates(order);
@@ -2290,11 +2560,39 @@ async function updateOrderPayment(id, paymentStatus) {
   const order = state.orders.find((item) => item.id === id);
   if (!order) return;
   const before = JSON.parse(JSON.stringify(order));
+  if (paymentStatus === 'Deposit Paid') {
+    const currentDeposit = getOrderDepositAmount(order);
+    const existingPaid = Number(order.depositPaidAmount || order.amountPaid || 0);
+    const suggested = existingPaid > 0 ? existingPaid : currentDeposit;
+    const confirmed = await confirmDepositPaidAmount(order, suggested, currentDeposit);
+    if (!confirmed) return;
+    order.depositPaidAmount = roundMoney(confirmed.amount);
+    order.amountPaid = roundMoney(confirmed.amount);
+  }
   order.paymentStatus = paymentStatus;
   syncOrderPaymentAmounts(order);
   order.updatedAt = new Date().toISOString();
   appendOrderUpdate(order, collectOrderChanges(before, order));
   await saveOrderOnly(order, before, 'admin-payment');
+}
+function confirmDepositPaidAmount(order = {}, suggested = 0, currentDeposit = 0) {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.className = 'modal-backdrop open';
+    modal.innerHTML = `<div class="modal deposit-confirm-modal"><div class="section-header"><h2 style="margin:0;">Confirm Deposit Paid</h2></div>
+      <p class="small muted">This locks the amount the customer actually paid. If the order total changes later, the remaining deposit/balance will adjust against this paid amount.</p>
+      <div class="numbers-summary-grid"><div class="numbers-metric"><div class="metric-label">Current 35% Deposit</div><div class="metric-value">${currency(currentDeposit)}</div></div><div class="numbers-metric"><div class="metric-label">Order Total</div><div class="metric-value">${currency(getEffectiveOrderTotal(order))}</div></div></div>
+      <label class="form-row"><span>Amount customer paid</span><input type="number" step="0.01" min="0" data-deposit-confirm-input value="${Number(suggested || 0).toFixed(2)}" /></label>
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:14px;"><button type="button" class="btn btn-ghost" data-deposit-cancel>Cancel</button><button type="button" class="btn btn-primary" data-deposit-save>Confirm Paid</button></div></div>`;
+    document.body.appendChild(modal);
+    const finish = (value) => { modal.remove(); resolve(value); };
+    modal.querySelector('[data-deposit-cancel]').addEventListener('click', () => finish(null));
+    modal.addEventListener('click', (event) => { if (event.target === modal) finish(null); });
+    modal.querySelector('[data-deposit-save]').addEventListener('click', () => {
+      const amount = Number(modal.querySelector('[data-deposit-confirm-input]')?.value || 0);
+      finish({ amount: Number.isFinite(amount) ? amount : 0 });
+    });
+  });
 }
 async function updateOrderVerbalConfirmation(id, verbalConfirmation) {
   const order = state.orders.find((item) => item.id === id);
@@ -2612,12 +2910,13 @@ function openOrderModal(orderId = null) {
 function resetOrderForm(order) {
   els.orderForm.reset();
   ['exchangeDate','returnDate'].forEach((name) => { if (els.orderForm.elements[name]) els.orderForm.elements[name].dataset.userEdited = ''; });
+  if (els.orderForm.elements.total) els.orderForm.elements.total.dataset.userAdjusted = '';
   const now = new Date();
   const defaultDate = now.toISOString().slice(0, 10);
   const values = order || {
     firstName: '', lastName: '', status: 'Pending', paymentStatus: 'Un-Paid', fulfillmentType: 'Pickup', verbalConfirmation: false,
     exchangeDate: defaultDate, exchangeTime: '10:00', returnDate: addDays(defaultDate, 1), returnTime: '17:00',
-    total: 0, adjustedTotal: '', eventDate: '', eventTime: '', eventName: '', address: '', deliveryMiles: 0, deliveryFee: 0, setupFee: 0, tipAmount: 0, notes: '', depositWaived: false, equipmentStillDiscussing: false
+    total: 0, adjustedTotal: '', eventDate: '', eventTime: '', eventName: '', address: '', deliveryFee: 0, setupFee: 0, tipAmount: 0, notes: '', depositWaived: false, equipmentStillDiscussing: false
   };
   Object.keys(values).forEach((key) => {
     const field = els.orderForm.elements[key];
@@ -2625,7 +2924,7 @@ function resetOrderForm(order) {
     if (field.type === 'checkbox') field.checked = Boolean(values[key]);
     else field.value = values[key] ?? '';
   });
-  if (els.orderForm.elements.adjustedTotal) els.orderForm.elements.adjustedTotal.value = order?.adjustedTotal ?? '';
+  if (els.orderForm.elements.total && order) { els.orderForm.elements.total.value = getEffectiveOrderTotal(order).toFixed(2); els.orderForm.elements.total.dataset.userAdjusted = order.adjustedTotal !== '' && order.adjustedTotal != null ? 'true' : ''; }
   if (els.orderForm.elements.eventDate) els.orderForm.elements.eventDate.value = order?.eventDate || '';
   if (els.orderForm.elements.eventTime) els.orderForm.elements.eventTime.value = order?.eventTime || '';
   if (els.orderForm.elements.eventName) els.orderForm.elements.eventName.value = order?.eventName || '';
@@ -2781,9 +3080,9 @@ async function handleOrderSave(event) {
   const listedItemsSubtotal = items.reduce((sum, item) => sum + (Number(item.unitPrice || 0) * Number(item.quantity || 0)) + Number(item.accessorySubtotal || 0), 0);
   const chargedItemsSubtotal = calculateOrderItemsSubtotal(items);
   const baseTotal = chargedItemsSubtotal + deliveryFee + setupFee + tipAmount;
-  const adjustedRaw = form.get('adjustedTotal');
-  const adjustedTotal = adjustedRaw !== '' && adjustedRaw != null ? Number(adjustedRaw || 0) : '';
-  const finalTotal = adjustedTotal === '' ? baseTotal : adjustedTotal;
+  const totalRaw = form.get('total');
+  const finalTotal = totalRaw !== '' && totalRaw != null ? Number(totalRaw || 0) : baseTotal;
+  const adjustedTotal = Math.abs(finalTotal - baseTotal) > 0.004 ? finalTotal : '';
   const existingOrder = state.orders.find((entry) => entry.id === state.editingOrderId) || null;
   const order = {
     id: state.editingOrderId || uid('ord'),
@@ -2801,7 +3100,7 @@ async function handleOrderSave(event) {
     exchangeTime: form.get('exchangeTime'),
     returnDate: form.get('returnDate'),
     returnTime: form.get('returnTime'),
-    deliveryMiles: Number(form.get('deliveryMiles') || 0),
+    deliveryMiles: existingOrder?.deliveryMiles || 0,
     deliveryFee,
     setupFee,
     tipAmount,

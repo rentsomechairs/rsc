@@ -167,6 +167,7 @@
         <div class="token-chip-row" id="numbersTabRow" style="margin-bottom:14px;">
           <button type="button" class="btn btn-primary btn-small" data-numbers-tab="costs">Costs</button>
           <button type="button" class="btn btn-ghost btn-small" data-numbers-tab="earnings">Earnings</button>
+          <button type="button" class="btn btn-ghost btn-small" data-numbers-tab="averages">Averages</button>
           <span id="numbersSaved" class="small badge badge-green" style="margin-left:auto;"></span>
         </div>
 
@@ -175,7 +176,7 @@
             <div class="section-header">
               <div>
                 <strong>Costs</strong>
-                <div class="small muted">Inventory items are listed automatically with blank quantity and price. Add extra rows when the same item was bought in different batches for different prices.</div>
+                <div class="small muted">Track business costs by business category, separate from inventory categories.</div>
               </div>
               <div class="toolbar">
                 <button type="button" class="btn btn-secondary btn-small" id="addCostRowBtn">Add Cost Row</button>
@@ -198,6 +199,22 @@
             </div>
             <div id="earningsSummary" class="numbers-summary-grid"></div>
             <div id="earningsBreakdown" class="stack-sm"></div>
+          </div>
+        </div>
+        <div class="tab-panel" data-numbers-panel="averages">
+          <div class="card" style="padding:18px;">
+            <div class="section-header">
+              <div>
+                <strong>Averages</strong>
+                <div class="small muted">Build time-per-task rules, then compare completed rental income against estimated labor time.</div>
+              </div>
+              <div class="toolbar">
+                <button type="button" class="btn btn-secondary btn-small" id="addAverageTaskBtn">Add Task</button>
+                <button type="button" class="btn btn-primary btn-small" id="saveAveragesBtn">Save Averages</button>
+              </div>
+            </div>
+            <div id="averagesSummary" class="numbers-summary-grid"></div>
+            <div id="averagesList" class="stack-sm"></div>
           </div>
         </div>
       </section>
@@ -313,9 +330,8 @@
           <div class="form-row"><label>Payment Status</label><select name="paymentStatus"> <option>Un-Paid</option><option>Deposit Paid</option><option>Paid</option><option>Free</option></select></div>
           <div class="form-row"><label>Pickup / Delivery</label><select name="fulfillmentType"> <option>Pickup</option><option>Delivery</option><option>To Be Determined</option></select></div>
         </div>
-        <div class="form-row two">
+        <div class="form-row">
           <div class="form-row"><label>Delivery Address</label><input name="address" placeholder="Delivery address if needed" /></div>
-          <div class="form-row"><label>Estimated Round Trip Miles</label><input type="number" step="0.1" min="0" name="deliveryMiles" /></div>
         </div>
         <div class="form-row" style="grid-column:1/-1;">
           <label class="inline-check"><input type="checkbox" name="verbalConfirmation" /> Verbal Confirmation Received</label>
@@ -325,11 +341,9 @@
           <div class="form-row"><label>Event Time</label><input type="hidden" name="eventTime" /><div class="time-select-row" data-time-control="eventTime"></div></div>
         </div>
         <div class="form-row"><label>Event</label><input name="eventName" placeholder="Birthday party, wedding, school event, or leave blank" /></div>
-        <div class="form-row two">
+        <div class="form-row three compact-date-row">
           <div class="form-row"><label>Exchange Date</label><input type="date" name="exchangeDate" required /></div>
           <div class="form-row"><label>Exchange Time</label><input type="hidden" name="exchangeTime" required /><div class="time-select-row" data-time-control="exchangeTime"></div></div>
-        </div>
-        <div class="form-row two">
           <div class="form-row"><label>Return Date</label><input type="date" name="returnDate" required /></div>
           <div class="form-row"><label>Return Time</label><input type="hidden" name="returnTime" required /><div class="time-select-row" data-time-control="returnTime"></div></div>
         </div>
@@ -337,8 +351,8 @@
           <div class="form-row"><label>Delivery Fee</label><input type="number" step="0.01" min="0" name="deliveryFee" /></div>
           <div class="form-row"><label>Setup Fee</label><input type="number" step="0.01" min="0" name="setupFee" /></div>
           <div class="form-row"><label>Tip</label><input type="number" step="0.01" min="0" name="tipAmount" /></div>
-          <div class="form-row"><label>Total</label><input type="number" step="0.01" min="0" name="total" readonly /></div>
-          <div class="form-row"><label>Adjusted Total</label><input type="number" step="0.01" min="0" name="adjustedTotal" placeholder="Optional" /></div>
+          <div class="form-row"><label>Total <span id="orderAdjustedBadge" class="small muted"></span></label><input type="number" step="0.01" min="0" name="total" /></div>
+          <div class="form-row"><label>Deposit</label><input type="number" step="0.01" min="0" name="depositPreview" readonly /></div>
         </div>
         <div id="orderDiscountPreview" class="small muted"></div>
 
