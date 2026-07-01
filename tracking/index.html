@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Track Order • Rent Some Orders</title>
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+</head>
+<body>
+  <div class="landing-shell">
+    <div class="landing-card tracking-card-wrap">
+      <div class="eyebrow">Order Tracking</div>
+      <h1>Track your order</h1>
+      <p class="muted">Enter your tracking number to see your order status and details.</p>
+      <div class="card" style="padding:18px;">
+        <form id="trackingForm" class="form-grid">
+          <div class="form-row two">
+            <div class="form-row">
+              <label for="trackingCodeInput">Tracking Number</label>
+              <input id="trackingCodeInput" autocomplete="off" spellcheck="false" placeholder="ABCD-EFGH" />
+            </div>
+            <div class="form-row" style="align-self:end;">
+              <button class="btn btn-primary" type="submit">Track Order</button>
+            </div>
+          </div>
+        </form>
+        <div id="trackingStatus" class="small muted" style="margin-top:8px;"></div>
+      </div>
+      <div id="trackingResult" class="tracking-result hidden"></div>
+    </div>
+  </div>
+  <div class="modal-backdrop" id="tipModalWrap">
+    <div class="modal" style="max-width:560px;">
+      <div class="section-header">
+        <h2 style="margin:0;">Thank You</h2>
+        <button type="button" class="btn btn-ghost" id="tipModalCloseBtn">Close</button>
+      </div>
+      <div id="tipModalBody" class="stack-sm"></div>
+    </div>
+  </div>
+  <script type="module" src="../assets/js/app-tracking.js"></script>
+</body>
+</html>

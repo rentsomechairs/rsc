@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin • Rent Some Orders</title>
+  <link rel="stylesheet" href="../assets/css/styles.css" />
+</head>
+<body>
+  <div id="loginView" class="login-shell hidden">
+    <div class="login-card">
+      <div class="eyebrow">Admin Only</div>
+      <h1>Sign in</h1>
+      <p class="muted">Sign in with your admin account.</p>
+      <form id="loginForm" class="form-grid">
+        <div class="form-row"><label>Email</label><input type="email" name="email" required /></div>
+        <div class="form-row"><label>Password</label><input type="password" name="password" required /></div>
+        <button class="btn btn-primary" type="submit">Log In</button>
+        <div id="loginError" class="small" style="color:#b91c1c;"></div>
+        
+</form>
+    </div>
+    </div>
+  </div>
+
+  <div id="appView" class="layout hidden">
+    <aside class="sidebar">
+      <div class="brand">Rent Some Orders</div>
+      <div class="nav-list">
+        <button class="nav-btn active" data-tab-btn="orders">Orders</button>
+        <button class="nav-btn" data-tab-btn="route">Delivery Route</button>
+        <button class="nav-btn" data-tab-btn="inventory">Inventory</button>
+        <button class="nav-btn" data-tab-btn="calendar">Quick Peek</button>
+        <button class="nav-btn" data-tab-btn="reviews">Reviews</button>
+        <button class="nav-btn" data-tab-btn="numbers">The Numbers</button>
+        <button class="nav-btn" data-tab-btn="settings">Settings</button>
+      </div>
+      <div class="sidebar-footer">
+        <div class="small muted">Quick links</div>
+        <div class="stack-sm" style="margin-top:10px;">
+          <a class="btn btn-ghost btn-small" href="../quick-picker/index.html">Open Quick Picker</a>
+          <a class="btn btn-ghost btn-small" href="../gallery/index.html">Open Gallery</a>
+          <a class="btn btn-ghost btn-small" href="../tracking/index.html">Open Tracking</a>
+          <a class="btn btn-ghost btn-small" href="../reviews/index.html">Open Reviews</a>
+          <button class="btn btn-ghost btn-small" id="copyPickupAddressBtn" type="button">Copy Pickup Address</button>
+          <button class="btn btn-secondary btn-small" id="logoutBtn">Log Out</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <h1 style="margin:0;">Admin Dashboard</h1>
+          <div class="muted small">Track inquiries, inventory, and settings.</div>
+        </div>
+      </div>
+
+      <section class="tab-panel active" data-tab-panel="orders">
+        <div class="section-header">
+          <div>
+            <h2 style="margin:0;">Orders</h2>
+            <div class="muted small">Pending stays unreserved. Confirmed and In-Progress reduce stock.</div>
+          </div>
+          <button class="btn btn-primary" id="addOrderBtn">Add Order</button>
+        </div>
+        <div class="collapsed-columns-rail" id="collapsedColumnsRail"></div>
+        <div class="columns columns-orders" id="ordersColumns">
+          <div class="column column-side" id="pendingColumn" data-column="pending">
+            <div class="column-head">
+              <div class="column-head-title">
+                <h3>Pending Orders</h3>
+                <div id="pendingTotal" class="badge badge-yellow inline-total"></div>
+              </div>
+              <button class="btn btn-ghost btn-small" type="button" data-toggle-column="pending">Collapse</button>
+            </div>
+            <div id="pendingList" class="order-list"></div>
+          </div>
+          <div class="column column-main" id="confirmedColumn" data-column="confirmed">
+            <div class="column-head">
+              <div class="column-head-title">
+                <h3>Confirmed Orders</h3>
+                <div id="confirmedTotal" class="badge badge-blue inline-total"></div>
+              </div>
+            </div>
+            <div id="confirmedList" class="order-list"></div>
+          </div>
+          <div class="column column-side" id="completedColumn" data-column="completed">
+            <div class="column-head">
+              <div class="column-head-title">
+                <h3>Completed Orders</h3>
+                <div id="completedTotal" class="badge badge-green inline-total"></div>
+              </div>
+              <button class="btn btn-ghost btn-small" type="button" data-toggle-column="completed">Collapse</button>
+            </div>
+            <div id="completedList" class="order-list"></div>
+          </div>
+        </div>
+      </section>
+
+
+
+      <section class="tab-panel" data-tab-panel="route">
+        <div class="section-header">
+          <div>
+            <h2 style="margin:0;">Delivery Route</h2>
+            <div class="muted small">See upcoming delivery drop-offs and customer pickups grouped by date, then open the route in Google Maps.</div>
+          </div>
+        </div>
+        <div id="routeStopsList" class="order-list"></div>
+      </section>
+
+      <section class="tab-panel" data-tab-panel="calendar">
+        <div class="section-header">
+          <div>
+            <h2 style="margin:0;">Quick Peek</h2>
+            <div class="muted small">Pick an event date and quickly see available equipment for the full exchange-to-return window.</div>
+          </div>
+        </div>
+        <div class="card" style="padding:18px;">
+          <div class="calendar-toolbar">
+            <button type="button" class="btn btn-ghost btn-small" id="calendarPrevBtn">←</button>
+            <label class="quick-peek-date-field"><span>Exchange Date</span><input type="date" id="quickPeekExchangeDateInput" /></label>
+            <label class="quick-peek-date-field"><span>Event Date</span><input type="date" id="calendarDateInput" /></label>
+            <label class="quick-peek-date-field"><span>Return Date</span><input type="date" id="quickPeekReturnDateInput" /></label>
+            <button type="button" class="btn btn-ghost btn-small" id="calendarTodayBtn">Today</button>
+            <button type="button" class="btn btn-ghost btn-small" id="calendarNextBtn">→</button>
+            <div id="calendarDateLabel" class="small muted"></div>
+          </div>
+          <div id="calendarAvailabilityBoard" class="calendar-availability-board"></div>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-tab-panel="inventory">
+        <div class="section-header">
+          <div>
+            <h2 style="margin:0;">Inventory</h2>
+            <div class="muted small">Category, stock, pricing, and images.</div>
+          </div>
+          <div class="toolbar">
+            <div id="inventoryStats"></div>
+            <button class="btn btn-primary" id="addInventoryBtn">Add Inventory</button>
+          </div>
+        </div>
+        <div id="inventoryList" class="inventory-grid"></div>
+      </section>
+
+      <section class="tab-panel" data-tab-panel="reviews">
+        <div class="section-header">
+          <div>
+            <h2 style="margin:0;">Reviews</h2>
+            <div class="muted small">Delete test reviews or check recent customer feedback.</div>
+          </div>
+          <a class="btn btn-secondary btn-small" href="../reviews/index.html" target="_blank" rel="noopener">Open Public Reviews</a>
+        </div>
+        <div id="reviewsList" class="stack-sm"></div>
+      </section>
+
+
+      <section class="tab-panel" data-tab-panel="numbers">
+        <div class="section-header">
+          <div>
+            <h2 style="margin:0;">The Numbers</h2>
+            <div class="muted small">Track what the business paid for equipment and what completed orders earned.</div>
+          </div>
+        </div>
+        <div class="token-chip-row" id="numbersTabRow" style="margin-bottom:14px;">
+          <button type="button" class="btn btn-primary btn-small" data-numbers-tab="costs">Costs</button>
+          <button type="button" class="btn btn-ghost btn-small" data-numbers-tab="earnings">Earnings</button>
+          <span id="numbersSaved" class="small badge badge-green" style="margin-left:auto;"></span>
+        </div>
+
+        <div class="tab-panel active" data-numbers-panel="costs">
+          <div class="card" style="padding:18px;">
+            <div class="section-header">
+              <div>
+                <strong>Costs</strong>
+                <div class="small muted">Inventory items are listed automatically with blank quantity and price. Add extra rows when the same item was bought in different batches for different prices.</div>
+              </div>
+              <div class="toolbar">
+                <button type="button" class="btn btn-secondary btn-small" id="addCostRowBtn">Add Cost Row</button>
+                <button type="button" class="btn btn-primary btn-small" id="saveCostsBtn">Save Costs</button>
+              </div>
+            </div>
+            <div id="costsSummary" class="numbers-summary-grid"></div>
+            <div id="costsList" class="numbers-table-wrap"></div>
+          </div>
+        </div>
+
+        <div class="tab-panel" data-numbers-panel="earnings">
+          <div class="card" style="padding:18px;">
+            <div class="section-header">
+              <div>
+                <strong>Earnings</strong>
+                <div class="small muted">Calculated from completed orders only. This breaks out item rentals, delivery fees, setup fees, tips, and custom discounts/adjustments.</div>
+              </div>
+              <label class="form-row" style="max-width:220px; margin:0;"><span>View</span><select id="earningsViewSelect"><option value="weekly">Weekly</option><option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select></label>
+            </div>
+            <div id="earningsSummary" class="numbers-summary-grid"></div>
+            <div id="earningsBreakdown" class="stack-sm"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-tab-panel="settings">
+        <div class="section-header">
+          <div>
+            <h2 style="margin:0;">Settings</h2>
+            <div class="muted small">Pickup location and quote defaults.</div>
+          </div>
+        </div>
+        <form id="settingsForm" class="card" style="padding:18px;">
+          <div class="settings-grid">
+            <div class="form-row"><label>Business Name</label><input name="businessName" required /></div>
+            <div class="form-row"><label>Pickup Location Name</label><input name="pickupName" required /></div>
+            <div class="form-row">
+              <label>Pickup Address</label>
+              <div class="address-autocomplete">
+                <input name="pickupAddress" id="pickupAddressInput" required />
+                <div id="pickupAddressSuggestions" class="address-suggestions hidden"></div>
+              </div>
+              <div id="pickupLookupStatus" class="small muted" style="margin-top:6px;"></div>
+            </div>
+            <div class="form-row"><label>Delivery Rate Per Mile (round trip)</label><input type="number" step="0.01" min="0" name="deliveryRatePerMile" required /></div>
+            <div class="form-row"><label>Minimum Order for 35% Deposit</label><input type="number" step="0.01" min="0" name="depositMinimumOrder" required /><div class="small muted" style="margin-top:6px;">Orders above this total can use the 35% deposit option. Orders at or below this must be paid in full.</div></div>
+            <div class="form-row"><label>Notification Email</label><input type="email" name="notificationEmail" required /></div>
+            <div class="form-row"><label>Notification From Name</label><input name="notificationFromName" placeholder="Rent Some Orders" /></div>
+            <div class="form-row" style="grid-column:1/-1;">
+              <label style="display:flex; gap:10px; align-items:center;"><input type="checkbox" name="emailNotificationsEnabled" /> Enable inquiry email notifications</label>
+              <div class="small muted" style="margin-top:6px;">Free setup option: EmailJS. Add your EmailJS Public Key, Service ID, and Template ID below.</div>
+            </div>
+            <div class="form-row"><label>EmailJS Public Key</label><input name="emailjsPublicKey" placeholder="public_xxxxx" /></div>
+            <div class="form-row"><label>EmailJS Service ID</label><input name="emailjsServiceId" placeholder="service_xxxxx" /></div>
+            <div class="form-row"><label>EmailJS Template ID</label><input name="emailjsTemplateId" placeholder="template_xxxxx" /></div>
+            <div class="form-row"><label>Google Maps API Key</label><input name="googleMapsApiKey" placeholder="AIza..." /></div>
+            <div class="form-row" style="grid-column:1/-1;"><hr style="border:0; border-top:1px solid var(--line); margin:4px 0;" /></div>
+            <div class="form-row" style="grid-column:1/-1;">
+              <strong>Homepage Images</strong>
+              <div class="small muted" style="margin-top:6px;">Optional. Upload homepage images the same way inventory images work. Leave blank and the homepage will pull real images from inventory.</div>
+            </div>
+            <div class="form-row homepage-image-row">
+              <label>Hero Image</label>
+              <input type="file" id="homeHeroImageUpload" accept="image/*" />
+              <input type="hidden" name="homeHeroImageData" id="homeHeroImageData" />
+              <img id="homeHeroImagePreview" class="inventory-image" alt="Hero image preview" hidden />
+              <button type="button" class="btn ghost" data-clear-home-image="Hero">Clear Hero Image</button>
+            </div>
+            <div class="form-row homepage-image-row">
+              <label>Quick Quote Card Image</label>
+              <input type="file" id="homeQuoteImageUpload" accept="image/*" />
+              <input type="hidden" name="homeQuoteImageData" id="homeQuoteImageData" />
+              <img id="homeQuoteImagePreview" class="inventory-image" alt="Quick quote image preview" hidden />
+              <button type="button" class="btn ghost" data-clear-home-image="Quote">Clear Quick Quote Image</button>
+            </div>
+            <div class="form-row homepage-image-row">
+              <label>Browse Rentals Card Image</label>
+              <input type="file" id="homeBrowseImageUpload" accept="image/*" />
+              <input type="hidden" name="homeBrowseImageData" id="homeBrowseImageData" />
+              <img id="homeBrowseImagePreview" class="inventory-image" alt="Browse rentals image preview" hidden />
+              <button type="button" class="btn ghost" data-clear-home-image="Browse">Clear Browse Image</button>
+            </div>
+            <div class="form-row homepage-image-row">
+              <label>Track Order Card Image</label>
+              <input type="file" id="homeTrackImageUpload" accept="image/*" />
+              <input type="hidden" name="homeTrackImageData" id="homeTrackImageData" />
+              <img id="homeTrackImagePreview" class="inventory-image" alt="Track order image preview" hidden />
+              <button type="button" class="btn ghost" data-clear-home-image="Track">Clear Track Image</button>
+            </div>
+          </div>
+          <div class="small muted" style="margin-top:10px;">Address autocomplete uses Google Maps when a Google Maps API key is saved here. If the key is blank or fails, it falls back to OpenStreetMap. Restrict your key to your site domain in Google Cloud.</div>
+          <div class="card" style="padding:16px; margin-top:16px;">
+            <div class="section-header">
+              <div>
+                <strong>Payment Options</strong>
+                <div class="small muted">Turn methods on or off and add the handle, link, or destination customers should use.</div>
+              </div>
+            </div>
+            <div id="paymentOptionsBox" class="stack-sm"></div>
+          </div>
+          <div style="margin-top:16px; display:flex; gap:10px; align-items:center;">
+            <button class="btn btn-primary" type="submit">Save Settings</button>
+            <span id="settingsSaved" class="small badge badge-green"></span>
+          </div>
+          <div class="note-block small">
+            Free safety tools: append-only audit log, manual JSON backup export, manual snapshot save, and backup restore.
+          </div>
+          <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <button type="button" class="btn btn-secondary" id="backupExportBtn">Download Backup JSON</button>
+            <button type="button" class="btn btn-ghost" id="backupSnapshotBtn">Create Snapshot</button>
+            <button type="button" class="btn btn-ghost" id="backupImportBtn">Restore Backup JSON</button>
+            <input type="file" id="backupImportFile" accept="application/json" class="hidden" />
+            <span id="backupStatus" class="small badge badge-blue"></span>
+          </div>
+          
+</form>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="orderModalWrap">
+    <div class="modal">
+      <div class="section-header">
+        <h2 id="orderModalTitle" style="margin:0;">Add Order</h2>
+        <button type="button" class="btn btn-ghost" data-close-modal>Close</button>
+      </div>
+      <form id="orderForm" class="form-grid">
+        <div class="form-row two">
+          <div class="form-row"><label>First Name</label><input name="firstName" required /></div>
+          <div class="form-row"><label>Last Name</label><input name="lastName" /></div>
+        </div>
+        <div class="form-row three">
+          <div class="form-row"><label>Status</label><select name="status"> <option>Pending</option><option>Confirmed</option><option>In-Progress</option><option>Completed</option></select></div>
+          <div class="form-row"><label>Payment Status</label><select name="paymentStatus"> <option>Un-Paid</option><option>Deposit Paid</option><option>Paid</option><option>Free</option></select></div>
+          <div class="form-row"><label>Pickup / Delivery</label><select name="fulfillmentType"> <option>Pickup</option><option>Delivery</option><option>To Be Determined</option></select></div>
+        </div>
+        <div class="form-row two">
+          <div class="form-row"><label>Delivery Address</label><input name="address" placeholder="Delivery address if needed" /></div>
+          <div class="form-row"><label>Estimated Round Trip Miles</label><input type="number" step="0.1" min="0" name="deliveryMiles" /></div>
+        </div>
+        <div class="form-row" style="grid-column:1/-1;">
+          <label class="inline-check"><input type="checkbox" name="verbalConfirmation" /> Verbal Confirmation Received</label>
+        </div>
+        <div class="form-row two">
+          <div class="form-row"><label>Event Date</label><input type="date" name="eventDate" /></div>
+          <div class="form-row"><label>Event Time</label><input type="hidden" name="eventTime" /><div class="time-select-row" data-time-control="eventTime"></div></div>
+        </div>
+        <div class="form-row"><label>Event</label><input name="eventName" placeholder="Birthday party, wedding, school event, or leave blank" /></div>
+        <div class="form-row two">
+          <div class="form-row"><label>Exchange Date</label><input type="date" name="exchangeDate" required /></div>
+          <div class="form-row"><label>Exchange Time</label><input type="hidden" name="exchangeTime" required /><div class="time-select-row" data-time-control="exchangeTime"></div></div>
+        </div>
+        <div class="form-row two">
+          <div class="form-row"><label>Return Date</label><input type="date" name="returnDate" required /></div>
+          <div class="form-row"><label>Return Time</label><input type="hidden" name="returnTime" required /><div class="time-select-row" data-time-control="returnTime"></div></div>
+        </div>
+        <div class="form-row three">
+          <div class="form-row"><label>Delivery Fee</label><input type="number" step="0.01" min="0" name="deliveryFee" /></div>
+          <div class="form-row"><label>Setup Fee</label><input type="number" step="0.01" min="0" name="setupFee" /></div>
+          <div class="form-row"><label>Tip</label><input type="number" step="0.01" min="0" name="tipAmount" /></div>
+          <div class="form-row"><label>Total</label><input type="number" step="0.01" min="0" name="total" readonly /></div>
+          <div class="form-row"><label>Adjusted Total</label><input type="number" step="0.01" min="0" name="adjustedTotal" placeholder="Optional" /></div>
+        </div>
+        <div id="orderDiscountPreview" class="small muted"></div>
+
+        <div class="form-row"><label>Notes</label><textarea name="notes" placeholder="Optional notes for this order"></textarea></div>
+
+        <div class="card" style="padding:16px;">
+          <div class="section-header">
+            <div><strong>Contact Methods</strong></div>
+          </div>
+          <div id="contactMethodChecks" class="contact-options"></div>
+          <div id="contactMethodInputs" style="margin-top:12px; display:grid; gap:12px;"></div>
+        </div>
+
+        <div class="card" style="padding:16px;">
+          <div class="section-header">
+            <div><strong>Items</strong></div>
+            <button type="button" class="btn btn-secondary btn-small" id="addOrderItemRow">Add Item</button>
+          </div>
+          <div id="orderItemsBox"></div>
+        </div>
+
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+          <button type="button" class="btn btn-ghost" data-close-modal>Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Order</button>
+        </div>
+        
+</form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="inventoryModalWrap">
+    <div class="modal">
+      <div class="section-header">
+        <h2 id="inventoryModalTitle" style="margin:0;">Add Inventory Item</h2>
+        <button type="button" class="btn btn-ghost" data-close-modal>Close</button>
+      </div>
+      <form id="inventoryForm" class="form-grid">
+        <div class="form-row two">
+          <div class="form-row"><label>Category</label><input name="category" list="categorySuggestions" required /><datalist id="categorySuggestions"></datalist></div>
+          <div class="form-row"><label>Item Name</label><input name="name" required /></div>
+        </div>
+        <div class="form-row"><label>Description</label><textarea name="description"></textarea></div>
+        <div class="form-row two">
+          <div class="form-row"><label>Price Per Unit</label><input type="number" step="0.01" min="0" name="price" required /></div>
+          <div class="form-row"><label>Total In Stock</label><input type="number" min="0" name="stock" required /></div>
+        </div>
+        <div class="form-row two">
+          <div class="form-row"><label>Small Picture</label><input type="file" name="imageUpload" id="imageUpload" accept="image/*" /><div class="small muted" style="margin-top:6px;">Choose an image from your computer. It will be resized and saved with the item.</div><input type="hidden" name="imageData" id="imageData" value="" /></div>
+          <div class="form-row"><label>Preview</label><img id="inventoryPreview" class="inventory-image" alt="Preview" /></div>
+        </div>
+
+        <div class="form-row">
+          <div class="section-header" style="margin-bottom:8px;">
+            <div>
+              <label style="margin:0;">Accessories</label>
+              <div class="small muted">Add optional upgrades like fitted covers. Customers can check more than one.</div>
+            </div>
+            <button type="button" class="btn btn-secondary btn-small" id="addAccessoryBtn">Add Accessory</button>
+          </div>
+          <div id="accessoriesBox" class="accessory-admin-list"></div>
+        </div>
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+          <button type="button" class="btn btn-ghost" data-close-modal>Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Inventory Item</button>
+        </div>
+        
+</form>
+    </div>
+  </div>
+
+
+  <div class="modal-backdrop" id="reminderModalWrap">
+    <div class="modal reminder-modal">
+      <div class="section-header">
+        <h2 id="reminderModalTitle" style="margin:0;">Reminder</h2>
+        <button type="button" class="btn btn-ghost" data-close-reminder-modal>Close</button>
+      </div>
+      <div class="token-chip-row" id="reminderTabRow" style="margin-bottom:14px;">
+        <button type="button" class="btn btn-primary btn-small" data-reminder-tab="details">Order Details</button>
+        <button type="button" class="btn btn-ghost btn-small" data-reminder-tab="updates">Update</button>
+        <button type="button" class="btn btn-ghost btn-small" data-reminder-tab="review">Review Request</button>
+        <span id="reminderCopiedStatus" class="small muted" style="margin-left:auto;"></span>
+      </div>
+      <div class="tab-panel active" data-reminder-panel="details">
+        <div class="settings-grid">
+          <label class="check-pill"><input type="checkbox" id="reminderVerbalCheckbox" /> Verbal confirmation received</label>
+          <label class="check-pill"><input type="checkbox" id="reminderDepositWaivedCheckbox" /> Deposit waived</label>
+          <label class="check-pill"><input type="checkbox" id="reminderEquipmentDiscussionCheckbox" /> Equipment still being discussed</label>
+          <label class="check-pill"><input type="checkbox" id="reminderFriendlyIntroCheckbox" /> Use friendly reminder first line</label>
+        </div>
+      </div>
+      <div class="tab-panel" data-reminder-panel="updates">
+        <div id="reminderUpdatesList" class="stack-sm"></div>
+      </div>
+      <div class="tab-panel" data-reminder-panel="review">
+        <div class="settings-grid">
+          <label class="check-pill"><input type="checkbox" id="reviewOlderCustomerCheckbox" /> Older customer / past order wording</label>
+        </div>
+      </div>
+      <div class="form-row" style="margin-top:16px;">
+        <label>Preview</label>
+        <textarea id="reminderPreviewOutput" rows="18" readonly></textarea>
+      </div>
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:14px;">
+        <button type="button" class="btn btn-secondary" id="copyReminderPreviewBtn">Copy Again</button>
+        <button type="button" class="btn btn-ghost" data-close-reminder-modal>Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="appBusyOverlay" class="app-busy-overlay" aria-hidden="true">
+    <div class="app-busy-card">
+      <div class="app-busy-spinner" aria-hidden="true"></div>
+      <div id="appBusyMessage" class="app-busy-message">Saving…</div>
+    </div>
+  </div>
+
+  <script type="module" src="../assets/js/app-admin.js"></script>
+</body>
+</html>
