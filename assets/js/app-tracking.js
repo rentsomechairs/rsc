@@ -29,6 +29,7 @@ async function init() {
   }
   const code = getRequestedCode();
   if (code) showTicketLoading(code);
+  else if (els.trackingStatus) els.trackingStatus.innerHTML = '<div class="section-loading-card"><span class="section-loading-spinner" aria-hidden="true"></span><span>Loading from Firebase…</span></div>';
   state.settings = await getSettings().catch(() => ({}));
   state.adminSession = await getSession().catch(() => null);
   state.records = await getPublicTrackingRecords();
@@ -38,6 +39,8 @@ async function init() {
     await renderTracking(code);
   } else if (state.adminSession) {
     renderAdminTrackingList();
+  } else if (els.trackingStatus) {
+    els.trackingStatus.textContent = 'Enter your tracking number.';
   }
 }
 

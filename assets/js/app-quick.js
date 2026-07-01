@@ -176,6 +176,7 @@ document.addEventListener('DOMContentLoaded', () => { init().catch(console.error
 
 async function init() {
   cacheEls();
+  renderQuickLoadingPlaceholders();
   await loadData();
   await initGoogleDeliveryAutocomplete();
   setDefaultDates();
@@ -255,6 +256,11 @@ function cacheEls() {
     reviewContent: document.getElementById('reviewContent'),
     submitInquiry: document.getElementById('submitInquiry')
   });
+}
+
+function renderQuickLoadingPlaceholders() {
+  const loading = '<div class="section-loading-card"><span class="section-loading-spinner" aria-hidden="true"></span><span>Loading from Firebase…</span></div>';
+  [els.categoryChips, els.availabilityBoard, els.itemChooser, els.summaryCard].forEach((target) => { if (target) target.innerHTML = loading; });
 }
 
 async function loadData() {

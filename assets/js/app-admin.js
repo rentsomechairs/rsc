@@ -19,6 +19,7 @@ const state = {
   editingOrderId: null,
   editingInventoryId: null,
   expandedOrderId: null,
+  expandedInventoryIds: {},
   imageLibrary: [],
   pickupSuggestions: [],
   pickupLookupToken: 0,
@@ -268,9 +269,12 @@ async function init() {
   els.loginView.classList.add('hidden');
   els.appView.classList.remove('hidden');
   bindApp();
-  await loadImageLibrary();
-  await loadData();
-  renderAll();
+  renderLoadingPlaceholders('Loading from Firebase…');
+  await withBusy(async () => {
+    await loadImageLibrary();
+    await loadData();
+    renderAll();
+  }, 'Loading from Firebase…');
 }
 function cacheEls() {
   Object.assign(els, {
@@ -715,6 +719,19 @@ async function withBusy(task, message = 'Saving…') {
   } finally {
     setBusyState(false);
   }
+}
+
+function loadingCard(message = 'Loading from Firebase…') {
+  return `<div class="section-loading-card"><span class="section-loading-spinner" aria-hidden="true"></span><span>${safeText(message)}</span></div>`;
+}
+function renderLoadingPlaceholders(message = 'Loading from Firebase…') {
+  const targets = [
+    els.pendingList, els.confirmedList, els.completedList, els.routeStopsList, els.inventoryList,
+    els.calendarAvailabilityBoard, els.reviewsList, els.costsSummary, els.costsList,
+    els.earningsSummary, els.earningsBreakdown, els.averagesSummary, els.averagesList
+  ];
+  targets.forEach((target) => { if (target) target.innerHTML = loadingCard(message); });
+  if (els.inventoryStats) els.inventoryStats.innerHTML = `<span class="badge badge-blue">Loading…</span>`;
 }
 async function saveAndRefresh(actor = 'admin') {
   await withBusy(async () => {
@@ -1602,7 +1619,7 @@ function buildReminderDiscountDetails(order = {}) {
 }
 function syncOrderTotalsPreview() {
   if (!els.orderForm) return;
-  const rows = [...els.orderItemsBox.querySelectorAll('.card')];
+  const rows = [...els.orderItemsBox.querySelectorAll('.order-item-card, .card')];
   const listedItemsSubtotal = rows.reduce((sum, row) => {
     const inventoryId = row.querySelector('[name="item_inventoryId"]')?.value;
     const quantity = Number(row.querySelector('[name="item_quantity"]')?.value || 0);
@@ -2621,38 +2638,50 @@ async function deleteOrder(id) {
 function renderInventory() {
   const html = state.inventory.map((item) => {
     const stats = inventoryAvailabilityStats(item.id);
+    const expanded = Boolean(state.expandedInventoryIds?.[item.id]);
+    const accessories = normalizeAccessories(item.accessories);
     return `
-      <div class="inventory-card">
-        <div class="inventory-head">
-          <div class="item-qty-row">
-            <img class="inventory-image" src="${getInventoryImageSrc(item)}" alt="${safeText(item.name)}" />
-            <div class="stack-sm">
-              <strong>${safeText(item.name)}</strong>
-              <span class="muted small">${safeText(item.category)}</span>
-              <span class="small">${safeText(item.description || '')}</span>
-            </div>
-            <div class="stack-sm">
-              <button class="btn btn-ghost btn-small" data-edit-inventory="${item.id}">Edit</button>
-              <button class="btn btn-ghost btn-small" data-delete-inventory="${item.id}">Delete</button>
+      <div class="inventory-card gallery-style-inventory${expanded ? ' expanded' : ''}">
+        <button type="button" class="inventory-gallery-toggle" data-toggle-inventory="${safeText(item.id)}" aria-expanded="${expanded ? 'true' : 'false'}">
+          <div class="gallery-image-wrap inventory-gallery-image-wrap">
+            ${getInventoryImageSrc(item) ? `<img class="gallery-image" src="${getInventoryImageSrc(item)}" alt="${safeText(item.name)}" />` : `<div class="inventory-image-placeholder">No Image</div>`}
+          </div>
+          <div class="gallery-card-body inventory-gallery-body">
+            <div class="gallery-card-top inventory-collapsed-title">
+              <h3>${safeText(item.name)}</h3>
             </div>
           </div>
-        </div>
-        <div class="hr"></div>
-        <div class="small kv">
-          <div class="kv-row"><span>Price</span><strong>${currency(item.price)}</strong></div>
-          <div class="kv-row"><span>Accessories</span><strong>${normalizeAccessories(item.accessories).length || 0}</strong></div>
-          <div class="kv-row"><span>Total in stock</span><strong>${item.stock}</strong></div>
-          <div class="kv-row"><span>Out right now</span><strong>${stats.outNow}</strong></div>
-          <div class="kv-row"><span>Available right now</span><strong>${stats.availableNow}</strong></div>
-          <div class="kv-row"><span>Pending today</span><strong>${stats.pendingToday}</strong></div>
+        </button>
+        <div class="inventory-expanded-details" ${expanded ? '' : 'hidden'}>
+          <div class="small muted">${safeText(item.description || 'No description yet.')}</div>
+          <div class="small kv">
+            <div class="kv-row"><span>Category</span><strong>${safeText(item.category || 'Other')}</strong></div>
+            <div class="kv-row"><span>Price</span><strong>${currency(item.price)}</strong></div>
+            <div class="kv-row"><span>Total stock</span><strong>${Number(item.stock || 0)}</strong></div>
+            <div class="kv-row"><span>Accessories</span><strong>${accessories.length || 0}</strong></div>
+            <div class="kv-row"><span>Out right now</span><strong>${stats.outNow}</strong></div>
+            <div class="kv-row"><span>Available right now</span><strong>${stats.availableNow}</strong></div>
+            <div class="kv-row"><span>Pending today</span><strong>${stats.pendingToday}</strong></div>
+          </div>
+          ${accessories.length ? `<div class="inventory-accessory-list">${accessories.map((acc) => `<span class="badge badge-light">${safeText(acc.name)} · ${currency(acc.price)}</span>`).join('')}</div>` : ''}
+          <div class="button-row inventory-action-row">
+            <button class="btn btn-secondary btn-small" data-edit-inventory="${safeText(item.id)}">Edit</button>
+            <button class="btn btn-ghost btn-small" data-delete-inventory="${safeText(item.id)}">Delete</button>
+          </div>
         </div>
       </div>`;
   }).join('');
   els.inventoryList.innerHTML = html || '<div class="empty-state">No inventory added yet.</div>';
   const categories = getCategories();
   els.inventoryStats.innerHTML = `<span class="badge badge-blue">${state.inventory.length} items</span> <span class="badge badge-green">${categories.length} categories</span>`;
-  document.querySelectorAll('[data-edit-inventory]').forEach((btn) => btn.addEventListener('click', () => openInventoryModal(btn.dataset.editInventory)));
-  document.querySelectorAll('[data-delete-inventory]').forEach((btn) => btn.addEventListener('click', () => deleteInventory(btn.dataset.deleteInventory)));
+  document.querySelectorAll('[data-toggle-inventory]').forEach((btn) => btn.addEventListener('click', () => {
+    const id = btn.dataset.toggleInventory;
+    const wasExpanded = Boolean(state.expandedInventoryIds?.[id]);
+    state.expandedInventoryIds = wasExpanded ? {} : { [id]: true };
+    renderInventory();
+  }));
+  document.querySelectorAll('[data-edit-inventory]').forEach((btn) => btn.addEventListener('click', (event) => { event.stopPropagation(); openInventoryModal(btn.dataset.editInventory); }));
+  document.querySelectorAll('[data-delete-inventory]').forEach((btn) => btn.addEventListener('click', (event) => { event.stopPropagation(); deleteInventory(btn.dataset.deleteInventory); }));
 }
 function normalizeOrderStatus(status = '') {
   return String(status || '').trim().toLowerCase().replace(/[\s_-]+/g, '-');
@@ -2959,33 +2988,91 @@ function renderContactMethodInputs(selectedMethods = [], values = {}) {
   pickWrap.querySelectorAll('[data-contact-check]').forEach((input) => input.addEventListener('change', paintInputs));
   paintInputs();
 }
+
+function normalizeItemName(value = '') {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function findDefaultOrderInventoryItem() {
+  const inventory = state.inventory || [];
+  return inventory.find((item) => normalizeItemName(item.name).includes('white folding chair'))
+    || inventory.find((item) => normalizeItemName(item.name).includes('folding chair'))
+    || inventory.find((item) => normalizeItemName(item.category) === 'chairs')
+    || inventory[0]
+    || null;
+}
+function buildInventoryOptions(selectedId = '') {
+  return (state.inventory || []).map((item) => `<option value="${safeText(item.id)}"${item.id === selectedId ? ' selected' : ''}>${safeText(item.name)} (${safeText(item.category)}) - ${currency(item.price)}</option>`).join('');
+}
+function getInventoryCategoriesForOrderPicker() {
+  const seen = new Set();
+  return (state.inventory || []).map((item) => item.category || 'Other').filter((category) => {
+    const key = normalizeCategory(category || 'Other');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function renderQuickCategoryButtons() {
+  const categories = getInventoryCategoriesForOrderPicker();
+  if (!categories.length) return '';
+  return `<div class="quick-item-picker"><div class="small muted">Add another item by category</div><div class="quick-category-row">${categories.map((category) => `<button type="button" class="btn btn-ghost btn-small" data-quick-category="${safeText(category)}">${safeText(category)}</button>`).join('')}</div><div class="quick-category-menu" data-quick-category-menu hidden></div></div>`;
+}
+function openQuickCategoryMenu(button) {
+  const wrap = button.closest('.quick-item-picker');
+  const menu = wrap?.querySelector('[data-quick-category-menu]');
+  if (!wrap || !menu) return;
+  const category = button.dataset.quickCategory || '';
+  const items = (state.inventory || []).filter((item) => normalizeCategory(item.category || 'Other') === normalizeCategory(category || 'Other'));
+  wrap.querySelectorAll('[data-quick-category]').forEach((btn) => btn.classList.toggle('active', btn === button));
+  menu.hidden = false;
+  menu.innerHTML = items.length ? items.map((item) => `<button type="button" class="quick-inventory-option" data-quick-inventory-id="${safeText(item.id)}"><span>${safeText(item.name)}</span><strong>${currency(item.price)}</strong></button>`).join('') : '<div class="small muted">No items in this category.</div>';
+}
+function closeQuickCategoryMenus(except = null) {
+  document.querySelectorAll('[data-quick-category-menu]').forEach((menu) => {
+    if (except && menu === except) return;
+    menu.hidden = true;
+    menu.innerHTML = '';
+  });
+  document.querySelectorAll('[data-quick-category]').forEach((btn) => btn.classList.remove('active'));
+}
+
 function renderOrderItemInputs(items = []) {
-  const options = state.inventory.map((item) => `<option value="${item.id}">${safeText(item.name)} (${safeText(item.category)}) - ${currency(item.price)}</option>`).join('');
+  const defaultItem = findDefaultOrderInventoryItem();
   const rows = items.length ? items.map((item) => ({
     ...item,
     customUnitPrice: item?.customUnitPrice ?? item?.chargedUnitPrice ?? ''
-  })) : [{ inventoryId: state.inventory[0]?.id || '', quantity: 1, customUnitPrice: '', accessories: [] }];
-  els.orderItemsBox.innerHTML = rows.map((item) => renderOrderItemRow(item, options)).join('');
-  [...els.orderItemsBox.querySelectorAll('.card')].forEach((row, index) => renderAccessoryOptionsForRow(row, rows[index]?.accessories || []));
+  })) : [{ inventoryId: defaultItem?.id || '', quantity: 1, customUnitPrice: '', accessories: [] }];
+  els.orderItemsBox.innerHTML = `<div class="order-item-stack">${rows.map((item) => renderOrderItemRow(item)).join('')}</div>${renderQuickCategoryButtons()}`;
+  [...els.orderItemsBox.querySelectorAll('.order-item-card')].forEach((row, index) => renderAccessoryOptionsForRow(row, rows[index]?.accessories || []));
   bindOrderItemRowEvents();
 }
-function renderOrderItemRow(item, options) {
+function renderOrderItemRow(item, config = {}) {
+  const selectedId = item.inventoryId || findDefaultOrderInventoryItem()?.id || '';
+  const inventoryItem = (state.inventory || []).find((entry) => entry.id === selectedId) || findDefaultOrderInventoryItem() || {};
+  const imageSrc = getInventoryImageSrc(inventoryItem);
   return `
-    <div class="card" style="padding:12px; margin-bottom:10px;">
-      <div class="form-row three">
-        <div><label>Inventory item</label><select name="item_inventoryId">${options.replace(`value="${item.inventoryId}"`, `value="${item.inventoryId}" selected`)}</select></div>
-        <div><label>Quantity</label><input type="number" min="1" name="item_quantity" value="${item.quantity || 1}" /></div>
-        <div><label>Charge Per Unit</label><input type="number" step="0.01" min="0" name="item_customUnitPrice" value="${item.customUnitPrice ?? ''}" placeholder="Default" /></div>
+    <div class="card order-item-card compact-order-item-card">
+      <input type="hidden" name="item_inventoryId" value="${safeText(selectedId)}" />
+      <div class="order-item-line">
+        <div class="order-item-thumb-wrap">
+          ${imageSrc ? `<img class="order-item-thumb" src="${imageSrc}" alt="${safeText(inventoryItem.name || 'Item')}" />` : `<div class="order-item-thumb order-item-thumb-empty">No Image</div>`}
+        </div>
+        <div class="order-item-name-block">
+          <strong>${safeText(inventoryItem.name || item.name || 'Inventory item')}</strong>
+          <span class="small muted">${safeText(inventoryItem.category || item.category || 'Inventory')} · ${currency(inventoryItem.price ?? item.unitPrice ?? 0)} each</span>
+        </div>
+        <label class="order-item-mini-field"><span>Qty</span><input type="number" min="1" name="item_quantity" value="${item.quantity || 1}" /></label>
+        <label class="order-item-mini-field"><span>Price Change</span><input type="number" step="0.01" min="0" name="item_customUnitPrice" value="${item.customUnitPrice ?? ''}" placeholder="Default" /></label>
+        <button type="button" class="btn btn-ghost btn-small order-item-remove" data-remove-item-row>Remove</button>
       </div>
-      <div class="order-item-accessories" style="margin-top:10px;"></div>
-      <div style="margin-top:10px;"><button type="button" class="btn btn-ghost btn-small" data-remove-item-row>Remove Item</button></div>
+      <div class="order-item-accessories"></div>
     </div>`;
 }
 function renderAccessoryOptionsForRow(row, selectedAccessories = []) {
-  const select = row.querySelector('[name="item_inventoryId"]');
+  const input = row.querySelector('[name="item_inventoryId"]');
   const wrap = row.querySelector('.order-item-accessories');
-  if (!select || !wrap) return;
-  const inventoryItem = state.inventory.find((entry) => entry.id === select.value);
+  if (!input || !wrap) return;
+  const inventoryItem = state.inventory.find((entry) => entry.id === input.value);
   const accessories = normalizeAccessories(inventoryItem?.accessories || []);
   const selectedIds = (selectedAccessories || []).map((acc) => acc.id || acc).filter(Boolean);
   if (!accessories.length) {
@@ -2994,24 +3081,39 @@ function renderAccessoryOptionsForRow(row, selectedAccessories = []) {
   }
   wrap.innerHTML = `<div class="small muted" style="margin-bottom:6px;">Accessories</div><div class="contact-options">${accessories.map((accessory) => `<label class="check-pill"><input type="checkbox" data-item-accessory value="${accessory.id}" ${selectedIds.includes(accessory.id) ? 'checked' : ''}/> ${safeText(accessory.name)} (${currency(accessory.price)} each)</label>`).join('')}</div>`;
 }
+function addOrderItemRow(inventoryId = '') {
+  const picked = (state.inventory || []).find((item) => item.id === inventoryId) || findDefaultOrderInventoryItem();
+  const stack = els.orderItemsBox.querySelector('.order-item-stack') || els.orderItemsBox;
+  stack.insertAdjacentHTML('beforeend', renderOrderItemRow({ inventoryId: picked?.id || '', quantity: 1, customUnitPrice: '', accessories: [] }));
+  const newRow = stack.lastElementChild;
+  if (newRow) renderAccessoryOptionsForRow(newRow, []);
+  bindOrderItemRowEvents();
+  syncOrderTotalsPreview();
+}
 function bindOrderItemRowEvents() {
-  document.getElementById('addOrderItemRow').onclick = () => {
-    const options = state.inventory.map((item) => `<option value="${item.id}">${safeText(item.name)} (${safeText(item.category)}) - ${currency(item.price)}</option>`).join('');
-    els.orderItemsBox.insertAdjacentHTML('beforeend', renderOrderItemRow({ inventoryId: state.inventory[0]?.id || '', quantity: 1, customUnitPrice: '', accessories: [] }, options));
-    const newRow = els.orderItemsBox.lastElementChild;
-    if (newRow) renderAccessoryOptionsForRow(newRow, []);
-    bindOrderItemRowEvents();
-    syncOrderTotalsPreview();
-  };
-  els.orderItemsBox.querySelectorAll('[data-remove-item-row]').forEach((btn) => btn.onclick = () => {
-    btn.closest('.card').remove();
+    els.orderItemsBox.querySelectorAll('[data-remove-item-row]').forEach((btn) => btn.onclick = () => {
+    btn.closest('.order-item-card, .card').remove();
     syncOrderTotalsPreview();
   });
   els.orderItemsBox.querySelectorAll('[name="item_inventoryId"]').forEach((input) => {
     input.onchange = () => {
-      renderAccessoryOptionsForRow(input.closest('.card'), []);
+      renderAccessoryOptionsForRow(input.closest('.order-item-card, .card'), []);
       bindOrderItemRowEvents();
       syncOrderTotalsPreview();
+    };
+  });
+  els.orderItemsBox.querySelectorAll('[data-quick-category]').forEach((btn) => {
+    btn.onclick = (event) => {
+      event.stopPropagation();
+      openQuickCategoryMenu(btn);
+    };
+  });
+  els.orderItemsBox.querySelectorAll('[data-quick-category-menu]').forEach((menu) => {
+    menu.onclick = (event) => {
+      const option = event.target.closest('[data-quick-inventory-id]');
+      if (!option) return;
+      addOrderItemRow(option.dataset.quickInventoryId || '');
+      closeQuickCategoryMenus();
     };
   });
   els.orderItemsBox.querySelectorAll('[name="item_quantity"], [name="item_customUnitPrice"], [data-item-accessory]').forEach((input) => {
@@ -3048,7 +3150,7 @@ async function handleOrderSave(event) {
   const contactMap = buildContactMap(contactChecks, contactValues);
   const contactError = validateOrderContactRequirement(contactMap);
   if (contactError) { alert(contactError); return; }
-  const rows = [...els.orderItemsBox.querySelectorAll('.card')];
+  const rows = [...els.orderItemsBox.querySelectorAll('.order-item-card, .card')];
   const items = rows.map((row) => {
     const inventoryId = row.querySelector('[name="item_inventoryId"]')?.value;
     const inv = state.inventory.find((entry) => entry.id === inventoryId);

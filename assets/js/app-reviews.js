@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
   try {
+    if (list) list.innerHTML = '<div class="section-loading-card"><span class="section-loading-spinner" aria-hidden="true"></span><span>Loading from Firebase…</span></div>';
     const reviews = (await getPublicReviews()).filter((review) => String(review.message || '').trim());
     if (!reviews.length) {
       if (status) status.textContent = 'No reviews have been posted yet.';

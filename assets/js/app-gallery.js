@@ -102,6 +102,8 @@ function renderContent() {
 
 async function init() {
   try {
+    if (els.content) els.content.innerHTML = '<div class="section-loading-card"><span class="section-loading-spinner" aria-hidden="true"></span><span>Loading from Firebase…</span></div>';
+    if (els.filters) els.filters.innerHTML = '<span class="badge badge-blue">Loading…</span>';
     const [inventory, settings] = await Promise.all([getInventory(), getSettings()]);
     state.inventory = inventory.sort((a, b) => {
       const categoryCompare = String(a.category || '').localeCompare(String(b.category || ''));
