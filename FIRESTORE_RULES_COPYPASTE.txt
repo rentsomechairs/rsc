@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isMe() {
+      return request.auth != null &&
+             request.auth.uid == "2OjzWe94F5RJrFdgx3fSF8gceuF2";
+    }
+
+    function isQuickPickerOrder() {
+      return request.resource.data.source == "quick-picker" &&
+             request.resource.data.status == "Pending";
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isMe();
+    }
+
+    match /inventory/{docId} {
+      allow read: if true;
+      allow write: if isMe();
+    }
+
+    match /equipment/{docId} {
+      allow read: if true;
+      allow write: if isMe();
+    }
+
+    match /categories/{docId} {
+      allow read: if true;
+      allow write: if isMe();
+    }
+
+    match /orders/{orderId} {
+      allow read, list: if true;
+      allow create: if isMe() || isQuickPickerOrder();
+      allow update: if isMe() || (
+        resource.data.source == "quick-picker" &&
+        request.resource.data.source == "quick-picker" &&
+        request.resource.data.status == "Pending"
+      );
+      allow delete: if isMe();
+    }
+
+    match /orderTracking/{trackingCode} {
+      allow read: if true;
+      allow create, update: if isMe() || request.resource.data.status == "Pending";
+      allow delete: if isMe();
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isMe();
+    }
+
+    match /inquiries/{docId} {
+      allow create: if true;
+      allow read, update, delete: if isMe();
+    }
+
+    match /customers/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /orderAuditLog/{docId} {
+      allow create: if isMe() || request.resource.data.actor in ["quick-picker", "quick-picker-notify"];
+      allow read, update, delete: if isMe();
+    }
+
+    match /orderSnapshots/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /{document=**} {
+      allow read, write: if isMe();
+    }
+  }
+}

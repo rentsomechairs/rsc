@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+
+    // USERS (roles/profile)
+    match /users/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow write: if isAdmin();
+    }
+
+    // PUBLIC CATALOG DATA (read by anyone, write by admins only)
+    match /categories/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /equipment/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /locations/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /coupons/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /settings/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // BOOKINGS
+    match /bookings/{bookingId} {
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid;
+
+      allow read: if isSignedIn();
+
+      allow update, delete: if isAdmin();
+    }
+
+    // ORDERS
+    match /orders/{orderId} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == resource.data.uid);
+      allow create: if isAdmin() || (isSignedIn() && request.resource.data.uid == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    // DEFAULT: lock everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

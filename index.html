@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rent Some Chairs | Chair, Table & Tent Rentals</title>
+  <meta name="description" content="Affordable chair, table, and tent rentals in Garner, Raleigh, and the Triangle. Get a quick quote, browse rentals, or track your order." />
+  <style>
+    :root {
+      --ink:#172033;
+      --muted:#64748b;
+      --line:#e2e8f0;
+      --bg:#f8fafc;
+      --card:#ffffff;
+      --brand:#2563eb;
+      --brand-dark:#1d4ed8;
+      --soft:#dbeafe;
+      --gold:#f59e0b;
+      --shadow:0 24px 70px rgba(15,23,42,.12);
+      --radius:26px;
+    }
+    * { box-sizing:border-box; }
+    body {
+      margin:0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color:var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(37,99,235,.18), transparent 34rem),
+        linear-gradient(180deg,#ffffff 0%,var(--bg) 54%,#eef4ff 100%);
+      min-height:100vh;
+    }
+    a { color:inherit; text-decoration:none; }
+    .shell { width:min(1120px, calc(100% - 32px)); margin:0 auto; }
+    .topbar {
+      display:flex; align-items:center; justify-content:space-between; gap:18px;
+      padding:22px 0;
+    }
+    .brand { display:flex; align-items:center; gap:12px; font-weight:900; letter-spacing:-.03em; font-size:1.25rem; }
+    .logo {
+      width:46px; height:46px; border-radius:16px;
+      background:linear-gradient(135deg,var(--brand),#60a5fa);
+      color:white; display:grid; place-items:center;
+      box-shadow:0 12px 30px rgba(37,99,235,.28);
+      font-weight:900;
+    }
+    .nav { display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end; }
+    .nav a { color:#334155; font-weight:700; font-size:.95rem; padding:10px 12px; border-radius:999px; }
+    .nav a:hover { background:white; box-shadow:0 8px 24px rgba(15,23,42,.08); }
+    .hero {
+      display:grid; grid-template-columns:minmax(0,1.05fr) minmax(320px,.95fr); gap:34px;
+      align-items:center; padding:34px 0 26px;
+    }
+    .badge {
+      display:inline-flex; align-items:center; gap:8px; color:#1e40af; background:var(--soft);
+      padding:9px 13px; border-radius:999px; font-weight:900; font-size:.9rem;
+      margin-bottom:18px;
+    }
+    h1 { margin:0; font-size:clamp(2.55rem, 6vw, 5.2rem); line-height:.93; letter-spacing:-.075em; }
+    .hero p { color:var(--muted); font-size:1.18rem; line-height:1.65; margin:22px 0 0; max-width:620px; }
+    .actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:30px; }
+    .btn {
+      display:inline-flex; align-items:center; justify-content:center; gap:9px;
+      min-height:50px; padding:0 20px; border-radius:999px; font-weight:900;
+      border:1px solid transparent; transition:.18s transform, .18s box-shadow, .18s background;
+    }
+    .btn:hover { transform:translateY(-1px); }
+    .primary { background:var(--brand); color:white; box-shadow:0 16px 34px rgba(37,99,235,.26); }
+    .primary:hover { background:var(--brand-dark); }
+    .secondary { background:white; color:#1e293b; border-color:var(--line); box-shadow:0 12px 30px rgba(15,23,42,.08); }
+    .hero-card {
+      background:rgba(255,255,255,.88); border:1px solid rgba(226,232,240,.9); border-radius:var(--radius);
+      padding:20px; box-shadow:var(--shadow); backdrop-filter:blur(10px);
+    }
+    .photo-card {
+      min-height:390px; border-radius:22px; overflow:hidden; position:relative;
+      background:linear-gradient(135deg,#eff6ff,#bfdbfe 45%,#93c5fd);
+      display:flex; align-items:flex-end;
+    }
+    .hero-photo { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.98; }
+    .photo-card::after { content:""; position:absolute; inset:0; background:linear-gradient(180deg,rgba(15,23,42,.08),rgba(15,23,42,.48)); }
+    .price-strip {
+      position:relative; z-index:2; width:100%; margin:20px; display:grid; grid-template-columns:repeat(3,1fr); gap:10px;
+    }
+    .price-box { background:rgba(255,255,255,.93); border:1px solid rgba(226,232,240,.9); padding:13px; border-radius:18px; }
+    .price-box span { display:block; color:var(--muted); font-size:.8rem; font-weight:800; }
+    .price-box strong { display:block; margin-top:4px; font-size:1.25rem; letter-spacing:-.04em; }
+    .section { padding:42px 0; }
+    .section-head { display:flex; align-items:end; justify-content:space-between; gap:18px; margin-bottom:18px; }
+    .section h2 { margin:0; font-size:clamp(1.7rem,3vw,2.6rem); letter-spacing:-.05em; }
+    .section p { color:var(--muted); line-height:1.6; }
+    .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+    .card { background:white; border:1px solid var(--line); border-radius:24px; padding:20px; box-shadow:0 12px 34px rgba(15,23,42,.07); overflow:hidden; }
+    .card-photo { height:155px; margin:-20px -20px 18px; background:#eff6ff; position:relative; overflow:hidden; }
+    .card-photo img { width:100%; height:100%; object-fit:cover; display:block; }
+    .card-photo::after { content:""; position:absolute; inset:0; background:linear-gradient(180deg,transparent 50%,rgba(15,23,42,.18)); }
+    .icon { width:46px; height:46px; border-radius:15px; background:#eff6ff; display:grid; place-items:center; font-size:1.35rem; margin-bottom:18px; }
+    .card h3 { margin:0 0 8px; font-size:1.18rem; }
+    .card p { margin:0; font-size:.98rem; }
+    .cta {
+      margin:34px 0 46px; background:linear-gradient(135deg,#172033,#1e3a8a); color:white;
+      border-radius:30px; padding:28px; display:flex; align-items:center; justify-content:space-between; gap:20px;
+      box-shadow:var(--shadow);
+    }
+    .cta h2 { margin:0 0 6px; letter-spacing:-.04em; }
+    .cta p { margin:0; color:#cbd5e1; }
+    .cta .btn { background:white; color:#172033; white-space:nowrap; }
+    footer { color:#64748b; font-size:.92rem; padding:20px 0 34px; display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+    .admin-link { color:#94a3b8; }
+    @media (max-width:850px) {
+      .hero { grid-template-columns:1fr; padding-top:18px; }
+      .topbar { align-items:flex-start; flex-direction:column; }
+      .nav { justify-content:flex-start; }
+      .cards { grid-template-columns:1fr; }
+      .cta { flex-direction:column; align-items:flex-start; }
+      .photo-card { min-height:330px; }
+      .price-strip { grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="index.html" aria-label="Rent Some Chairs home">
+        <span class="logo">RS</span>
+        <span>Rent Some Chairs</span>
+      </a>
+      <nav class="nav" aria-label="Main navigation">
+        <a href="gallery/index.html">Browse Rentals</a>
+        <a href="quick-picker/index.html">Quick Quote</a>
+        <a href="tracking/index.html">Track Order</a>
+        <a href="reviews/index.html">Reviews</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <div>
+        <div class="badge">Lowest prices in the Triangle</div>
+        <h1>Simple event rentals without the big-company hassle.</h1>
+        <p>Affordable chairs, tables, covers, and tent rentals for parties, showers, church events, school events, and backyard gatherings around Garner, Raleigh, and the Triangle.</p>
+        <div class="actions">
+          <a class="btn primary" href="quick-picker/index.html">Get a Quick Quote</a>
+          <a class="btn secondary" href="gallery/index.html">Browse Rentals</a>
+          <a class="btn secondary" href="tracking/index.html">Track My Order</a>
+        </div>
+      </div>
+      <div class="hero-card" aria-label="Rental setup illustration">
+        <div class="photo-card">
+          <img id="heroPhoto" class="hero-photo" alt="Rent Some Chairs event rental setup" hidden />
+          <div class="price-strip">
+            <div class="price-box"><span>Chairs from</span><strong>$1</strong></div>
+            <div class="price-box"><span>Tables from</span><strong>$5</strong></div>
+            <div class="price-box"><span>Quotes</span><strong>Fast</strong></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="rentals">
+      <div class="section-head">
+        <div>
+          <h2>What can we help with?</h2>
+          <p>Start with the fastest option, browse the gallery, or check an existing order.</p>
+        </div>
+      </div>
+      <div class="cards">
+        <a class="card" href="quick-picker/index.html">
+          <div class="card-photo"><img id="quotePhoto" alt="Rental setup" hidden /></div>
+          <h3>Get a Quick Quote</h3>
+          <p>Pick your date, items, pickup or delivery, and send a request for approval.</p>
+        </a>
+        <a class="card" href="gallery/index.html">
+          <div class="card-photo"><img id="browsePhoto" alt="Tables and chairs for rent" hidden /></div>
+          <h3>Browse Rentals</h3>
+          <p>See available chairs, tables, covers, and event items before requesting a quote.</p>
+        </a>
+        <a class="card" href="tracking/index.html">
+          <div class="card-photo"><img id="trackPhoto" alt="Event rental order" hidden /></div>
+          <h3>Track an Order</h3>
+          <p>Already booked? Enter your tracking number to view order details and updates.</p>
+        </a>
+      </div>
+    </section>
+
+    <section class="cta">
+      <div>
+        <h2>Planning something soon?</h2>
+        <p>Send the request now and it will go into the approval queue.</p>
+      </div>
+      <a class="btn" href="quick-picker/index.html">Start Quote</a>
+    </section>
+
+    <footer>
+      <span>© Rent Some Chairs</span>
+      <span>Serving Garner, Raleigh, and the Triangle</span>
+      <a class="admin-link" href="admin/index.html">Admin</a>
+    </footer>
+  </main>
+
+  <script type="module">
+    import { getSettings, getInventory } from './assets/js/store.js';
+
+    function itemImage(item) { return item?.imageData || item?.imageUrl || ''; }
+    function findImage(inventory, words) {
+      const lowerWords = words.map((word) => word.toLowerCase());
+      const match = inventory.find((item) => {
+        const haystack = `${item.category || ''} ${item.name || ''} ${item.description || ''}`.toLowerCase();
+        return lowerWords.some((word) => haystack.includes(word)) && itemImage(item);
+      });
+      return itemImage(match) || itemImage(inventory.find((item) => itemImage(item))) || '';
+    }
+    function setImage(id, src) {
+      const img = document.getElementById(id);
+      if (!img || !src) return;
+      img.src = src;
+      img.hidden = false;
+    }
+
+    try {
+      const [settings, inventory] = await Promise.all([getSettings(), getInventory()]);
+      const allInventory = Array.isArray(inventory) ? inventory : [];
+      const hero = settings.homeHeroImageData || settings.homeHeroImageUrl || findImage(allInventory, ['tent', 'table', 'chair', 'cover']);
+      const quote = settings.homeQuoteImageData || settings.homeQuoteImageUrl || findImage(allInventory, ['tent', 'cover', 'table']);
+      const browse = settings.homeBrowseImageData || settings.homeBrowseImageUrl || findImage(allInventory, ['chair', 'table']);
+      const track = settings.homeTrackImageData || settings.homeTrackImageUrl || hero || browse || quote;
+      setImage('heroPhoto', hero);
+      setImage('quotePhoto', quote || hero);
+      setImage('browsePhoto', browse || hero);
+      setImage('trackPhoto', track);
+    } catch (error) {
+      console.warn('Homepage images could not load from settings/inventory.', error);
+    }
+  </script>
+</body>
+</html>

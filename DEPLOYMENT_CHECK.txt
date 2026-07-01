@@ -1,0 +1,15 @@
+QUICK QUOTE DEPLOYMENT CHECK
+
+The quick quote page loads this file:
+quick-picker/index.html -> ../assets/js/app-quick.js?v=quickquote-v10-20260518
+
+After uploading to GitHub, open the live Quick Quote page and press F12 > Console.
+You should see:
+QUICK QUOTE VERSION: v10-cache-bust-live-check
+
+If you do not see that exact line, GitHub Pages is not serving this uploaded folder/path yet.
+Most likely causes:
+1. Files were uploaded inside an extra nested folder instead of repo root.
+2. GitHub Pages is pointed at a different branch/folder.
+3. The live URL is using a different quick quote page than quick-picker/index.html.
+4. GitHub Pages/CDN has not refreshed yet.

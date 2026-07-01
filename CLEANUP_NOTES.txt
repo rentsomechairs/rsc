@@ -1,0 +1,7 @@
+Cleaned build notes:
+- Kept only the active Rent Some Chairs pages: home, admin, quick picker, gallery, reviews, tracking.
+- Kept only the active shared source: assets/css and assets/js modules used by those pages.
+- Removed old duplicate root JS files, old js/ checkout app folder, old copied index files, old backup ZIPs, old library/demo item images, duplicate loose images, and .bak files.
+- Inventory images uploaded through the admin panel are stored as imageData in Firebase/local data, so the old static image library is no longer required for active inventory thumbnails.
+Original files: 178
+Cleaned files: 35
