@@ -12,6 +12,7 @@ const state = {
   expandedEarningsPeriod: '',
   highlightedOrderDates: {},
   collapsedCostCategories: {},
+  expandedCostRows: {},
   recurringEditorCostId: null,
   averages: [],
   routeDate: new Date().toISOString().slice(0, 10),
@@ -186,8 +187,15 @@ function normalizeAccessories(accessories = []) {
     id: entry?.id || uid('acc'),
     name: (entry?.name || '').trim(),
     price: Number(entry?.price || 0),
+    costQuantity: entry?.costQuantity === '' || entry?.costQuantity == null ? '' : Number(entry.costQuantity || 0),
+    costEach: entry?.costEach === '' || entry?.costEach == null ? '' : Number(entry.costEach || 0),
+    costTotal: entry?.costTotal === '' || entry?.costTotal == null ? '' : Number(entry.costTotal || 0),
     imageData: entry?.imageData || ''
   })).filter((entry) => entry.name) : [];
+}
+function getAccessoryCostTotal(accessory = {}) {
+  if (accessory.costTotal !== '' && accessory.costTotal != null && Number(accessory.costTotal || 0) > 0) return Number(accessory.costTotal || 0);
+  return Number(accessory.costQuantity || 0) * Number(accessory.costEach || 0);
 }
 function getAccessoryImageSrc(accessory) {
   return accessory?.imageData || '';
@@ -214,8 +222,16 @@ function createAccessoryRow(accessory = {}) {
         <input type="text" data-acc-name placeholder="Black Fitted Cover" value="${safeText(accessory.name || '')}" />
       </div>
       <div class="form-row">
-        <label>Cost Each</label>
+        <label>Customer Price Each</label>
         <input type="number" min="0" step="0.01" data-acc-price value="${Number(accessory.price || 0)}" />
+      </div>
+      <div class="form-row">
+        <label>Purchase Qty</label>
+        <input type="number" min="0" step="1" data-acc-cost-quantity value="${accessory.costQuantity === '' ? '' : Number(accessory.costQuantity || 0)}" />
+      </div>
+      <div class="form-row">
+        <label>Cost Each</label>
+        <input type="number" min="0" step="0.01" data-acc-cost-each value="${accessory.costEach === '' ? '' : Number(accessory.costEach || 0)}" />
       </div>
       <div class="form-row">
         <label>Accessory Image</label>
@@ -253,6 +269,9 @@ function collectAccessoriesFromForm() {
     id: row.dataset.accessoryId || uid('acc'),
     name: (row.querySelector('[data-acc-name]')?.value || '').trim(),
     price: Number(row.querySelector('[data-acc-price]')?.value || 0),
+    costQuantity: row.querySelector('[data-acc-cost-quantity]')?.value === '' ? '' : Number(row.querySelector('[data-acc-cost-quantity]')?.value || 0),
+    costEach: row.querySelector('[data-acc-cost-each]')?.value === '' ? '' : Number(row.querySelector('[data-acc-cost-each]')?.value || 0),
+    costTotal: '',
     imageData: row.querySelector('[data-acc-image]')?.value || ''
   })).filter((accessory) => accessory.name);
 }
@@ -451,7 +470,6 @@ function bindApp() {
   els.reminderUpdatesList?.addEventListener('click', handleReminderUpdatesListClick);
   els.copyReminderPreviewBtn?.addEventListener('click', () => copyReminderComposerPreview(true));
   els.numbersTabButtons?.forEach((btn) => btn.addEventListener('click', () => setNumbersTab(btn.dataset.numbersTab || 'costs')));
-  els.addCostRowBtn?.addEventListener('click', () => addCostRow());
   els.saveCostsBtn?.addEventListener('click', handleSaveCosts);
   els.addAverageTaskBtn?.addEventListener('click', () => addAverageTask());
   els.saveAveragesBtn?.addEventListener('click', handleSaveAverages);
@@ -799,6 +817,16 @@ function normalizeCostRecord(record = {}) {
     type,
     inventoryId: record.inventoryId || '',
     accessoryId: record.accessoryId || '',
+    costAccessoryLinks: Array.isArray(record.costAccessoryLinks)
+      ? record.costAccessoryLinks.map((entry) => ({
+          id: entry?.id || uid('costacc'),
+          inventoryId: entry?.inventoryId || '',
+          accessoryId: entry?.accessoryId || '',
+          quantity: entry?.quantity === '' || entry?.quantity == null ? '' : Number(entry.quantity || 0),
+          costEach: entry?.costEach === '' || entry?.costEach == null ? '' : Number(entry.costEach || 0),
+          note: String(entry?.note || '').trim()
+        })).filter((entry) => entry.inventoryId || entry.accessoryId || entry.note)
+      : [],
     name: String(record.name || '').trim(),
     quantity: record.quantity === '' || record.quantity == null ? '' : Number(record.quantity || 0),
     price: record.price === '' || record.price == null ? '' : Number(record.price || 0),
@@ -817,6 +845,58 @@ function getInventoryCostOptions() {
   });
   return out;
 }
+
+function getInventoryOnlyCostOptions() {
+  return (state.inventory || []).map((item) => ({ value: item.id, label: `${item.name} (${item.category || 'Inventory'})` }));
+}
+function getAccessoryOptionsForInventory(inventoryId = '') {
+  const item = (state.inventory || []).find((entry) => entry.id === inventoryId);
+  return normalizeAccessories(item?.accessories || []).map((acc) => ({ value: acc.id, label: acc.name }));
+}
+function getCostAccessoryLinks(row = {}) {
+  return Array.isArray(row.costAccessoryLinks) ? row.costAccessoryLinks : [];
+}
+function getCostAccessoryLinkLabel(link = {}) {
+  const item = (state.inventory || []).find((entry) => entry.id === link.inventoryId);
+  const acc = normalizeAccessories(item?.accessories || []).find((entry) => entry.id === link.accessoryId);
+  return [item?.name || 'Inventory item', acc?.name || 'Accessory'].join(' — ');
+}
+function getCostAccessoryLinkTotal(link = {}) {
+  return Number(link.quantity || 0) * Number(link.costEach || 0);
+}
+function getCostAccessoryLinksTotal(row = {}) {
+  return getCostAccessoryLinks(row).reduce((sum, link) => sum + getCostAccessoryLinkTotal(link), 0);
+}
+function renderCostAccessoryModalRow(link = {}) {
+  const inventoryOptions = getInventoryOnlyCostOptions();
+  const invId = link.inventoryId || inventoryOptions[0]?.value || '';
+  const accessoryOptions = getAccessoryOptionsForInventory(invId);
+  const accId = link.accessoryId || accessoryOptions[0]?.value || '';
+  return `<div class="cost-accessory-row" data-cost-accessory-row data-cost-accessory-id="${safeText(link.id || uid('costacc'))}">
+    <label><span>Inventory item</span><select data-cost-accessory-inventory><option value="">Choose item</option>${inventoryOptions.map((opt) => `<option value="${safeText(opt.value)}" ${invId === opt.value ? 'selected' : ''}>${safeText(opt.label)}</option>`).join('')}</select></label>
+    <label><span>Accessory</span><select data-cost-accessory-select><option value="">Choose accessory</option>${accessoryOptions.map((opt) => `<option value="${safeText(opt.value)}" ${accId === opt.value ? 'selected' : ''}>${safeText(opt.label)}</option>`).join('')}</select></label>
+    <label><span>Qty bought</span><input type="number" min="0" step="1" data-cost-accessory-qty value="${link.quantity === '' ? '' : safeText(link.quantity ?? 1)}" /></label>
+    <label><span>Cost each</span><input type="number" min="0" step="0.01" data-cost-accessory-each value="${link.costEach === '' ? '' : safeText(link.costEach ?? '')}" /></label>
+    <button type="button" class="icon-btn cost-icon-btn danger" data-remove-cost-accessory title="Remove accessory">×</button>
+  </div>`;
+}
+function refreshCostAccessorySelect(row) {
+  const invId = row.querySelector('[data-cost-accessory-inventory]')?.value || '';
+  const select = row.querySelector('[data-cost-accessory-select]');
+  if (!select) return;
+  const current = select.value;
+  const options = getAccessoryOptionsForInventory(invId);
+  select.innerHTML = `<option value="">Choose accessory</option>${options.map((opt) => `<option value="${safeText(opt.value)}" ${current === opt.value ? 'selected' : ''}>${safeText(opt.label)}</option>`).join('')}`;
+}
+function collectCostAccessoryLinksFromModal(modal) {
+  return [...modal.querySelectorAll('[data-cost-accessory-row]')].map((row) => ({
+    id: row.dataset.costAccessoryId || uid('costacc'),
+    inventoryId: row.querySelector('[data-cost-accessory-inventory]')?.value || '',
+    accessoryId: row.querySelector('[data-cost-accessory-select]')?.value || '',
+    quantity: row.querySelector('[data-cost-accessory-qty]')?.value === '' ? '' : Number(row.querySelector('[data-cost-accessory-qty]')?.value || 0),
+    costEach: row.querySelector('[data-cost-accessory-each]')?.value === '' ? '' : Number(row.querySelector('[data-cost-accessory-each]')?.value || 0)
+  })).filter((entry) => entry.inventoryId || entry.accessoryId);
+}
 function getCostRowsForDisplay() {
   const categoryOrder = ['Inventory', 'Monthly Expenses', 'Recurring Expenses', 'Tools / Supplies', 'Repairs / Maintenance', 'Marketing', 'Fuel / Delivery', 'Labor / Payroll', 'Insurance / Legal', 'Other'];
   return (state.costs || []).map(normalizeCostRecord).sort((a, b) => {
@@ -833,33 +913,19 @@ function getCostTotal(record = {}) {
   }
   const quantity = Number(record.quantity || 0);
   const price = Number(record.price || 0);
-  return quantity * price;
+  return (quantity * price) + getCostAccessoryLinksTotal(record);
 }
 function collectCostsFromTable() {
-  return [...(els.costsList?.querySelectorAll('[data-cost-row]') || [])].map((row) => {
-    const existing = (state.costs || []).find((entry) => entry.id === row.dataset.costId) || {};
-    const quantityValue = row.querySelector('[data-cost-field="quantity"]')?.value ?? '';
-    const priceValue = row.querySelector('[data-cost-field="price"]')?.value ?? '';
-    return normalizeCostRecord({
-      ...existing,
-      id: row.dataset.costId || uid('cost'),
-      category: row.querySelector('[data-cost-field="category"]')?.value || 'Inventory',
-      type: row.querySelector('[data-cost-field="type"]')?.value || 'One-Time',
-      inventoryId: '',
-      accessoryId: '',
-      name: row.querySelector('[data-cost-field="name"]')?.value || existing.name || '',
-      quantity: quantityValue === '' ? '' : Number(quantityValue || 0),
-      price: priceValue === '' ? '' : Number(priceValue || 0),
-      recurringEntries: existing.recurringEntries || [],
-      createdAt: row.dataset.createdAt || existing.createdAt || new Date().toISOString()
-    });
-  }).filter((record) => record.category || record.name || record.quantity !== '' || record.price !== '' || (record.recurringEntries || []).length);
+  return (state.costs || []).map(normalizeCostRecord).filter((record) => record.category || record.name || record.quantity !== '' || record.price !== '' || (record.recurringEntries || []).length || (record.costAccessoryLinks || []).length);
 }
 function findCostOptionValue(row = {}) {
   if (row.accessoryId) return `acc:${row.inventoryId}:${row.accessoryId}`;
   if (row.inventoryId) return `inv:${row.inventoryId}`;
   const match = getInventoryCostOptions().find((opt) => opt.label === row.name || opt.label.startsWith(`${row.name} (`));
   return match?.value || '';
+}
+function getCostCategories() {
+  return ['Inventory', 'Monthly Expenses', 'Recurring Expenses', 'Tools / Supplies', 'Repairs / Maintenance', 'Marketing', 'Fuel / Delivery', 'Labor / Payroll', 'Insurance / Legal', 'Other'];
 }
 function renderCosts() {
   if (!els.costsList) return;
@@ -876,7 +942,7 @@ function renderCosts() {
       <div class="numbers-metric"><div class="metric-label">Cost lines</div><div class="metric-value">${rows.length}</div><div class="small muted">${recurringRows} recurring</div></div>
     `;
   }
-  const costCategories = ['Inventory', 'Monthly Expenses', 'Recurring Expenses', 'Tools / Supplies', 'Repairs / Maintenance', 'Marketing', 'Fuel / Delivery', 'Labor / Payroll', 'Insurance / Legal', 'Other'];
+  const costCategories = getCostCategories();
   const grouped = new Map();
   costCategories.forEach((cat) => grouped.set(cat, []));
   rows.forEach((row) => {
@@ -884,46 +950,62 @@ function renderCosts() {
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(row);
   });
-  els.costsList.innerHTML = [...grouped.entries()].map(([category, groupRows]) => {
+  els.costsList.innerHTML = `<div class="cost-category-grid">${[...grouped.entries()].map(([category, groupRows]) => {
     const collapsed = Boolean(state.collapsedCostCategories[category]);
     const groupTotal = groupRows.reduce((sum, row) => sum + getCostTotal(row), 0);
     return `<div class="numbers-source-card cost-category-card" data-cost-category-card="${safeText(category)}">
-      <button type="button" class="cost-category-head" data-toggle-cost-category="${safeText(category)}">
-        <span><strong>${safeText(category)}</strong><span class="small muted"> ${groupRows.length} line${groupRows.length === 1 ? '' : 's'}</span></span>
-        <span class="badge badge-green">${currency(groupTotal)}</span>
-      </button>
+      <div class="cost-category-headline">
+        <button type="button" class="cost-category-head" data-toggle-cost-category="${safeText(category)}" title="Show or hide costs">
+          <span><strong>${safeText(category)}</strong><span class="small muted"> ${groupRows.length} line${groupRows.length === 1 ? '' : 's'}</span></span>
+          <span class="badge badge-green">${currency(groupTotal)}</span>
+        </button>
+        <button type="button" class="btn btn-primary btn-small cost-add-btn" data-add-cost-category="${safeText(category)}">+</button>
+      </div>
       <div class="cost-category-body ${collapsed ? 'hidden' : ''}">
-        ${groupRows.length ? groupRows.map((row) => renderCostEditorCard(row, costCategories)).join('') : `<div class="empty-state compact">No costs here yet. Use Add Cost Row, then choose this category.</div>`}
+        ${groupRows.length ? groupRows.map((row) => renderCostSummaryCard(row)).join('') : `<div class="empty-state compact">No costs yet. Tap + to add one.</div>`}
       </div>
     </div>`;
-  }).join('');
+  }).join('')}</div>`;
 }
-function renderCostEditorCard(row = {}, costCategories = []) {
-  const isRecurring = row.type === 'Recurring';
-  const categoryOptions = costCategories.includes(row.category) ? costCategories : [row.category || 'Other', ...costCategories];
-  return `<div class="cost-editor-card" data-cost-row data-cost-id="${safeText(row.id)}" data-created-at="${safeText(row.createdAt || '')}">
-    <div class="cost-editor-main">
-      <label><span>Cost category</span><select data-cost-field="category">${categoryOptions.map((cat) => `<option value="${safeText(cat)}" ${row.category === cat ? 'selected' : ''}>${safeText(cat)}</option>`).join('')}</select></label>
-      <label class="cost-name-field"><span>What was it?</span><input data-cost-field="name" value="${safeText(row.name || '')}" placeholder="Chairs, gas, storage, insurance..." /></label>
-      <label><span>Type</span><select data-cost-field="type"><option ${!isRecurring ? 'selected' : ''}>One-Time</option><option ${isRecurring ? 'selected' : ''}>Recurring</option></select></label>
-      <label><span>Qty</span><input data-cost-field="quantity" type="number" min="0" step="1" value="${row.quantity === '' ? '' : safeText(row.quantity)}" ${isRecurring ? 'disabled' : ''} /></label>
-      <label><span>${isRecurring ? 'Amount' : 'Each'}</span><input data-cost-field="price" type="number" min="0" step="0.01" value="${row.price === '' ? '' : safeText(row.price)}" ${isRecurring ? 'disabled' : ''} /></label>
-      <div class="cost-total-pill"><span>Total</span><strong>${currency(getCostTotal(row))}</strong>${isRecurring ? `<small>${(row.recurringEntries || []).length} date${(row.recurringEntries || []).length === 1 ? '' : 's'}</small>` : ''}</div>
+function renderCostSummaryCard(row = {}) {
+  const linked = row.inventoryId ? getInventoryCostOptions().find((opt) => opt.value === findCostOptionValue(row))?.label : '';
+  const sub = [row.type === 'Recurring' ? `${(row.recurringEntries || []).length} charges` : '', linked].filter(Boolean).join(' · ');
+  const expanded = Boolean(state.expandedCostRows?.[row.id]);
+  const total = getCostTotal(row);
+  return `<div class="cost-summary-card ${expanded ? 'expanded' : ''}" data-cost-row data-cost-id="${safeText(row.id)}">
+    <div class="cost-summary-main cost-summary-line" data-toggle-cost-row="${safeText(row.id)}" role="button" tabindex="0" title="Show or hide cost details">
+      <span class="cost-summary-name"><strong>${safeText(row.name || 'Unnamed cost')}</strong>${sub ? `<small>${safeText(sub)}</small>` : ''}</span>
+      <strong class="cost-summary-total">${currency(total)}</strong>
+      <div class="cost-summary-actions">
+        ${row.type === 'Recurring' ? `<button type="button" class="icon-btn cost-icon-btn" data-edit-recurring-cost="${safeText(row.id)}" title="Dates">📅</button>` : ''}
+        <button type="button" class="icon-btn cost-icon-btn" data-copy-cost-row="${safeText(row.id)}" title="Copy">⧉</button>
+        <button type="button" class="icon-btn cost-icon-btn danger" data-delete-cost-row="${safeText(row.id)}" title="Delete">×</button>
+      </div>
     </div>
-    <div class="cost-editor-actions"><button type="button" class="btn btn-secondary btn-small" data-copy-cost-row="${safeText(row.id)}">Duplicate</button>${isRecurring ? `<button type="button" class="btn btn-primary btn-small" data-edit-recurring-cost="${safeText(row.id)}">Dates</button>` : ''}<button type="button" class="btn btn-ghost btn-small" data-delete-cost-row="${safeText(row.id)}">Delete</button></div>
+    ${expanded ? `<div class="cost-summary-details">
+      <div><span>Category</span><strong>${safeText(row.category || 'Inventory')}</strong></div>
+      <div><span>Type</span><strong>${safeText(row.type || 'One-Time')}</strong></div>
+      <div><span>Quantity</span><strong>${row.type === 'Recurring' ? '—' : safeText(row.quantity === '' ? '0' : row.quantity)}</strong></div>
+      <div><span>Cost each</span><strong>${row.type === 'Recurring' ? '—' : currency(Number(row.price || 0))}</strong></div>
+      ${linked ? `<div class="cost-detail-wide"><span>Tied to</span><strong>${safeText(linked)}</strong></div>` : ''}
+      ${(row.costAccessoryLinks || []).length ? `<div class="cost-detail-wide"><span>Accessories</span><strong>${safeText((row.costAccessoryLinks || []).map(getCostAccessoryLinkLabel).join(', '))}</strong></div>` : ''}
+      <button type="button" class="btn btn-secondary btn-small cost-detail-edit" data-edit-cost-row="${safeText(row.id)}">Edit</button>
+    </div>` : ''}
   </div>`;
 }
+function renderCostEditorCard(row = {}, costCategories = []) {
+  return renderCostSummaryCard(row);
+}
 function addCostRow(copyFrom = null) {
-  const record = normalizeCostRecord(copyFrom || { id: uid('cost'), category: 'Inventory', type: 'One-Time', name: '', quantity: '', price: '' });
-  state.costs = [record, ...(state.costs || [])];
-  renderCosts();
+  openCostModal(null, copyFrom?.category || 'Inventory', copyFrom || null);
 }
-function handleCostsListChange(event) {
-  if (!event.target.closest('[data-cost-row]')) return;
-  state.costs = collectCostsFromTable();
-  renderCosts();
-}
+function handleCostsListChange(event) {}
 function handleCostsListClick(event) {
+  const addBtn = event.target.closest('[data-add-cost-category]');
+  if (addBtn) {
+    openCostModal(null, addBtn.dataset.addCostCategory || 'Inventory');
+    return;
+  }
   const toggle = event.target.closest('[data-toggle-cost-category]');
   if (toggle) {
     const key = toggle.dataset.toggleCostCategory || 'Inventory';
@@ -933,22 +1015,149 @@ function handleCostsListClick(event) {
   }
   const recurringBtn = event.target.closest('[data-edit-recurring-cost]');
   if (recurringBtn) {
-    state.costs = collectCostsFromTable();
+    event.stopPropagation();
     openRecurringCostEditor(recurringBtn.dataset.editRecurringCost);
     return;
   }
   const copyBtn = event.target.closest('[data-copy-cost-row]');
   if (copyBtn) {
-    state.costs = collectCostsFromTable();
-    const existing = state.costs.find((row) => row.id === copyBtn.dataset.copyCostRow) || {};
-    addCostRow({ ...existing, id: uid('cost'), quantity: '', price: '', recurringEntries: [] });
+    event.stopPropagation();
+    const existing = (state.costs || []).find((row) => row.id === copyBtn.dataset.copyCostRow) || {};
+    const copy = normalizeCostRecord({ ...existing, id: uid('cost'), name: `${existing.name || 'Cost'} copy`, recurringEntries: [] });
+    state.costs = [copy, ...(state.costs || [])];
+    state.expandedCostRows[copy.id] = true;
+    renderCosts();
+    openCostModal(copy.id);
     return;
   }
   const deleteBtn = event.target.closest('[data-delete-cost-row]');
-  if (!deleteBtn) return;
-  state.costs = collectCostsFromTable().filter((row) => row.id !== deleteBtn.dataset.deleteCostRow);
-  renderCosts();
+  if (deleteBtn) {
+    event.stopPropagation();
+    state.costs = (state.costs || []).filter((row) => row.id !== deleteBtn.dataset.deleteCostRow);
+    delete state.expandedCostRows[deleteBtn.dataset.deleteCostRow];
+    renderCosts();
+    return;
+  }
+  const editBtn = event.target.closest('[data-edit-cost-row]');
+  if (editBtn) {
+    event.stopPropagation();
+    openCostModal(editBtn.dataset.editCostRow);
+    return;
+  }
+  const rowToggle = event.target.closest('[data-toggle-cost-row]');
+  if (rowToggle) {
+    const id = rowToggle.dataset.toggleCostRow;
+    state.expandedCostRows[id] = !state.expandedCostRows[id];
+    renderCosts();
+  }
 }
+function openCostModal(costId = null, category = 'Inventory', starter = null) {
+  const existing = costId ? (state.costs || []).find((row) => row.id === costId) : null;
+  const row = normalizeCostRecord(existing || starter || { id: uid('cost'), category, type: 'One-Time', name: '', quantity: 1, price: '', costAccessoryLinks: [] });
+  let modal = document.getElementById('costModalWrap');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'costModalWrap';
+    modal.className = 'modal-backdrop';
+    document.body.appendChild(modal);
+  }
+  const costCategories = getCostCategories();
+  const inventoryOptions = getInventoryCostOptions();
+  const selectedLink = findCostOptionValue(row);
+  const isRecurring = row.type === 'Recurring';
+  const accessoryLinks = getCostAccessoryLinks(row);
+  modal.innerHTML = `<div class="modal cost-modal"><div class="modal-header"><h3>${existing ? 'Edit Cost' : 'Add Cost'}</h3><button type="button" class="icon-btn" data-close-cost-modal>×</button></div>
+    <div class="cost-modal-grid">
+      <label><span>Category</span><select id="costModalCategory">${costCategories.map((cat) => `<option value="${safeText(cat)}" ${row.category === cat ? 'selected' : ''}>${safeText(cat)}</option>`).join('')}</select></label>
+      <label><span>Tied to inventory/accessory</span><select id="costModalLinked"><option value="">Not tied to inventory</option>${inventoryOptions.map((opt) => `<option value="${safeText(opt.value)}" ${selectedLink === opt.value ? 'selected' : ''}>${safeText(opt.label)}</option>`).join('')}</select></label>
+      <label class="cost-modal-wide"><span>Cost name</span><input id="costModalName" value="${safeText(row.name || '')}" placeholder="White folding chairs, chair bags, gas, storage..." /></label>
+      <label><span>Type</span><select id="costModalType"><option value="One-Time" ${!isRecurring ? 'selected' : ''}>One-Time</option><option value="Recurring" ${isRecurring ? 'selected' : ''}>Recurring</option></select></label>
+      <label><span>Quantity</span><input id="costModalQuantity" type="number" min="0" step="1" value="${row.quantity === '' ? '' : safeText(row.quantity)}" ${isRecurring ? 'disabled' : ''}/></label>
+      <label><span>${isRecurring ? 'Use Dates for recurring' : 'Cost each'}</span><input id="costModalPrice" type="number" min="0" step="0.01" value="${row.price === '' ? '' : safeText(row.price)}" ${isRecurring ? 'disabled' : ''}/></label>
+      <div class="cost-modal-total"><span>Total spent</span><strong>${currency(getCostTotal(row))}</strong>${isRecurring ? `<small>Use Dates after saving to add recurring charges.</small>` : ''}</div>
+      <div class="cost-modal-accessories cost-modal-wide">
+        <div class="cost-accessory-head"><div><strong>Accessories included in this cost</strong><div class="small muted">Choose accessories already saved under inventory items. Add as many rows as needed.</div></div><button type="button" class="btn btn-secondary btn-small" data-add-cost-accessory>+ Add accessory</button></div>
+        <div id="costAccessoryRows" class="cost-accessory-rows">${accessoryLinks.length ? accessoryLinks.map(renderCostAccessoryModalRow).join('') : '<div class="empty-state compact" data-no-cost-accessories>No accessories added to this cost yet.</div>'}</div>
+      </div>
+    </div>
+    <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close-cost-modal>Cancel</button><button type="button" class="btn btn-primary" data-save-cost-modal>${existing ? 'Save Cost' : 'Add Cost'}</button></div></div>`;
+  modal.classList.add('open');
+  const recalc = () => {
+    const type = modal.querySelector('#costModalType')?.value || 'One-Time';
+    const recurring = type === 'Recurring';
+    const qtyInput = modal.querySelector('#costModalQuantity');
+    const priceInput = modal.querySelector('#costModalPrice');
+    if (qtyInput) qtyInput.disabled = recurring;
+    if (priceInput) priceInput.disabled = recurring;
+    const temp = normalizeCostRecord({
+      ...row,
+      type,
+      quantity: qtyInput?.value === '' ? '' : Number(qtyInput?.value || 0),
+      price: priceInput?.value === '' ? '' : Number(priceInput?.value || 0),
+      costAccessoryLinks: collectCostAccessoryLinksFromModal(modal)
+    });
+    const total = modal.querySelector('.cost-modal-total strong');
+    if (total) total.textContent = currency(getCostTotal(temp));
+  };
+  const bindAccessoryRows = () => {
+    modal.querySelectorAll('[data-cost-accessory-inventory]').forEach((select) => {
+      select.onchange = () => { refreshCostAccessorySelect(select.closest('[data-cost-accessory-row]')); recalc(); };
+    });
+    modal.querySelectorAll('[data-cost-accessory-select], [data-cost-accessory-qty], [data-cost-accessory-each]').forEach((input) => {
+      input.oninput = recalc;
+      input.onchange = recalc;
+    });
+    modal.querySelectorAll('[data-remove-cost-accessory]').forEach((btn) => {
+      btn.onclick = () => {
+        btn.closest('[data-cost-accessory-row]')?.remove();
+        const box = modal.querySelector('#costAccessoryRows');
+        if (box && !box.querySelector('[data-cost-accessory-row]')) box.innerHTML = '<div class="empty-state compact" data-no-cost-accessories>No accessories added to this cost yet.</div>';
+        recalc();
+      };
+    });
+  };
+  modal.querySelectorAll('[data-close-cost-modal]').forEach((btn) => btn.onclick = () => modal.classList.remove('open'));
+  modal.querySelector('#costModalLinked')?.addEventListener('change', (event) => {
+    const opt = inventoryOptions.find((item) => item.value === event.target.value);
+    const nameInput = modal.querySelector('#costModalName');
+    if (opt && nameInput && !nameInput.value.trim()) nameInput.value = opt.label;
+  });
+  modal.querySelector('[data-add-cost-accessory]')?.addEventListener('click', () => {
+    const box = modal.querySelector('#costAccessoryRows');
+    if (!box) return;
+    box.querySelector('[data-no-cost-accessories]')?.remove();
+    box.insertAdjacentHTML('beforeend', renderCostAccessoryModalRow({ quantity: 1, costEach: '' }));
+    bindAccessoryRows();
+    recalc();
+  });
+  ['#costModalType', '#costModalQuantity', '#costModalPrice'].forEach((sel) => modal.querySelector(sel)?.addEventListener('input', recalc));
+  bindAccessoryRows();
+  modal.querySelector('[data-save-cost-modal]').onclick = () => {
+    const linkedValue = modal.querySelector('#costModalLinked')?.value || '';
+    const linked = inventoryOptions.find((opt) => opt.value === linkedValue);
+    const quantityValue = modal.querySelector('#costModalQuantity')?.value ?? '';
+    const priceValue = modal.querySelector('#costModalPrice')?.value ?? '';
+    const saved = normalizeCostRecord({
+      ...row,
+      category: modal.querySelector('#costModalCategory')?.value || 'Inventory',
+      type: modal.querySelector('#costModalType')?.value || 'One-Time',
+      inventoryId: linked?.inventoryId || '',
+      accessoryId: linked?.accessoryId || '',
+      name: modal.querySelector('#costModalName')?.value || linked?.label || '',
+      quantity: quantityValue === '' ? '' : Number(quantityValue || 0),
+      price: priceValue === '' ? '' : Number(priceValue || 0),
+      costAccessoryLinks: collectCostAccessoryLinksFromModal(modal),
+      updatedAt: new Date().toISOString()
+    });
+    const exists = (state.costs || []).some((item) => item.id === saved.id);
+    state.costs = exists ? (state.costs || []).map((item) => item.id === saved.id ? saved : item) : [saved, ...(state.costs || [])];
+    modal.classList.remove('open');
+    renderCosts();
+    if (saved.type === 'Recurring' && !(saved.recurringEntries || []).length) openRecurringCostEditor(saved.id);
+  };
+  recalc();
+}
+
 function openRecurringCostEditor(costId) {
   const cost = (state.costs || []).find((row) => row.id === costId);
   if (!cost) return;
@@ -957,7 +1166,7 @@ function openRecurringCostEditor(costId) {
   if (!modal) {
     modal = document.createElement('div');
     modal.id = 'recurringCostModalWrap';
-    modal.className = 'modal-wrap';
+    modal.className = 'modal-backdrop';
     document.body.appendChild(modal);
   }
   const entries = Array.isArray(cost.recurringEntries) ? cost.recurringEntries : [];
@@ -2663,8 +2872,9 @@ function renderInventory() {
             <div class="kv-row"><span>Available right now</span><strong>${stats.availableNow}</strong></div>
             <div class="kv-row"><span>Pending today</span><strong>${stats.pendingToday}</strong></div>
           </div>
-          ${accessories.length ? `<div class="inventory-accessory-list">${accessories.map((acc) => `<span class="badge badge-light">${safeText(acc.name)} · ${currency(acc.price)}</span>`).join('')}</div>` : ''}
+          ${accessories.length ? `<div class="inventory-accessory-list">${accessories.map((acc) => `<span class="badge badge-light">${safeText(acc.name)} · charge ${currency(acc.price)}${getAccessoryCostTotal(acc) ? ` · spent ${currency(getAccessoryCostTotal(acc))}` : ''}</span>`).join('')}</div>` : ''}
           <div class="button-row inventory-action-row">
+            <button class="btn btn-primary btn-small" data-add-accessory-cost="${safeText(item.id)}">+ Accessory Cost</button>
             <button class="btn btn-secondary btn-small" data-edit-inventory="${safeText(item.id)}">Edit</button>
             <button class="btn btn-ghost btn-small" data-delete-inventory="${safeText(item.id)}">Delete</button>
           </div>
@@ -2680,9 +2890,95 @@ function renderInventory() {
     state.expandedInventoryIds = wasExpanded ? {} : { [id]: true };
     renderInventory();
   }));
+  document.querySelectorAll('[data-add-accessory-cost]').forEach((btn) => btn.addEventListener('click', (event) => { event.stopPropagation(); openAccessoryCostModal(btn.dataset.addAccessoryCost); }));
   document.querySelectorAll('[data-edit-inventory]').forEach((btn) => btn.addEventListener('click', (event) => { event.stopPropagation(); openInventoryModal(btn.dataset.editInventory); }));
   document.querySelectorAll('[data-delete-inventory]').forEach((btn) => btn.addEventListener('click', (event) => { event.stopPropagation(); deleteInventory(btn.dataset.deleteInventory); }));
 }
+
+function openAccessoryCostModal(inventoryId) {
+  const item = (state.inventory || []).find((entry) => entry.id === inventoryId);
+  if (!item) return;
+  let modal = document.getElementById('accessoryCostModalWrap');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'accessoryCostModalWrap';
+    modal.className = 'modal-backdrop';
+    document.body.appendChild(modal);
+  }
+  const accessories = normalizeAccessories(item.accessories || []);
+  modal.innerHTML = `<div class="modal cost-modal"><div class="modal-header"><h3>Add Accessory Cost</h3><button type="button" class="icon-btn" data-close-accessory-cost-modal>×</button></div>
+    <div class="small muted" style="margin-bottom:10px;">${safeText(item.name)} — add a new accessory and log what you spent on it.</div>
+    <div class="cost-modal-grid">
+      <label class="cost-modal-wide"><span>Accessory name</span><input id="accessoryCostName" list="accessoryCostExisting" placeholder="Black Fitted Table Clothes" /></label>
+      <datalist id="accessoryCostExisting">${accessories.map((acc) => `<option value="${safeText(acc.name)}"></option>`).join('')}</datalist>
+      <label><span>Customer price each</span><input id="accessoryCustomerPrice" type="number" min="0" step="0.01" placeholder="0.00" /></label>
+      <label><span>Purchase quantity</span><input id="accessoryCostQty" type="number" min="0" step="1" value="1" /></label>
+      <label><span>Cost each</span><input id="accessoryCostEach" type="number" min="0" step="0.01" placeholder="0.00" /></label>
+      <div class="cost-modal-total"><span>Total spent</span><strong>$0.00</strong></div>
+    </div>
+    <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close-accessory-cost-modal>Cancel</button><button type="button" class="btn btn-primary" data-save-accessory-cost-modal>Save Accessory Cost</button></div></div>`;
+  modal.classList.add('open');
+  const nameInput = modal.querySelector('#accessoryCostName');
+  const priceInput = modal.querySelector('#accessoryCustomerPrice');
+  const qtyInput = modal.querySelector('#accessoryCostQty');
+  const eachInput = modal.querySelector('#accessoryCostEach');
+  const recalc = () => {
+    const total = Number(qtyInput?.value || 0) * Number(eachInput?.value || 0);
+    const totalEl = modal.querySelector('.cost-modal-total strong');
+    if (totalEl) totalEl.textContent = currency(total);
+  };
+  const fillExisting = () => {
+    const match = accessories.find((acc) => acc.name.toLowerCase() === String(nameInput?.value || '').trim().toLowerCase());
+    if (!match) return;
+    if (priceInput && !priceInput.value) priceInput.value = Number(match.price || 0);
+    if (qtyInput && !qtyInput.value && match.costQuantity !== '') qtyInput.value = Number(match.costQuantity || 0);
+    if (eachInput && !eachInput.value && match.costEach !== '') eachInput.value = Number(match.costEach || 0);
+    recalc();
+  };
+  [qtyInput, eachInput].forEach((input) => input?.addEventListener('input', recalc));
+  nameInput?.addEventListener('change', fillExisting);
+  modal.querySelectorAll('[data-close-accessory-cost-modal]').forEach((btn) => btn.onclick = () => modal.classList.remove('open'));
+  modal.querySelector('[data-save-accessory-cost-modal]').onclick = async () => {
+    const name = String(nameInput?.value || '').trim();
+    if (!name) { alert('Add an accessory name first.'); return; }
+    const qty = Number(qtyInput?.value || 0);
+    const costEach = Number(eachInput?.value || 0);
+    const total = qty * costEach;
+    const now = new Date().toISOString();
+    let accessory = accessories.find((acc) => acc.name.toLowerCase() === name.toLowerCase());
+    if (accessory) {
+      accessory = { ...accessory, price: Number(priceInput?.value || accessory.price || 0), costQuantity: qty, costEach, costTotal: total };
+    } else {
+      accessory = { id: uid('acc'), name, price: Number(priceInput?.value || 0), costQuantity: qty, costEach, costTotal: total, imageData: '' };
+    }
+    const nextAccessories = accessories.some((acc) => acc.id === accessory.id) ? accessories.map((acc) => acc.id === accessory.id ? accessory : acc) : [...accessories, accessory];
+    state.inventory = (state.inventory || []).map((entry) => entry.id === inventoryId ? { ...entry, accessories: nextAccessories, updatedAt: now } : entry);
+    if (total > 0) {
+      const cost = normalizeCostRecord({
+        id: uid('cost'),
+        category: 'Inventory',
+        type: 'One-Time',
+        inventoryId,
+        accessoryId: accessory.id,
+        name,
+        quantity: qty,
+        price: costEach,
+        createdAt: now,
+        updatedAt: now
+      });
+      state.costs = [cost, ...(state.costs || [])];
+    }
+    await withBusy(async () => {
+      await saveInventory(state.inventory);
+      if (total > 0) state.costs = await saveCostRecords(collectCostsFromTable());
+      modal.classList.remove('open');
+      renderInventory();
+      renderNumbers();
+    }, 'Saving accessory cost…');
+  };
+  recalc();
+}
+
 function normalizeOrderStatus(status = '') {
   return String(status || '').trim().toLowerCase().replace(/[\s_-]+/g, '-');
 }
