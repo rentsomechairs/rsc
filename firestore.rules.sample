@@ -47,5 +47,63 @@ service cloud.firestore {
     match /costs/{id} {
       allow read, write: if signedIn();
     }
+
+
+    function ownsFinanceRecord() {
+      return signedIn() && resource.data.ownerId == request.auth.uid;
+    }
+    function createsOwnedFinanceRecord() {
+      return signedIn() && request.resource.data.ownerId == request.auth.uid;
+    }
+
+    match /financeExpenses/{id} {
+      allow create: if createsOwnedFinanceRecord();
+      allow read, update, delete: if ownsFinanceRecord();
+    }
+    match /financeIncome/{id} {
+      allow create: if createsOwnedFinanceRecord();
+      allow read, update, delete: if ownsFinanceRecord();
+    }
+    match /financeMileage/{id} {
+      allow create: if createsOwnedFinanceRecord();
+      allow read, update, delete: if ownsFinanceRecord();
+    }
+    match /financeVehicles/{id} {
+      allow create: if createsOwnedFinanceRecord();
+      allow read, update, delete: if ownsFinanceRecord();
+    }
+    match /financeAssets/{id} {
+      allow create: if createsOwnedFinanceRecord();
+      allow read, update, delete: if ownsFinanceRecord();
+    }
+    match /financeIncidents/{id} {
+      allow create: if createsOwnedFinanceRecord();
+      allow read, update, delete: if ownsFinanceRecord();
+    }
+    match /financeHomeOffice/{id} {
+      allow create: if createsOwnedFinanceRecord();
+      allow read, update, delete: if ownsFinanceRecord();
+    }
+    match /financeCategories/{id} {
+      allow create: if createsOwnedFinanceRecord();
+      allow read, update, delete: if ownsFinanceRecord();
+    }
+    match /financeMileageRates/{id} {
+      allow create: if createsOwnedFinanceRecord();
+      allow read, update, delete: if ownsFinanceRecord();
+    }
+    match /financeAttachments/{id} {
+      allow create: if createsOwnedFinanceRecord();
+      allow read, update, delete: if ownsFinanceRecord();
+    }
+    match /financeAudit/{id} {
+      allow create: if createsOwnedFinanceRecord();
+      allow read: if ownsFinanceRecord();
+      allow update, delete: if false;
+    }
   }
 }
+
+// Financial recordkeeping collections: add these matches inside the existing
+// /databases/{database}/documents block. Each record is isolated to avoid large payloads.
+// Owner-based access also supports future multi-user/company expansion.

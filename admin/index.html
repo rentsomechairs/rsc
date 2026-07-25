@@ -33,6 +33,7 @@
         <button class="nav-btn" data-tab-btn="calendar">Quick Peek</button>
         <button class="nav-btn" data-tab-btn="reviews">Reviews</button>
         <button class="nav-btn" data-tab-btn="numbers">The Numbers</button>
+        <a class="nav-btn" href="../finance/index.html" style="text-decoration:none;display:block;">Financial Records</a>
         <button class="nav-btn" data-tab-btn="settings">Settings</button>
       </div>
       <div class="sidebar-footer">
@@ -42,7 +43,7 @@
           <a class="btn btn-ghost btn-small" href="../gallery/index.html">Open Gallery</a>
           <a class="btn btn-ghost btn-small" href="../tracking/index.html">Open Tracking</a>
           <a class="btn btn-ghost btn-small" href="../reviews/index.html">Open Reviews</a>
-          <button class="btn btn-ghost btn-small" id="copyPickupAddressBtn" type="button">Copy Pickup Address</button>
+          <button class="btn btn-ghost btn-small" id="copyPickupAddressBtn" type="button">Copy Paste</button>
           <button class="btn btn-secondary btn-small" id="logoutBtn">Log Out</button>
         </div>
       </div>
@@ -422,6 +423,14 @@
   </div>
 
 
+  <div class="modal-backdrop" id="copyPasteModalWrap">
+    <div class="modal copy-paste-modal">
+      <div class="section-header"><div><h2 style="margin:0;">Copy Paste</h2><div class="small muted">Choose a saved message or create your own.</div></div><button type="button" class="btn btn-ghost" data-close-copy-paste-modal>Close</button></div>
+      <div id="copyPasteOptions" class="stack-sm" style="margin-top:14px;"></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:14px;"><button type="button" class="btn btn-primary" id="addCopyPasteTemplateBtn">Add Custom Button</button></div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="reminderModalWrap">
     <div class="modal reminder-modal">
       <div class="section-header">
@@ -440,6 +449,9 @@
           <label class="check-pill"><input type="checkbox" id="reminderDepositWaivedCheckbox" /> Deposit waived</label>
           <label class="check-pill"><input type="checkbox" id="reminderEquipmentDiscussionCheckbox" /> Equipment still being discussed</label>
           <label class="check-pill"><input type="checkbox" id="reminderFriendlyIntroCheckbox" /> Use friendly reminder first line</label>
+          <label class="check-pill"><input type="checkbox" id="reminderIncludeTrackingCheckbox" checked /> Include tracking</label>
+          <label class="check-pill"><input type="checkbox" id="reminderIncludeEquipmentCheckbox" checked /> Include equipment</label>
+          <label class="check-pill"><input type="checkbox" id="reminderIncludeAddressCheckbox" checked /> Include address</label>
         </div>
       </div>
       <div class="tab-panel" data-reminder-panel="updates">

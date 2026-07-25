@@ -319,6 +319,7 @@ function createTrackingSnapshot(order = {}, settings = cacheSettings) {
   return {
     id: order.id,
     trackingCode: order.trackingCode || '',
+    trackingAccessCode: order.trackingAccessCode || '',
     firstName: order.firstName || '',
     lastName: order.lastName || '',
     status: order.status || '',

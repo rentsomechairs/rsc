@@ -2,7 +2,7 @@ import { getPublicReview, getPublicTrackingRecords, getSettings, getSession, sav
 import { currency, formatDateTime, safeText } from './utils.js';
 
 const els = {};
-const TRACKING_VERSION = 'v20-deposit-paid-lock';
+const TRACKING_VERSION = 'v21-four-character-access-code';
 const state = { records: [], settings: {}, trackingUrl: '', activeRecord: null, activeReview: null, verifiedCodes: new Set(), adminSession: null };
 const PAYMENT_METHOD_ORDER = ['cash', 'invoice', 'venmo', 'paypal', 'cashapp', 'zelle', 'googlepay', 'crypto'];
 const PAYMENT_METHOD_LABELS = {
@@ -155,34 +155,16 @@ async function handleSubmit(event) {
 }
 
 
-function normalizeEmail(value = '') {
-  return String(value || '').trim().toLowerCase();
-}
-
-function normalizePhoneDigits(value = '') {
-  return String(value || '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
-}
-
-function getVerificationOptions(record = {}) {
-  const methods = record.contactMethods && typeof record.contactMethods === 'object' ? record.contactMethods : {};
-  const options = [];
-  const email = normalizeEmail(methods.email);
-  const phone = normalizePhoneDigits(methods.text);
-  if (email) options.push({ key: 'email', label: 'Email address', type: 'email', placeholder: 'Enter your email address', stored: email });
-  if (phone) options.push({ key: 'text', label: 'Phone number', type: 'tel', placeholder: 'Enter your phone number', stored: phone });
-  return options;
+function normalizeAccessCode(value = '') {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
 function renderVerificationGate(record = {}) {
-  const options = getVerificationOptions(record);
-  if (!options.length) {
-    return `<div class="card" style="padding:18px; margin-top:18px;"><div class="section-header"><div><div class="eyebrow">Tracking Number</div><h2 style="margin:6px 0 0;">${safeText(record.trackingCode || '')}</h2></div></div><div class="note-block small">An email or phone number is required to view this ticket, please contact us to add one to your order.</div></div>`;
-  }
   return `<div class="card" style="padding:18px; margin-top:18px;">
-    <div class="section-header"><div><div class="eyebrow">Protected Ticket</div><h2 style="margin:6px 0 0;">Confirm your ${options.length > 1 ? 'email or phone' : options[0].label.toLowerCase()}</h2><div class="small muted">Tracking Number: ${safeText(record.trackingCode || '')}</div></div></div>
+    <div class="section-header"><div><div class="eyebrow">Protected Ticket</div><h2 style="margin:6px 0 0;">Enter your 4-character access code</h2><div class="small muted">Tracking Number: ${safeText(record.trackingCode || '')}</div></div></div>
     <form id="ticketVerifyForm" class="form-grid">
-      <div class="note-block small">For privacy, confirm the ${options.length > 1 ? 'email address or phone number' : options[0].label.toLowerCase()} saved on this order before viewing the ticket.</div>
-      ${options.map((option) => `<div class="form-row"><label>${safeText(option.label)}</label><input id="verify_${safeText(option.key)}" type="${safeText(option.type)}" inputmode="${option.key === 'text' ? 'tel' : 'email'}" name="verify_${safeText(option.key)}" placeholder="${safeText(option.placeholder)}" /></div>`).join('')}
+      <div class="note-block small">Use the four-letter/number code included with your order reminder.</div>
+      <div class="form-row"><label>Access code</label><input id="verify_access" type="text" inputmode="text" maxlength="4" autocomplete="one-time-code" placeholder="AB12" style="text-transform:uppercase;letter-spacing:.25em;font-weight:800;" required /></div>
       <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;"><button type="submit" class="btn btn-primary">View My Order</button><span id="ticketVerifyError" class="small" style="color:#b91c1c;"></span></div>
     </form>
   </div>`;
@@ -193,17 +175,11 @@ function bindVerificationForm(record = {}) {
   if (!form) return;
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const data = new FormData(form);
-    const options = getVerificationOptions(record);
-    const matched = options.some((option) => {
-      const typed = String(data.get(`verify_${option.key}`) || '');
-      if (option.key === 'email') return normalizeEmail(typed) === option.stored;
-      if (option.key === 'text') return normalizePhoneDigits(typed) === option.stored;
-      return false;
-    });
-    if (!matched) {
+    const typed = normalizeAccessCode(document.getElementById('verify_access')?.value || '');
+    const stored = normalizeAccessCode(record.trackingAccessCode || '');
+    if (!stored || typed !== stored) {
       const error = document.getElementById('ticketVerifyError');
-      if (error) error.textContent = 'That does not match this order. Please try again.';
+      if (error) error.textContent = 'That access code does not match this order. Please try again.';
       return;
     }
     state.verifiedCodes.add(normalizeCode(record.trackingCode || ''));

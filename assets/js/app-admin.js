@@ -305,6 +305,9 @@ function cacheEls() {
     panels: [...document.querySelectorAll('[data-tab-panel]')],
     logoutBtn: document.getElementById('logoutBtn'),
     copyPickupAddressBtn: document.getElementById('copyPickupAddressBtn'),
+    copyPasteModalWrap: document.getElementById('copyPasteModalWrap'),
+    copyPasteOptions: document.getElementById('copyPasteOptions'),
+    addCopyPasteTemplateBtn: document.getElementById('addCopyPasteTemplateBtn'),
     pendingList: document.getElementById('pendingList'),
     confirmedList: document.getElementById('confirmedList'),
     completedList: document.getElementById('completedList'),
@@ -389,6 +392,9 @@ function cacheEls() {
     reminderDepositWaivedCheckbox: document.getElementById('reminderDepositWaivedCheckbox'),
     reminderEquipmentDiscussionCheckbox: document.getElementById('reminderEquipmentDiscussionCheckbox'),
     reminderFriendlyIntroCheckbox: document.getElementById('reminderFriendlyIntroCheckbox'),
+    reminderIncludeTrackingCheckbox: document.getElementById('reminderIncludeTrackingCheckbox'),
+    reminderIncludeEquipmentCheckbox: document.getElementById('reminderIncludeEquipmentCheckbox'),
+    reminderIncludeAddressCheckbox: document.getElementById('reminderIncludeAddressCheckbox'),
     reviewOlderCustomerCheckbox: document.getElementById('reviewOlderCustomerCheckbox'),
     reminderUpdatesList: document.getElementById('reminderUpdatesList'),
     reminderTabButtons: [...document.querySelectorAll('[data-reminder-tab]')],
@@ -451,9 +457,11 @@ function bindApp() {
     await logoutAdmin();
     window.location.reload();
   });
-  els.copyPickupAddressBtn?.addEventListener('click', async () => {
-    await copyPickupAddressMessage();
-  });
+  els.copyPickupAddressBtn?.addEventListener('click', openCopyPasteMenu);
+  els.copyPasteModalWrap?.addEventListener('click', (event) => { if (event.target === els.copyPasteModalWrap) closeCopyPasteMenu(); });
+  document.querySelectorAll('[data-close-copy-paste-modal]').forEach((btn) => btn.addEventListener('click', closeCopyPasteMenu));
+  els.copyPasteOptions?.addEventListener('click', handleCopyPasteOptionClick);
+  els.addCopyPasteTemplateBtn?.addEventListener('click', addCustomCopyPasteTemplate);
   els.addOrderBtn.addEventListener('click', () => openOrderModal());
   els.routeStopsList?.addEventListener('click', (event) => {
     const btn = event.target.closest('[data-plan-route-date]');
@@ -465,7 +473,7 @@ function bindApp() {
   document.querySelectorAll('[data-close-reminder-modal]').forEach((btn) => btn.addEventListener('click', closeReminderComposer));
   els.reminderModalWrap?.addEventListener('click', (e) => { if (e.target === els.reminderModalWrap) closeReminderComposer(); });
   els.reminderTabButtons?.forEach((btn) => btn.addEventListener('click', () => setReminderComposerTab(btn.dataset.reminderTab || 'details')));
-  [els.reminderVerbalCheckbox, els.reminderDepositWaivedCheckbox, els.reminderEquipmentDiscussionCheckbox, els.reminderFriendlyIntroCheckbox, els.reviewOlderCustomerCheckbox].forEach((input) => input?.addEventListener('change', handleReminderComposerFieldChange));
+  [els.reminderVerbalCheckbox, els.reminderDepositWaivedCheckbox, els.reminderEquipmentDiscussionCheckbox, els.reminderFriendlyIntroCheckbox, els.reminderIncludeTrackingCheckbox, els.reminderIncludeEquipmentCheckbox, els.reminderIncludeAddressCheckbox, els.reviewOlderCustomerCheckbox].forEach((input) => input?.addEventListener('change', handleReminderComposerFieldChange));
   els.reminderUpdatesList?.addEventListener('change', () => copyReminderComposerPreview(false));
   els.reminderUpdatesList?.addEventListener('click', handleReminderUpdatesListClick);
   els.copyReminderPreviewBtn?.addEventListener('click', () => copyReminderComposerPreview(true));
@@ -1591,6 +1599,15 @@ function generateTrackingCode(existingCodes = new Set()) {
   existingCodes.add(code);
   return code;
 }
+function generateTrackingAccessCode(existingCodes = new Set()) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  do {
+    code = Array.from({ length: 4 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+  } while (existingCodes.has(code));
+  existingCodes.add(code);
+  return code;
+}
 function ensureOrdersHaveTrackingCodes(orders = []) {
   const existingCodes = new Set((orders || []).map((order) => String(order?.trackingCode || '').trim()).filter(Boolean));
   let changed = false;
@@ -2316,11 +2333,11 @@ async function saveInlineOrder(orderId) {
     const subtotalRaw = row.querySelector('[data-inline-field="item_subtotal"]')?.value;
     const chargedUnitPrice = chargedRaw === '' || chargedRaw == null ? '' : Number(chargedRaw || 0);
     const effectiveUnitPrice = chargedUnitPrice === '' ? unitPrice : chargedUnitPrice;
-    return { ...oldItem, inventoryId: row.querySelector('[data-inline-field="item_inventoryId"]')?.value || oldItem.inventoryId || '', name: row.querySelector('[data-inline-field="item_name"]')?.value || oldItem.name || '', quantity: qty, unitPrice, chargedUnitPrice, subtotal: subtotalRaw === '' ? qty * effectiveUnitPrice + Number(oldItem.accessorySubtotal || 0) : Number(subtotalRaw || 0) };
+    return { ...oldItem, inventoryId: row.querySelector('[data-inline-field="item_inventoryId"]')?.value || oldItem.inventoryId || '', name: row.querySelector('[data-inline-field="item_name"]')?.value || oldItem.name || '', quantity: qty, unitPrice, chargedUnitPrice, subtotal: qty * effectiveUnitPrice + Number(oldItem.accessorySubtotal || 0) };
   }).filter((item) => Number(item.quantity || 0) > 0);
   next.baseTotal = calculateOrderItemsSubtotal(next.items) + Number(next.deliveryFee || 0) + Number(next.setupFee || 0) + Number(next.tipAmount || 0);
-  const totalField = get('total')?.value;
-  next.total = next.adjustedTotal !== '' ? next.adjustedTotal : (totalField === '' ? next.baseTotal : Number(totalField || 0));
+  next.total = next.adjustedTotal !== '' ? next.adjustedTotal : next.baseTotal;
+  next.listedTotal = next.items.reduce((sum, item) => sum + (Number(item.unitPrice || 0) * Number(item.quantity || 0)) + Number(item.accessorySubtotal || 0), 0) + Number(next.deliveryFee || 0) + Number(next.setupFee || 0) + Number(next.tipAmount || 0);
   next.updatedAt = new Date().toISOString();
   next.completedAt = next.status === 'Completed' ? (next.completedAt || new Date().toISOString()) : '';
   syncOrderPaymentAmounts(next);
@@ -2492,7 +2509,10 @@ function buildReminderMessage(order, options = {}) {
     verbalConfirmation: Boolean(options.verbalConfirmation ?? order?.verbalConfirmation),
     depositWaived: Boolean(options.depositWaived ?? order?.depositWaived),
     equipmentStillDiscussing: Boolean(options.equipmentStillDiscussing ?? order?.equipmentStillDiscussing),
-    friendlyIntro: Boolean(options.friendlyIntro)
+    friendlyIntro: Boolean(options.friendlyIntro),
+    includeTracking: options.includeTracking !== false,
+    includeEquipment: options.includeEquipment !== false,
+    includeAddress: options.includeAddress !== false
   };
   const fullDateTime = formatDateTime(order.exchangeDate, order.exchangeTime || 'To Be Determined');
   const missing = [];
@@ -2505,54 +2525,48 @@ function buildReminderMessage(order, options = {}) {
     : order.status === 'Confirmed'
     ? `Your upcoming rental order has been confirmed for ${fullDateTime}.`
     : `An order has been started for ${fullDateTime}. This order is pending until the following items are addressed: ${missing.length ? missing.join(', ') : 'none'}.`;
-  const categoryTotals = {};
-  (order.items || []).forEach((item) => {
-    categoryTotals[item.category || 'Equipment'] = (categoryTotals[item.category || 'Equipment'] || 0) + Number(item.quantity || 0);
-  });
-  const equipmentSummary = Object.entries(categoryTotals).map(([category, qty]) => `${qty} ${category}`).join(', ') || summarizeOrderItems(order.items || []);
-  const lines = [
-    `Hello ${order?.firstName || ''}!`,
-    '',
-    intro,
-    '',
-    `Equipment: ${equipmentSummary}`,
-    order.fulfillmentType === 'Delivery'
+  const lines = [`Hello ${order?.firstName || ''}!`, '', intro];
+
+  if (opts.includeAddress) {
+    lines.push('');
+    lines.push(order.fulfillmentType === 'Delivery'
       ? `Delivery Address: ${order.address || order.addressSnapshot || 'Not set'}`
-      : `Pickup Address: ${state.settings?.pickupAddress || 'the pickup location on file'}`
-  ];
+      : `Pickup Address: ${state.settings?.pickupAddress || 'the pickup location on file'}`);
+  }
+
   const totalBefore = getListedOrderTotal(order);
   const totalAfter = getEffectiveOrderTotal(order);
   const hasDiscounts = getOrderDiscountAmount(order) > 0.004;
-  lines.push('');
-  lines.push(`${hasDiscounts ? 'Total Before Discounts' : 'Total'}: ${currency(hasDiscounts ? totalBefore : totalAfter)}`);
-  (order.items || []).forEach((item) => {
-    const inventoryMatch = state.inventory.find((entry) => entry.id === item.inventoryId);
-    const originalUnitPrice = Number(inventoryMatch?.price ?? item.unitPrice ?? 0);
-    const effectiveUnitPrice = Number(getItemEffectiveUnitPrice(item));
-    const lineParts = [`${item.name}: ${Number(item.quantity || 0)} × ${currency(originalUnitPrice)}`];
-    if (effectiveUnitPrice < originalUnitPrice) lineParts.push(`(Marked down to ${currency(effectiveUnitPrice)} each)`);
-    lines.push(lineParts.join(' '));
-    if (Array.isArray(item.accessories) && item.accessories.length) {
-      item.accessories.forEach((acc) => lines.push(`- ${acc.name}: ${currency(Number(acc.price || 0))} each`));
-    }
-  });
-  if (Number(order.deliveryFee || 0) > 0) lines.push(`Delivery Fee: ${currency(order.deliveryFee)}`);
-  if (Number(order.setupFee || 0) > 0) lines.push(`Set Up Fee: ${currency(order.setupFee)}`);
-  if (Number(order.tipAmount || 0) > 0) lines.push(`Tip: ${currency(order.tipAmount)}`);
-  if (hasDiscounts) lines.push(`Total After Discounts: ${currency(totalAfter)}`);
-  if (depositRequired && !['Deposit Paid', 'Deposit', 'Paid', 'Free'].includes(order.paymentStatus)) {
-    lines.push(`Deposit Required: ${currency(depositRequired)}`);
-  } else {
-    lines.push(`Payment Status: ${order.paymentStatus || 'Un-Paid'}`);
+  if (opts.includeEquipment) {
+    lines.push('');
+    (order.items || []).forEach((item) => {
+      const qty = Number(item.quantity || 0);
+      const inventoryMatch = state.inventory.find((entry) => entry.id === item.inventoryId);
+      const originalUnitPrice = Number(inventoryMatch?.price ?? item.unitPrice ?? 0);
+      const effectiveUnitPrice = Number(getItemEffectiveUnitPrice(item));
+      const lineTotal = qty * effectiveUnitPrice + Number(item.accessorySubtotal || 0);
+      let line = `${qty}x ${item.name}: ${currency(lineTotal)} (${currency(effectiveUnitPrice)} each)`;
+      if (effectiveUnitPrice < originalUnitPrice) line += `, marked down from ${currency(originalUnitPrice)} each`;
+      lines.push(line);
+      (item.accessories || []).forEach((acc) => lines.push(`  + ${acc.name}: ${currency(Number(acc.price || 0) * qty)} (${currency(acc.price)} each)`));
+    });
+    if (Number(order.deliveryFee || 0) > 0) lines.push(`Delivery Fee: ${currency(order.deliveryFee)}`);
+    if (Number(order.setupFee || 0) > 0) lines.push(`Set Up Fee: ${currency(order.setupFee)}`);
+    if (Number(order.tipAmount || 0) > 0) lines.push(`Tip: ${currency(order.tipAmount)}`);
   }
+
+  lines.push('');
+  const totalLabel = hasDiscounts ? `${currency(totalBefore)} before discounts / ${currency(totalAfter)} after discounts` : currency(totalAfter);
+  lines.push(`Total: ${totalLabel} | Payment Status: ${order.paymentStatus || 'Un-Paid'}`);
+  if (depositRequired && !['Deposit Paid', 'Deposit', 'Paid', 'Free'].includes(order.paymentStatus)) lines.push(`Deposit Required: ${currency(depositRequired)}`);
   if (depositRequired && ['Deposit Paid', 'Deposit'].includes(order.paymentStatus)) lines.push(`Deposit Paid: ${currency(getOrderAmountPaid(order))}`);
-  if (order.paymentStatus === 'Paid') lines.push(`Paid: ${currency(getOrderAmountPaid(order))}`);
   if (depositRequired && !opts.depositWaived) lines.push(`Remaining Balance: ${currency(getOrderAmountRemaining(order))}`);
+
   lines.push('');
   lines.push(`If anything has changed or you need to make adjustments, please let us know. Otherwise, we look forward to taking care of your order ${getReminderTimingText(order)}!`);
-  if (order?.trackingCode) {
+  if (opts.includeTracking && order?.trackingCode) {
     lines.push('');
-    lines.push(`Track your order here! ${getTrackingLinkForOrder(order)} with your Tracking Number ${order.trackingCode}`);
+    lines.push(`Track your order here! ${getTrackingLinkForOrder(order)} and use ${order.trackingAccessCode || 'your 4-digit code'} to access.`);
   }
   return lines.filter((line, index, arr) => !(line === '' && arr[index - 1] === '')).join('\n').trim();
 }
@@ -2623,9 +2637,15 @@ async function handleReminderUpdatesListClick(event) {
   renderOrders();
   await copyReminderComposerPreview(false);
 }
-function openReminderComposer(id, tab = 'details') {
+async function openReminderComposer(id, tab = 'details') {
   const order = getOrderById(id);
   if (!order || !els.reminderModalWrap) return;
+  if (!order.trackingAccessCode) {
+    const before = JSON.parse(JSON.stringify(order));
+    order.trackingAccessCode = generateTrackingAccessCode(new Set(state.orders.map((entry) => entry.trackingAccessCode).filter(Boolean)));
+    order.updatedAt = new Date().toISOString();
+    await saveOrderOnly(order, before, 'admin-tracking-access-code');
+  }
   state.reminderComposer = {
     orderId: id,
     tab,
@@ -2633,6 +2653,9 @@ function openReminderComposer(id, tab = 'details') {
     depositWaived: Boolean(order.depositWaived),
     equipmentStillDiscussing: Boolean(order.equipmentStillDiscussing),
     friendlyIntro: false,
+    includeTracking: true,
+    includeEquipment: true,
+    includeAddress: true,
     olderCustomer: false
   };
   if (els.reminderModalTitle) els.reminderModalTitle.textContent = 'Notifications';
@@ -2640,6 +2663,9 @@ function openReminderComposer(id, tab = 'details') {
   if (els.reminderDepositWaivedCheckbox) els.reminderDepositWaivedCheckbox.checked = state.reminderComposer.depositWaived;
   if (els.reminderEquipmentDiscussionCheckbox) els.reminderEquipmentDiscussionCheckbox.checked = state.reminderComposer.equipmentStillDiscussing;
   if (els.reminderFriendlyIntroCheckbox) els.reminderFriendlyIntroCheckbox.checked = false;
+  if (els.reminderIncludeTrackingCheckbox) els.reminderIncludeTrackingCheckbox.checked = true;
+  if (els.reminderIncludeEquipmentCheckbox) els.reminderIncludeEquipmentCheckbox.checked = true;
+  if (els.reminderIncludeAddressCheckbox) els.reminderIncludeAddressCheckbox.checked = true;
   if (els.reviewOlderCustomerCheckbox) els.reviewOlderCustomerCheckbox.checked = false;
   populateReminderComposerUpdates(order);
   els.reminderModalWrap.classList.add('open');
@@ -2660,6 +2686,9 @@ async function handleReminderComposerFieldChange() {
   composer.depositWaived = Boolean(els.reminderDepositWaivedCheckbox?.checked);
   composer.equipmentStillDiscussing = Boolean(els.reminderEquipmentDiscussionCheckbox?.checked);
   composer.friendlyIntro = Boolean(els.reminderFriendlyIntroCheckbox?.checked);
+  composer.includeTracking = Boolean(els.reminderIncludeTrackingCheckbox?.checked);
+  composer.includeEquipment = Boolean(els.reminderIncludeEquipmentCheckbox?.checked);
+  composer.includeAddress = Boolean(els.reminderIncludeAddressCheckbox?.checked);
   composer.olderCustomer = Boolean(els.reviewOlderCustomerCheckbox?.checked);
   order.verbalConfirmation = composer.verbalConfirmation;
   order.depositWaived = composer.depositWaived;
@@ -2689,10 +2718,62 @@ async function copyReminderComposerPreview(showStatus = true) {
   }
 }
 
-function buildPickupAddressMessage() {
+function getPickupAddressCopyOptions() {
   const pickupAddress = state.settings?.pickupAddress || 'the pickup address on file';
-  return `Here is the pickup address! ${pickupAddress}. You can use this to help you make a decision between pickup or delivery.`;
+  const firstSentence = `Here is the pickup address! ${pickupAddress}.`;
+  const lastSentence = 'The pick up location is a small parking lot just outside of my neighborhood';
+  return [
+    { id: 'pickup-short', label: 'Pickup intro + address', text: firstSentence },
+    { id: 'pickup-full', label: 'Full pickup message', text: `${firstSentence} ${lastSentence}` },
+    { id: 'pickup-address', label: 'Address only', text: pickupAddress }
+  ];
 }
+function getCustomCopyPasteTemplates() {
+  return Array.isArray(state.settings?.copyPasteTemplates) ? state.settings.copyPasteTemplates : [];
+}
+function renderCopyPasteMenu() {
+  if (!els.copyPasteOptions) return;
+  const defaults = getPickupAddressCopyOptions();
+  const customs = getCustomCopyPasteTemplates();
+  els.copyPasteOptions.innerHTML = `
+    <div class="copy-paste-group"><div class="eyebrow">Pickup Address</div>${defaults.map((item) => `<button type="button" class="copy-paste-option" data-copy-paste-default="${safeText(item.id)}"><strong>${safeText(item.label)}</strong><span>${safeText(item.text)}</span></button>`).join('')}</div>
+    <div class="copy-paste-group"><div class="eyebrow">Custom Copy Paste</div>${customs.map((item) => `<div class="copy-paste-custom-row"><button type="button" class="copy-paste-option" data-copy-paste-custom="${safeText(item.id)}"><strong>${safeText(item.label || 'Untitled')}</strong><span>${safeText(item.text || '')}</span></button><button type="button" class="btn btn-ghost btn-small" data-edit-copy-paste="${safeText(item.id)}">Edit</button><button type="button" class="btn btn-ghost btn-small" data-delete-copy-paste="${safeText(item.id)}">Delete</button></div>`).join('') || '<div class="small muted">No custom buttons yet.</div>'}</div>`;
+}
+function openCopyPasteMenu() { renderCopyPasteMenu(); els.copyPasteModalWrap?.classList.add('open'); }
+function closeCopyPasteMenu() { els.copyPasteModalWrap?.classList.remove('open'); }
+async function persistCopyPasteTemplates(templates) {
+  state.settings = { ...state.settings, copyPasteTemplates: templates };
+  await saveSettings(state.settings);
+  renderCopyPasteMenu();
+}
+async function addCustomCopyPasteTemplate(existingId = '') {
+  const existing = getCustomCopyPasteTemplates().find((item) => item.id === existingId);
+  const label = window.prompt('Button name:', existing?.label || '');
+  if (label == null || !label.trim()) return;
+  const text = window.prompt('Text to copy:', existing?.text || '');
+  if (text == null) return;
+  const templates = getCustomCopyPasteTemplates().slice();
+  if (existing) Object.assign(existing, { label: label.trim(), text, updatedAt: new Date().toISOString() });
+  const next = existing ? templates.map((item) => item.id === existing.id ? existing : item) : [...templates, { id: uid('copy'), label: label.trim(), text, createdAt: new Date().toISOString() }];
+  await persistCopyPasteTemplates(next);
+}
+async function handleCopyPasteOptionClick(event) {
+  const defaultBtn = event.target.closest('[data-copy-paste-default]');
+  const customBtn = event.target.closest('[data-copy-paste-custom]');
+  const editBtn = event.target.closest('[data-edit-copy-paste]');
+  const deleteBtn = event.target.closest('[data-delete-copy-paste]');
+  if (editBtn) return addCustomCopyPasteTemplate(editBtn.dataset.editCopyPaste);
+  if (deleteBtn) {
+    if (!window.confirm('Delete this custom copy paste button?')) return;
+    return persistCopyPasteTemplates(getCustomCopyPasteTemplates().filter((item) => item.id !== deleteBtn.dataset.deleteCopyPaste));
+  }
+  let text = '';
+  if (defaultBtn) text = getPickupAddressCopyOptions().find((item) => item.id === defaultBtn.dataset.copyPasteDefault)?.text || '';
+  if (customBtn) text = getCustomCopyPasteTemplates().find((item) => item.id === customBtn.dataset.copyPasteCustom)?.text || '';
+  if (!text) return;
+  await copyTextWithFallback(text, 'Copy the text below:');
+}
+
 function copyReminderMessage(id) {
   openReminderComposer(id, 'details');
 }
@@ -2747,15 +2828,6 @@ async function copyDeliveryAddress(id) {
     alert('Delivery address copied to clipboard.');
   } catch (error) {
     window.prompt('Copy the delivery address below:', order.address);
-  }
-}
-async function copyPickupAddressMessage() {
-  const message = buildPickupAddressMessage();
-  try {
-    await navigator.clipboard.writeText(message);
-    alert('Pickup address copied to clipboard.');
-  } catch (error) {
-    window.prompt('Copy the pickup address message below:', message);
   }
 }
 function openTextReminder(id) {
@@ -3522,7 +3594,8 @@ async function handleOrderSave(event) {
     newInquiry: false,
     source: existingOrder?.source || 'admin',
     updateHistory: Array.isArray(existingOrder?.updateHistory) ? existingOrder.updateHistory.slice() : [],
-    trackingCode: existingOrder?.trackingCode || generateTrackingCode(new Set(state.orders.map((entry) => entry.trackingCode).filter(Boolean)))
+    trackingCode: existingOrder?.trackingCode || generateTrackingCode(new Set(state.orders.map((entry) => entry.trackingCode).filter(Boolean))),
+    trackingAccessCode: existingOrder?.trackingAccessCode || generateTrackingAccessCode(new Set(state.orders.map((entry) => entry.trackingAccessCode).filter(Boolean)))
   };
   syncOrderPaymentAmounts(order);
   if (existingOrder) {

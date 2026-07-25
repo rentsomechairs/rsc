@@ -5,5 +5,9 @@ service firebase.storage {
       allow read: if true;
       allow write: if request.auth != null;
     }
+
+    match /finance/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
   }
 }
