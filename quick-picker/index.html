@@ -7,11 +7,12 @@
   <link rel="stylesheet" href="../assets/css/styles.css" />
 </head>
 <body>
+  <div id="firebaseLoadingOverlay" class="firebase-loading-overlay hidden" role="status" aria-live="polite"><div class="firebase-loading-card"><span class="section-loading-spinner" aria-hidden="true"></span><strong id="firebaseLoadingText">Loading…</strong></div></div>
   <div class="quick-shell">
     <div id="mobileTotalBar" class="mobile-total-bar" aria-hidden="false">
       <div class="mobile-total-left">
         <strong>Quick Picker</strong>
-        <span id="mobileStepCount" class="mobile-step-count">Step 1/6 • Event Date and Time</span>
+        <span id="mobileStepCount" class="mobile-step-count">Step 1/5 • Event Date and Time</span>
       </div>
       <div id="mobileTotalWrap" class="mobile-total-right">
         <span>Estimated total</span>
@@ -41,7 +42,7 @@
           </div>
         </section>
 
-        <section id="step2" class="card staged-card staged-accordion collapsed">
+        <section id="step2" class="card staged-card staged-accordion collapsed hidden" aria-hidden="true">
           <button type="button" class="step-toggle" data-step-target="2"><span class="step-toggle-meta">Step 2</span><span class="step-toggle-title">Exchange and Return</span></button>
           <div class="staged-body">
             <h2 class="step-title">Exchange and Return</h2>
@@ -58,17 +59,17 @@
         </section>
 
         <section id="step3" class="card staged-card staged-accordion collapsed">
-          <button type="button" class="step-toggle" data-step-target="3"><span class="step-toggle-meta">Step 3</span><span class="step-toggle-title">Category Selection</span></button>
+          <button type="button" class="step-toggle" data-step-target="3"><span class="step-toggle-meta">Step 2</span><span class="step-toggle-title">Category Selection</span></button>
           <div class="staged-body">
             <h2 class="step-title">Category Selection</h2>
-            <p class="muted">Choose the category types you want first. You will pick the exact equipment and quantities in Step 4.</p>
+            <p class="muted">Choose the category types you want first. You will pick the exact equipment and quantities in Step 3.</p>
             <div id="categoryChips" class="category-chips"></div>
             <div class="step-actions"><button type="button" id="nextStep3" class="btn btn-primary">Next</button></div>
           </div>
         </section>
 
         <section id="step4" class="card staged-card staged-accordion collapsed">
-          <button type="button" class="step-toggle" data-step-target="4"><span class="step-toggle-meta">Step 4</span><span class="step-toggle-title">Equipment Selection</span></button>
+          <button type="button" class="step-toggle" data-step-target="4"><span class="step-toggle-meta">Step 3</span><span class="step-toggle-title">Equipment Selection</span></button>
           <div class="staged-body">
             <h2 class="step-title">Equipment Selection</h2>
             <p class="muted">Use the arrows to check nearby dates, then choose equipment below by category.</p>
@@ -84,7 +85,7 @@
         </section>
 
         <section id="step5" class="card staged-card staged-accordion collapsed">
-          <button type="button" class="step-toggle" data-step-target="5"><span class="step-toggle-meta">Step 5</span><span class="step-toggle-title">Pick-Up or Delivery</span></button>
+          <button type="button" class="step-toggle" data-step-target="5"><span class="step-toggle-meta">Step 4</span><span class="step-toggle-title">Pick-Up or Delivery</span></button>
           <div class="staged-body">
             <h2 class="step-title">Pick-Up or Delivery</h2>
             <div class="split-choice">
@@ -104,7 +105,7 @@
               <div class="form-row">
                 <label>Delivery address</label>
                 <div class="address-autocomplete">
-                  <input id="deliveryAddress" name="deliveryAddress" autocomplete="street-address" placeholder="Start typing your drop off address" />
+                  <input id="deliveryAddress" name="rsc_delivery_lookup" type="search" autocomplete="one-time-code" autocapitalize="words" spellcheck="false" inputmode="text" readonly data-lpignore="true" data-1p-ignore="true" data-form-type="other" aria-autocomplete="list" aria-controls="deliveryAddressSuggestions" placeholder="Start typing your drop off address" />
                   <div id="deliveryAddressSuggestions" class="address-suggestions hidden"></div>
                 </div>
                 <div id="deliveryLookupStatus" class="small muted" style="margin-top:6px;"></div>
@@ -127,7 +128,7 @@
         </section>
 
         <section id="step6" class="card staged-card staged-accordion collapsed">
-          <button type="button" class="step-toggle" data-step-target="6"><span class="step-toggle-meta">Step 6</span><span class="step-toggle-title">Communication Preference</span></button>
+          <button type="button" class="step-toggle" data-step-target="6"><span class="step-toggle-meta">Step 5</span><span class="step-toggle-title">Communication Preference</span></button>
           <div class="staged-body">
             <h2 class="step-title">Communication Preference</h2>
             <div class="form-row two">

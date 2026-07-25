@@ -405,6 +405,35 @@ async function appendAuditLog(entry) {
   await upsertDoc(COLLECTIONS.audit, payload.id, payload);
 }
 
+
+export async function createQuickPickerOrder(order) {
+  const cleanOrder = clone(order);
+  if (!isFirebaseEnabled()) {
+    const previous = read(STORAGE_KEYS.orders, []);
+    if (previous.some((item) => item.id === cleanOrder.id)) {
+      const error = new Error('duplicate-order');
+      error.code = 'duplicate-order';
+      throw error;
+    }
+    write(STORAGE_KEYS.orders, [cleanOrder, ...previous]);
+    cacheOrders = [cleanOrder, ...previous];
+    return clone(cleanOrder);
+  }
+  try {
+    await upsertDoc(COLLECTIONS.orders, cleanOrder.id, cleanOrder);
+    cacheOrders = [cleanOrder, ...cacheOrders.filter((item) => item.id !== cleanOrder.id)];
+    return clone(cleanOrder);
+  } catch (error) {
+    if (error?.code === 'permission-denied' || error?.code === 'already-exists') {
+      const duplicate = new Error('duplicate-order');
+      duplicate.code = 'duplicate-order';
+      duplicate.cause = error;
+      throw duplicate;
+    }
+    throw error;
+  }
+}
+
 export async function saveOrders(orders, meta = { actor: 'app' }) {
   cacheOrders = clone(orders);
   if (!isFirebaseEnabled()) {

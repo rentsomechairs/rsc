@@ -25,10 +25,8 @@ const state = {
   pickupSuggestions: [],
   pickupLookupToken: 0,
   orderActionDelegatesBound: false,
-  collapsedColumns: {
-    pending: true,
-    completed: true
-  },
+  activeOrderColumn: 'confirmed',
+  collapsedColumns: { pending: true, confirmed: false, completed: true },
   busyCount: 0,
   activeTemplateField: null,
   reminderComposer: null
@@ -317,6 +315,8 @@ function cacheEls() {
     pendingColumn: document.getElementById('pendingColumn'),
     confirmedColumn: document.getElementById('confirmedColumn'),
     completedColumn: document.getElementById('completedColumn'),
+    newInquiryBell: document.getElementById('newInquiryBell'),
+    newInquiryBadge: document.getElementById('newInquiryBadge'),
     collapsedColumnsRail: document.getElementById('collapsedColumnsRail'),
     addOrderBtn: document.getElementById('addOrderBtn'),
     routeDateInput: document.getElementById('routeDateInput'),
@@ -411,6 +411,8 @@ function cacheEls() {
     pendingColumn: document.getElementById('pendingColumn'),
     confirmedColumn: document.getElementById('confirmedColumn'),
     completedColumn: document.getElementById('completedColumn'),
+    newInquiryBell: document.getElementById('newInquiryBell'),
+    newInquiryBadge: document.getElementById('newInquiryBadge'),
     collapsedColumnsRail: document.getElementById('collapsedColumnsRail'),
     orderDiscountPreview: document.getElementById('orderDiscountPreview'),
     appBusyOverlay: document.getElementById('appBusyOverlay'),
@@ -500,10 +502,16 @@ function bindApp() {
     els.orderForm.elements[name]?.addEventListener('input', () => { els.orderForm.elements[name].dataset.userEdited = 'true'; });
   });
   document.querySelectorAll('[data-toggle-column]').forEach((btn) => btn.addEventListener('click', () => {
-    const key = btn.dataset.toggleColumn;
-    state.collapsedColumns[key] = !state.collapsedColumns[key];
+    state.activeOrderColumn = btn.dataset.toggleColumn || 'confirmed';
     applyOrderColumnCollapseState();
   }));
+  els.newInquiryBell?.addEventListener('click', () => {
+    state.activeTab = 'orders';
+    state.activeOrderColumn = 'pending';
+    document.querySelector('[data-tab-btn="orders"]')?.click();
+    applyOrderColumnCollapseState();
+    els.pendingColumn?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
   els.inventoryForm.addEventListener('submit', handleInventorySave);
   els.settingsForm.addEventListener('submit', handleSettingsSave);
   els.calendarDateInput?.addEventListener('change', handleQuickPeekEventDateChange);
@@ -1906,38 +1914,31 @@ function setReturnDateFromExchange(force = false) {
   returnDateField.value = addDays(exchangeDate, 1);
 }
 function applyOrderColumnCollapseState() {
-  const columns = {
-    pending: els.pendingColumn,
-    completed: els.completedColumn
-  };
-  const rail = els.collapsedColumnsRail;
   const ordersColumns = document.getElementById('ordersColumns');
-  if (!ordersColumns) return;
-  const confirmedColumn = els.confirmedColumn;
-  const insertionMap = {
-    pending: () => ordersColumns.insertBefore(columns.pending, confirmedColumn),
-    completed: () => ordersColumns.appendChild(columns.completed)
-  };
-  ['pending', 'completed'].forEach((key) => {
-    const column = columns[key];
+  const rail = els.collapsedColumnsRail;
+  if (!ordersColumns || !rail) return;
+  const columns = { pending: els.pendingColumn, confirmed: els.confirmedColumn, completed: els.completedColumn };
+  const active = state.activeOrderColumn || 'confirmed';
+  rail.innerHTML = '';
+  Object.entries(columns).forEach(([key, column]) => {
     if (!column) return;
-    const collapsed = Boolean(state.collapsedColumns[key]);
+    const collapsed = key !== active;
+    state.collapsedColumns[key] = collapsed;
     column.classList.toggle('collapsed', collapsed);
-    const btn = column.querySelector('[data-toggle-column]');
-    if (btn) btn.textContent = collapsed ? 'Expand' : 'Collapse';
-    if (collapsed && rail) {
-      rail.appendChild(column);
-    } else {
-      insertionMap[key]?.();
-    }
+    const toggle = column.querySelector('[data-toggle-column]');
+    toggle?.setAttribute('aria-expanded', String(!collapsed));
+    if (collapsed) rail.appendChild(column); else ordersColumns.appendChild(column);
   });
-  if (rail) {
-    rail.classList.toggle('has-collapsed-columns', rail.children.length > 0);
-  }
-  const hasLeftColumn = !state.collapsedColumns.pending;
-  const hasRightColumn = !state.collapsedColumns.completed;
-  ordersColumns.classList.toggle('has-left-column', hasLeftColumn);
-  ordersColumns.classList.toggle('has-right-column', hasRightColumn);
+  rail.classList.toggle('has-collapsed-columns', rail.children.length > 0);
+  ordersColumns.classList.add('single-open-column');
+}
+
+function updateNewInquiryBadge() {
+  const count = (state.orders || []).filter((order) => order.newInquiry).length;
+  if (!els.newInquiryBadge) return;
+  els.newInquiryBadge.textContent = String(count);
+  els.newInquiryBadge.classList.toggle('hidden', count === 0);
+  els.newInquiryBell?.classList.toggle('has-new', count > 0);
 }
 
 function getBusinessWeekOfYear(dateStr) {
@@ -2125,6 +2126,7 @@ function renderOrders() {
   if (els.confirmedTotal) els.confirmedTotal.textContent = `Total: ${currency(sumOrderTotals(confirmed))}`;
   if (els.completedTotal) els.completedTotal.textContent = `Total: ${currency(sumOrderTotals(completed))}`;
   applyOrderColumnCollapseState();
+  updateNewInquiryBadge();
   bindOrderCardActions();
 }
 function fillList(el, html, emptyText) {
@@ -2267,7 +2269,7 @@ function renderOrderAccordion(order, mode) {
         <div class="order-summary-main">
           <div class="order-summary-title separated-order-title">${headerTitle}</div>
           <div class="order-summary-sub">${headerSub} · Remaining ${currency(getOrderAmountRemaining(order))}</div>
-          <div>${order.newInquiry ? '<span class="badge badge-blue">New Inquiry</span>' : ''}</div>
+          <div>${order.newInquiry ? `<button type="button" class="badge badge-blue new-inquiry-clear" data-clear-new-inquiry="${order.id}" title="Mark this inquiry as seen">New Inquiry</button>` : ''}</div>
         </div>
         <div class="order-summary-arrow">⌄</div>
       </button>
@@ -2362,6 +2364,13 @@ function bindOrderCardActions() {
         const date = highlightBtn.dataset.toggleDayHighlight;
         state.highlightedOrderDates[date] = !state.highlightedOrderDates[date];
         renderOrders();
+        return;
+      }
+      const clearInquiryBtn = event.target.closest('[data-clear-new-inquiry]');
+      if (clearInquiryBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+        clearNewInquiryStatus(clearInquiryBtn.dataset.clearNewInquiry);
         return;
       }
       const expandBtn = event.target.closest('[data-expand-order]');
@@ -2841,6 +2850,22 @@ function openTextReminder(id) {
   const message = buildReminderMessage(order);
   const url = `sms:${phone}?&body=${encodeURIComponent(message)}`;
   window.open(url, '_blank');
+}
+async function clearNewInquiryStatus(id) {
+  const order = state.orders.find((item) => item.id === id);
+  if (!order || !order.newInquiry) return;
+  const before = JSON.parse(JSON.stringify(order));
+  order.newInquiry = false;
+  order.updatedAt = new Date().toISOString();
+  try {
+    await saveOrderOnly(order, before, 'admin-inquiry-seen');
+    renderOrders();
+    updateNewInquiryBadge();
+  } catch (error) {
+    Object.assign(order, before);
+    console.error('Unable to clear new inquiry status:', error);
+    alert('The new inquiry status could not be updated. Please try again.');
+  }
 }
 async function updateOrderStatus(id, status) {
   const order = state.orders.find((item) => item.id === id);

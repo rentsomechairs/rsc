@@ -1,9 +1,9 @@
-import { getCategories, getInventory, getOrders, getSettings, saveOrders } from './store.js';
+import { createQuickPickerOrder, getCategories, getInventory, getOrders, getSettings } from './store.js';
 import { CONTACT_METHODS, addDays, buildContactMap, currency, overlaps, parseDateTime, safeText, uid, formatShortDate, formatDateTime } from './utils.js';
 import { computeDeliveryEstimate, debounce, geocodeAddress, searchAddresses } from './geo.js';
 import { sendInquiryNotification } from './email-notify.js';
 
-console.log('QUICK PICKER VERSION:', 'delivery-route-fallback-v7');
+console.log('QUICK PICKER VERSION:', 'browser-autofill-block-fix-v10');
 
 const state = {
   inventory: [],
@@ -28,6 +28,8 @@ const state = {
   deliveryLookupStatus: '',
   deliverySuggestions: [],
   deliveryLookupToken: 0,
+  deliveryResolveToken: 0,
+  deliverySelectionActive: false,
   selectedContactMethods: [],
   contactValues: {},
   availabilityOffset: 0,
@@ -99,18 +101,29 @@ function renderDeliverySuggestions(matches = []) {
       ${formatDistanceTag(match) ? `<div class="address-suggestion-distance">${safeText(formatDistanceTag(match))}</div>` : ''}
     </button>
   `).join('');
+  els.deliveryAddressSuggestions.querySelectorAll('[data-delivery-suggestion]').forEach((button, index) => {
+    button.__deliveryAddressMatch = state.deliverySuggestions[index];
+  });
   els.deliveryAddressSuggestions.classList.remove('hidden');
 }
 
 async function selectDeliverySuggestion(match) {
-  if (!match) return;
+  if (!match || state.deliverySelectionActive) return;
+  state.deliverySelectionActive = true;
+  // Invalidate any autocomplete request that was started while the customer was typing.
+  // Otherwise a late response can replace the list between pointer-down and click.
+  state.deliveryLookupToken += 1;
   state.deliveryAddress = match.label;
   state.deliveryCoords = Number.isFinite(Number(match.lat)) && Number.isFinite(Number(match.lon))
     ? { lat: Number(match.lat), lon: Number(match.lon) }
     : null;
   els.deliveryAddress.value = match.label;
   hideDeliverySuggestions();
-  await resolveDeliveryAddress(match.label, match);
+  try {
+    await resolveDeliveryAddress(match.label, match);
+  } finally {
+    state.deliverySelectionActive = false;
+  }
 }
 
 function getDeliveryRatePerMinute() {
@@ -254,7 +267,9 @@ function cacheEls() {
     backToContact: document.getElementById('backToContact'),
     reviewSection: document.getElementById('reviewSection'),
     reviewContent: document.getElementById('reviewContent'),
-    submitInquiry: document.getElementById('submitInquiry')
+    submitInquiry: document.getElementById('submitInquiry'),
+    firebaseLoadingOverlay: document.getElementById('firebaseLoadingOverlay'),
+    firebaseLoadingText: document.getElementById('firebaseLoadingText')
   });
 }
 
@@ -263,10 +278,21 @@ function renderQuickLoadingPlaceholders() {
   [els.categoryChips, els.availabilityBoard, els.itemChooser, els.summaryCard].forEach((target) => { if (target) target.innerHTML = loading; });
 }
 
+function setFirebaseBusy(isBusy, message = 'Working…') {
+  if (els.firebaseLoadingText) els.firebaseLoadingText.textContent = message;
+  els.firebaseLoadingOverlay?.classList.toggle('hidden', !isBusy);
+  document.body.classList.toggle('firebase-busy', isBusy);
+}
+
 async function loadData() {
+  setFirebaseBusy(true, 'Loading quote information…');
+  try {
   state.inventory = await getInventory();
   state.orders = await getOrders();
   state.settings = await getSettings();
+  } finally {
+    setFirebaseBusy(false);
+  }
 }
 
 function setDefaultDates() {
@@ -306,15 +332,31 @@ function bindEvents() {
   els.eventDate.addEventListener('input', onEventInput);
   els.eventTime.addEventListener('input', onEventInput);
   els.eventName.addEventListener('input', () => { state.eventName = els.eventName.value.trim(); renderSummary(); });
-  els.eventNameSkip?.addEventListener('click', () => { state.eventName = ''; els.eventName.value = ''; advanceTo(2); });
+  els.eventNameSkip?.addEventListener('click', () => { state.eventName = ''; els.eventName.value = ''; advanceTo(3); });
   els.receiveDate.addEventListener('input', onReceiveInput);
   els.receiveTime.addEventListener('input', onReceiveInput);
   els.returnDate.addEventListener('input', onReturnInput);
   els.returnTime.addEventListener('input', onReturnInput);
 
   if (!state.googleDeliveryWidgetReady) {
+    // Keep Chrome/Safari saved-address autofill from covering our own address results.
+    // Starting readonly prevents the browser popup; unlocking on the customer's first
+    // pointer/key interaction still allows normal typing and our custom suggestions.
+    const unlockDeliveryAddress = () => {
+      if (!els.deliveryAddress.hasAttribute('readonly')) return;
+      els.deliveryAddress.removeAttribute('readonly');
+    };
+    els.deliveryAddress.addEventListener('pointerdown', unlockDeliveryAddress, { once: true });
+    els.deliveryAddress.addEventListener('touchstart', unlockDeliveryAddress, { once: true, passive: true });
+    els.deliveryAddress.addEventListener('keydown', unlockDeliveryAddress, { once: true });
+    els.deliveryAddress.addEventListener('focus', () => {
+      window.setTimeout(unlockDeliveryAddress, 0);
+    }, { once: true });
+
     const debouncedDeliveryLookup = debounce((query) => lookupDeliverySuggestions(query), 280);
     els.deliveryAddress.addEventListener('input', () => {
+      state.deliveryLookupToken += 1;
+      state.deliveryResolveToken += 1;
       state.deliveryAddress = els.deliveryAddress.value.trim();
       state.deliveryCoords = null;
       if (!state.deliveryAddress) {
@@ -338,14 +380,29 @@ function bindEvents() {
     });
     els.deliveryAddress.addEventListener('change', () => {
       const typed = els.deliveryAddress.value.trim();
+      // Selecting a suggestion already resolves the exact selected place. Browsers fire a
+      // second change event afterward; resolving that text again can choose a different
+      // worldwide geocoding result and overwrite the customer's selection.
+      if (typed === state.deliveryAddress && state.deliveryCoords) return;
       state.deliveryAddress = typed;
       resolveDeliveryAddress(typed);
     });
-    els.deliveryAddressSuggestions?.addEventListener('click', (event) => {
+    // Select on pointer-down rather than click. This captures the exact suggestion the
+    // customer touched before blur handlers or a late autocomplete response can replace it.
+    els.deliveryAddressSuggestions?.addEventListener('pointerdown', (event) => {
       const button = event.target.closest('[data-delivery-suggestion]');
       if (!button) return;
-      const match = state.deliverySuggestions[Number(button.dataset.deliverySuggestion)];
-      selectDeliverySuggestion(match);
+      event.preventDefault();
+      const match = button.__deliveryAddressMatch;
+      if (match) selectDeliverySuggestion(match);
+    });
+    els.deliveryAddressSuggestions?.addEventListener('click', (event) => {
+      // Keyboard activation still arrives as a click without pointer-down.
+      const button = event.target.closest('[data-delivery-suggestion]');
+      if (!button || state.deliverySelectionActive) return;
+      event.preventDefault();
+      const match = button.__deliveryAddressMatch;
+      if (match) selectDeliverySuggestion(match);
     });
     document.addEventListener('click', (event) => {
       if (event.target === els.deliveryAddress || els.deliveryAddressSuggestions?.contains(event.target)) return;
@@ -367,7 +424,7 @@ function bindEvents() {
     renderAvailabilityBoard(getVisibleInventory());
   });
 
-  els.nextStep1.addEventListener('click', () => advanceTo(2));
+  els.nextStep1.addEventListener('click', () => advanceTo(3));
   els.nextStep2.addEventListener('click', () => advanceTo(3));
   els.nextStep3.addEventListener('click', () => advanceTo(4));
   els.nextStep4.addEventListener('click', () => advanceTo(5));
@@ -434,6 +491,7 @@ async function lookupDeliverySuggestions(query) {
 async function resolveDeliveryAddress(query, preselectedMatch = null) {
   const text = String(query || '').trim();
   if (!text || state.fulfillmentType !== 'Delivery') return;
+  const resolveToken = ++state.deliveryResolveToken;
   state.deliveryAddress = text;
   if (!state.settings?.pickupCoords?.lat && !state.settings?.pickupCoords?.lon) {
     state.deliveryLookupStatus = 'Could not calculate route for that address.';
@@ -449,6 +507,7 @@ async function resolveDeliveryAddress(query, preselectedMatch = null) {
     const destination = preselectedHasCoords
       ? preselectedMatch
       : await geocodeAddress(text, { origin: state.settings?.pickupCoords || null, context: state.settings || null });
+    if (resolveToken !== state.deliveryResolveToken) return;
     if (!destination) {
       state.deliveryLookupStatus = 'Address not matched. Please check the address so we can calculate delivery automatically.';
       renderFulfillment();
@@ -470,6 +529,7 @@ async function resolveDeliveryAddress(query, preselectedMatch = null) {
     state.deliveryCoords = { lat, lon };
     els.deliveryAddress.value = state.deliveryAddress;
     const estimate = await computeDeliveryEstimate(state.settings.pickupCoords, state.deliveryCoords, state.settings || null);
+    if (resolveToken !== state.deliveryResolveToken) return;
     state.estimatedMiles = Number(estimate.roundTripMiles.toFixed(1));
     if (els.estimatedMiles) els.estimatedMiles.value = state.estimatedMiles;
     const minutes = Number.isFinite(estimate.oneWayMinutes) ? estimate.oneWayMinutes : 0;
@@ -483,6 +543,7 @@ async function resolveDeliveryAddress(query, preselectedMatch = null) {
       state.deliveryLookupStatus = 'Could not calculate route for that address.';
     }
   } catch (error) {
+    if (resolveToken !== state.deliveryResolveToken) return;
     state.estimatedMinutes = 0;
     if (els.estimatedMinutes) els.estimatedMinutes.value = '';
     state.deliveryLookupStatus = 'Could not calculate route for that address.';
@@ -555,31 +616,22 @@ function render() {
   renderActionStates();
 }
 
-function renderSubmittedState() {
+function renderSubmittedState(isDuplicate = false) {
   els.pickerForm.classList.toggle('hidden', state.submitted);
   els.responseMessage.classList.toggle('hidden', !state.submitted);
 els.mobileTotalBar.classList.toggle('hidden', state.submitted);
 
   if (state.submitted) {
-    const emailNote = state.notificationResult?.status === 'sent'
-      ? '<div class="small muted" style="margin-top:10px;">An email notification was also sent to the business inbox.</div>'
-      : '';
-    const submittedTotal = Number(state.lastSubmittedOrder?.total || 0);
-    const depositNote = requiresDeposit(submittedTotal)
-      ? `<div class="note-block" style="margin-top:12px;">Orders over ${currency(getDepositMinimumOrder())} require a 35% deposit. Your required deposit for this request is <strong>${currency(getDepositAmount(submittedTotal))}</strong>.</div>`
-      : '';
     els.responseMessage.innerHTML = `
       <section class="card staged-card thanks-card">
-        <div class="eyebrow">Inquiry Sent</div>
-        <h1 class="step-title">Thank you for your inquiry!</h1>
-        <div class="note-block">
-          Please remember that this order is pending until confirmed. Someone from our team will reach out to you as soon as possible to confirm everything. Dates and times chosen are subject to negotiation based on availability!
-        </div>
-        ${state.lastSubmittedOrder?.eventName ? `<div class="small muted" style="margin-top:10px;"><strong>Event:</strong> ${safeText(state.lastSubmittedOrder.eventName)}</div>` : ''}
-        ${depositNote}
-        ${emailNote}
+        <div class="eyebrow">${isDuplicate ? 'Already Received' : 'Request Received'}</div>
+        <h1 class="step-title">${isDuplicate ? 'We already have this quote request.' : 'Thank you for reaching out!'}</h1>
+        <div class="note-block">${isDuplicate
+          ? 'There is no need to submit it again. Our team will reach out soon.'
+          : 'Your quote request was submitted successfully. Someone from our team will reach out as soon as possible.'}</div>
+        <p class="muted" style="margin:14px 0 0;">We appreciate the opportunity to help with your event.</p>
         <div class="step-actions step-actions-left">
-          <button type="button" id="placeAnotherOrder" class="btn btn-primary">Place another order!</button>
+          <button type="button" id="placeAnotherOrder" class="btn btn-primary">Submit a different request</button>
         </div>
       </section>`;
     document.getElementById('placeAnotherOrder')?.addEventListener('click', resetAfterSubmit);
@@ -593,6 +645,7 @@ function renderSections() {
   const sections = [els.step1, els.step2, els.step3, els.step4, els.step5, els.step6].filter(Boolean);
   sections.forEach((section, index) => {
     const stepNumber = index + 1;
+    if (stepNumber === 2) { section.classList.add('hidden'); return; }
     section.classList.remove('hidden');
     section.classList.toggle('open', stepNumber === state.step);
     section.classList.toggle('collapsed', stepNumber !== state.step);
@@ -602,15 +655,9 @@ function renderSections() {
     if (toggle) toggle.disabled = stepNumber > highest;
   });
   if (els.mobileStepCount) {
-    const names = {
-      1: 'Event Date and Time',
-      2: 'Exchange and Return',
-      3: 'Category Selection',
-      4: 'Equipment Selection',
-      5: 'Pick-Up or Delivery',
-      6: 'Communication Preference'
-    };
-    els.mobileStepCount.textContent = `Step ${state.step}/6 • ${names[state.step] || ''}`;
+    const names = { 1: 'Event Date and Time', 3: 'Category Selection', 4: 'Equipment Selection', 5: 'Pick-Up or Delivery', 6: 'Communication Preference' };
+    const displayStep = ({1:1,3:2,4:3,5:4,6:5})[state.step] || 1;
+    els.mobileStepCount.textContent = `Step ${displayStep}/5 • ${names[state.step] || ''}`;
   }
   updateFloatingTotalVisibility();
 }
@@ -1140,6 +1187,21 @@ function updateFloatingTotalVisibility() {
   els.mobileTotalBar.classList.remove('faded');
 }
 
+function stableOrderFingerprint(order) {
+  const normalized = {
+    firstName: String(order.firstName || '').trim().toLowerCase(),
+    lastName: String(order.lastName || '').trim().toLowerCase(),
+    eventDate: order.eventDate || '', eventTime: order.eventTime || '', eventName: String(order.eventName || '').trim().toLowerCase(),
+    fulfillmentType: order.fulfillmentType || '', address: String(order.address || '').trim().toLowerCase(),
+    items: (order.items || []).map((item) => [item.inventoryId || item.name || '', Number(item.quantity || 0), Number(item.unitPrice || 0)]).sort(),
+    contactMethods: order.contactMethods || {}
+  };
+  const text = JSON.stringify(normalized);
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) { hash ^= text.charCodeAt(i); hash = Math.imul(hash, 16777619); }
+  return `quote_${(hash >>> 0).toString(36)}`;
+}
+
 async function handleSubmit(event) {
   event.preventDefault();
   if (!hasValidContactSection() || !state.reviewReady) return;
@@ -1151,7 +1213,7 @@ async function handleSubmit(event) {
   }));
   const contactMap = buildContactMap(state.selectedContactMethods, contactValues);
   const order = {
-    id: uid('ord'),
+    id: '',
     firstName: (form.get('firstName') || '').trim(),
     lastName: (form.get('lastName') || '').trim(),
     status: 'Pending',
@@ -1188,29 +1250,37 @@ async function handleSubmit(event) {
     source: 'quick-picker',
     subtotal
   };
-  const orders = await getOrders();
-  orders.unshift(order);
-  await saveOrders(orders, { actor: 'quick-picker' });
-  state.orders = orders;
+  order.id = stableOrderFingerprint(order);
+  setFirebaseBusy(true, 'Submitting your quote request…');
   try {
+    await createQuickPickerOrder(order);
+    state.orders = [order, ...state.orders.filter((item) => item.id !== order.id)];
     state.settings = await getSettings();
-    const notificationResult = await sendInquiryNotification(state.settings, order);
-    state.notificationResult = notificationResult;
-    order.notificationEmailStatus = notificationResult.status;
-    order.notificationEmailUpdatedAt = new Date().toISOString();
-    if (notificationResult.reason) order.notificationEmailReason = notificationResult.reason;
+    try {
+      const notificationResult = await sendInquiryNotification(state.settings, order);
+      state.notificationResult = notificationResult;
+    } catch (notificationError) {
+      state.notificationResult = { status: 'failed', reason: notificationError?.message || 'Notification failed.' };
+      console.error('Inquiry email notification failed:', notificationError);
+    }
+    state.lastSubmittedOrder = order;
+    state.submitted = true;
+    renderSubmittedState();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   } catch (error) {
-    state.notificationResult = { status: 'failed', reason: error?.message || 'Notification failed.' };
-    order.notificationEmailStatus = 'failed';
-    order.notificationEmailReason = error?.message || 'Notification failed.';
-    order.notificationEmailUpdatedAt = new Date().toISOString();
-    console.error('Inquiry email notification failed:', error);
+    if (error?.code === 'duplicate-order') {
+      state.lastSubmittedOrder = order;
+      state.notificationResult = null;
+      state.submitted = true;
+      renderSubmittedState(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    console.error('Quote submission failed:', error);
+    alert('We could not submit your request. Please wait a moment and try again.');
+  } finally {
+    setFirebaseBusy(false);
   }
-  await saveOrders(orders, { actor: 'quick-picker-notify' });
-  state.lastSubmittedOrder = order;
-  state.submitted = true;
-  renderSubmittedState();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function resetAfterSubmit() {

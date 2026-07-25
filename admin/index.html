@@ -55,6 +55,7 @@
           <h1 style="margin:0;">Admin Dashboard</h1>
           <div class="muted small">Track inquiries, inventory, and settings.</div>
         </div>
+        <button id="newInquiryBell" class="notification-bell" type="button" aria-label="New quote submissions">🔔<span id="newInquiryBadge" class="notification-badge hidden">0</span></button>
       </div>
 
       <section class="tab-panel active" data-tab-panel="orders">
@@ -68,32 +69,15 @@
         <div class="collapsed-columns-rail" id="collapsedColumnsRail"></div>
         <div class="columns columns-orders" id="ordersColumns">
           <div class="column column-side" id="pendingColumn" data-column="pending">
-            <div class="column-head">
-              <div class="column-head-title">
-                <h3>Pending Orders</h3>
-                <div id="pendingTotal" class="badge badge-yellow inline-total"></div>
-              </div>
-              <button class="btn btn-ghost btn-small" type="button" data-toggle-column="pending">Collapse</button>
-            </div>
+            <button class="column-head order-column-toggle" type="button" data-toggle-column="pending" aria-expanded="false"><span class="column-head-title"><h3>Pending Orders</h3><span id="pendingTotal" class="badge badge-yellow inline-total"></span></span><span class="column-chevron" aria-hidden="true">⌄</span></button>
             <div id="pendingList" class="order-list"></div>
           </div>
           <div class="column column-main" id="confirmedColumn" data-column="confirmed">
-            <div class="column-head">
-              <div class="column-head-title">
-                <h3>Confirmed Orders</h3>
-                <div id="confirmedTotal" class="badge badge-blue inline-total"></div>
-              </div>
-            </div>
+            <button class="column-head order-column-toggle" type="button" data-toggle-column="confirmed" aria-expanded="false"><span class="column-head-title"><h3>Confirmed Orders</h3><span id="confirmedTotal" class="badge badge-blue inline-total"></span></span><span class="column-chevron" aria-hidden="true">⌄</span></button>
             <div id="confirmedList" class="order-list"></div>
           </div>
           <div class="column column-side" id="completedColumn" data-column="completed">
-            <div class="column-head">
-              <div class="column-head-title">
-                <h3>Completed Orders</h3>
-                <div id="completedTotal" class="badge badge-green inline-total"></div>
-              </div>
-              <button class="btn btn-ghost btn-small" type="button" data-toggle-column="completed">Collapse</button>
-            </div>
+            <button class="column-head order-column-toggle" type="button" data-toggle-column="completed" aria-expanded="false"><span class="column-head-title"><h3>Completed Orders</h3><span id="completedTotal" class="badge badge-green inline-total"></span></span><span class="column-chevron" aria-hidden="true">⌄</span></button>
             <div id="completedList" class="order-list"></div>
           </div>
         </div>
