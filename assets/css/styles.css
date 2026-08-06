@@ -1794,3 +1794,4 @@ body.app-is-busy { overflow: hidden; }
 
 .new-inquiry-clear { font: inherit; cursor: pointer; border: 1px solid rgba(37,99,235,.25); }
 .new-inquiry-clear:hover { filter: brightness(.96); transform: translateY(-1px); }
+body.employee-view .admin-only { display: none !important; }

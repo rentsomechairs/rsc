@@ -33,6 +33,7 @@
         <button class="nav-btn" data-tab-btn="calendar">Quick Peek</button>
         <button class="nav-btn" data-tab-btn="reviews">Reviews</button>
         <button class="nav-btn" data-tab-btn="numbers">The Numbers</button>
+        <button class="nav-btn admin-only" data-tab-btn="employees">Employees</button>
         <a class="nav-btn" href="../finance/index.html" style="text-decoration:none;display:block;">Financial Records</a>
         <button class="nav-btn" data-tab-btn="settings">Settings</button>
       </div>
@@ -203,6 +204,16 @@
         </div>
       </section>
 
+
+      <section class="tab-panel admin-only" data-tab-panel="employees">
+        <div class="section-header">
+          <div><h2 style="margin:0;">Employees</h2><div class="muted small">Approve employee accounts, review pickup locations, and copy the private signup link.</div></div>
+          <button class="btn btn-primary" id="copyEmployeeSignupLinkBtn" type="button">Copy Signup Link</button>
+        </div>
+        <div id="employeeSignupLinkStatus" class="small muted" style="margin-bottom:12px;"></div>
+        <div id="employeesList" class="stack-sm"></div>
+      </section>
+
       <section class="tab-panel" data-tab-panel="settings">
         <div class="section-header">
           <div>
@@ -316,6 +327,7 @@
         </div>
         <div class="form-row">
           <div class="form-row"><label>Delivery Address</label><input name="address" placeholder="Delivery address if needed" /></div>
+          <div class="form-row admin-only"><label>Assigned Employee</label><select name="assignedEmployeeId"><option value="">Unassigned</option></select></div>
         </div>
         <div class="form-row" style="grid-column:1/-1;">
           <label class="inline-check"><input type="checkbox" name="verbalConfirmation" /> Verbal Confirmation Received</label>
@@ -464,6 +476,6 @@
     </div>
   </div>
 
-  <script type="module" src="../assets/js/app-admin.js"></script>
+  <script type="module" src="../assets/js/app-admin.js?v=employee-access-load-fix-v1"></script>
 </body>
 </html>

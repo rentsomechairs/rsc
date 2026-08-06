@@ -45,6 +45,12 @@ export async function waitForAuthReady() {
   return authReadyPromise;
 }
 
+export async function firebaseSignup(email, password) {
+  const { auth } = await initFirebase();
+  const authMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js');
+  return authMod.createUserWithEmailAndPassword(auth, email, password);
+}
+
 export async function firebaseLogin(email, password) {
   const { auth } = await initFirebase();
   const authMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js');
@@ -67,6 +73,14 @@ export async function listCollection(name) {
   const { db } = await initFirebase();
   const fireMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js');
   const snap = await fireMod.getDocs(fireMod.collection(db, name));
+  return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+}
+
+export async function listCollectionWhere(name, field, op, value) {
+  const { db } = await initFirebase();
+  const fireMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js');
+  const q = fireMod.query(fireMod.collection(db, name), fireMod.where(field, op, value));
+  const snap = await fireMod.getDocs(q);
   return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 }
 
@@ -95,4 +109,35 @@ export async function uploadFile(path, file) {
   const storageRef = storageMod.ref(storage, path);
   await storageMod.uploadBytes(storageRef, file);
   return storageMod.getDownloadURL(storageRef);
+}
+
+
+export async function bootstrapOrGetUserProfile(user) {
+  if (!user) return null;
+  const { db } = await initFirebase();
+  const fireMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js');
+  const userRef = fireMod.doc(db, 'users', user.uid);
+  const existing = await fireMod.getDoc(userRef);
+  if (existing.exists()) return { id: existing.id, ...existing.data() };
+  const securityRef = fireMod.doc(db, 'appSecurity', 'main');
+  return fireMod.runTransaction(db, async (tx) => {
+    const securitySnap = await tx.get(securityRef);
+    const isBootstrapAdmin = !securitySnap.exists() || !securitySnap.data()?.adminUid;
+    const now = new Date().toISOString();
+    const profile = {
+      uid: user.uid,
+      email: user.email || '',
+      firstName: '',
+      lastName: '',
+      phone: '',
+      pickupAddress: '',
+      role: isBootstrapAdmin ? 'admin' : 'employee',
+      status: isBootstrapAdmin ? 'approved' : 'pending',
+      createdAt: now,
+      updatedAt: now
+    };
+    tx.set(userRef, profile, { merge: false });
+    if (isBootstrapAdmin) tx.set(securityRef, { adminUid: user.uid, adminEmail: user.email || '', createdAt: now }, { merge: false });
+    return { id: user.uid, ...profile };
+  });
 }

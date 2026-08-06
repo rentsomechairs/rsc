@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, firebaseLogin, firebaseLogout, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, upsertDoc, uploadFile, waitForAuthReady } from './firebase-service.js';
+import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, uploadFile, waitForAuthReady } from './firebase-service.js';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -22,7 +22,8 @@ const COLLECTIONS = {
   snapshots: 'orderSnapshots',
   tracking: 'orderTracking',
   reviews: 'reviews',
-  costs: 'costs'
+  costs: 'costs',
+  users: 'users'
 };
 
 
@@ -176,6 +177,7 @@ let cacheSnapshots = [];
 let cacheTracking = [];
 let cacheReviews = [];
 let cacheCosts = [];
+let cacheUsers = [];
 let localSeeded = false;
 
 function futureDate(offset) {
@@ -265,6 +267,13 @@ export async function saveInventory(items) {
   for (const [id] of currentMap.entries()) {
     if (!nextIds.has(id)) await deleteDocById(COLLECTIONS.inventory, id);
   }
+}
+
+
+export async function getAssignedOrders(employeeUid) {
+  if (!isFirebaseEnabled()) return clone(cacheOrders.filter((order) => order.assignedEmployeeId === employeeUid));
+  cacheOrders = await listCollectionWhere(COLLECTIONS.orders, 'assignedEmployeeId', '==', employeeUid);
+  return clone(cacheOrders);
 }
 
 export async function getOrders() {
@@ -575,6 +584,52 @@ export async function saveSettings(settings) {
 export function getCategories() {
   const set = new Set((cacheInventory || []).map((item) => item.category).filter(Boolean));
   return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+
+
+export async function getCurrentUserProfile() {
+  if (!isFirebaseEnabled()) {
+    const session = read(STORAGE_KEYS.session, null);
+    return session ? { id: 'local-admin', uid: 'local-admin', email: session.email || '', role: 'admin', status: 'approved' } : null;
+  }
+  const user = await waitForAuthReady().then(() => getCurrentFirebaseUser());
+  return user ? bootstrapOrGetUserProfile(user) : null;
+}
+
+export async function getUsers() {
+  if (!isFirebaseEnabled()) return clone(cacheUsers);
+  cacheUsers = await listCollection(COLLECTIONS.users);
+  return clone(cacheUsers);
+}
+
+export async function saveUserProfile(profile) {
+  const next = { ...clone(profile), uid: profile.uid || profile.id, updatedAt: new Date().toISOString() };
+  await upsertDoc(COLLECTIONS.users, next.uid, next);
+  cacheUsers = cacheUsers.filter((u) => (u.uid || u.id) !== next.uid).concat(next);
+  return clone(next);
+}
+
+export async function signupEmployee(data) {
+  if (!isFirebaseEnabled()) throw new Error('Employee signup requires Firebase.');
+  const credential = await firebaseSignup(String(data.email || '').trim(), String(data.password || ''));
+  const now = new Date().toISOString();
+  const profile = {
+    uid: credential.user.uid,
+    email: credential.user.email || String(data.email || '').trim(),
+    firstName: String(data.firstName || '').trim(),
+    lastName: String(data.lastName || '').trim(),
+    phone: String(data.phone || '').trim(),
+    pickupAddress: String(data.pickupAddress || '').trim(),
+    emergencyContactName: String(data.emergencyContactName || '').trim(),
+    emergencyContactPhone: String(data.emergencyContactPhone || '').trim(),
+    role: 'employee',
+    status: 'pending',
+    createdAt: now,
+    updatedAt: now
+  };
+  await upsertDoc(COLLECTIONS.users, profile.uid, profile);
+  return clone(profile);
 }
 
 export async function loginAdmin(email, password) {

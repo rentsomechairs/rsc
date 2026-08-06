@@ -1,9 +1,11 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOrders, getPublicReviews, getSession, getSettings, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveInventory, saveOrders, saveSettings, saveSingleOrder } from './store.js';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveInventory, saveOrders, saveSettings, saveSingleOrder, saveUserProfile } from './store.js';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
 const state = {
   inventory: [],
   orders: [],
+  users: [],
+  currentUser: null,
   settings: {},
   reviews: [],
   costs: [],
@@ -35,7 +37,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'order-numbers-final-patch-v3';
+const ADMIN_VERSION = 'employee-access-load-fix-v1';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -283,8 +285,11 @@ async function init() {
     bindLogin();
     return;
   }
+  state.currentUser = await getCurrentUserProfile();
+  if (!state.currentUser) throw new Error('Unable to load your account profile.');
   els.loginView.classList.add('hidden');
   els.appView.classList.remove('hidden');
+  applyRoleAccess();
   bindApp();
   renderLoadingPlaceholders('Loading from Firebase…');
   await withBusy(async () => {
@@ -416,9 +421,56 @@ function cacheEls() {
     collapsedColumnsRail: document.getElementById('collapsedColumnsRail'),
     orderDiscountPreview: document.getElementById('orderDiscountPreview'),
     appBusyOverlay: document.getElementById('appBusyOverlay'),
-    appBusyMessage: document.getElementById('appBusyMessage')
+    appBusyMessage: document.getElementById('appBusyMessage'),
+    employeesList: document.getElementById('employeesList'),
+    copyEmployeeSignupLinkBtn: document.getElementById('copyEmployeeSignupLinkBtn'),
+    employeeSignupLinkStatus: document.getElementById('employeeSignupLinkStatus')
   });
 }
+function isAdminUser() { return state.currentUser?.role === 'admin' && state.currentUser?.status === 'approved'; }
+function applyRoleAccess() {
+  const admin = isAdminUser();
+  document.body.classList.toggle('employee-view', !admin);
+  document.querySelectorAll('.admin-only').forEach((el) => el.classList.toggle('hidden', !admin));
+  if (!admin) {
+    state.activeTab = 'orders';
+    document.querySelectorAll('[data-tab-btn]').forEach((btn) => btn.classList.toggle('hidden', btn.dataset.tabBtn !== 'orders'));
+    document.querySelectorAll('[data-tab-panel]').forEach((panel) => panel.classList.toggle('active', panel.dataset.tabPanel === 'orders'));
+    if (state.currentUser?.status !== 'approved') {
+      document.querySelector('[data-tab-panel="orders"]')?.insertAdjacentHTML('afterbegin', '<div class="card" style="padding:18px;margin-bottom:16px;"><strong>Account pending approval</strong><div class="small muted">Your signup was received. You will see assigned orders after an administrator approves your account.</div></div>');
+    }
+  }
+}
+function approvedEmployees() { return (state.users || []).filter((u) => u.role === 'employee' && u.status === 'approved'); }
+function employeeDisplayName(user = {}) { return `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Employee'; }
+function populateEmployeeAssignmentSelect(selectedId = '') {
+  const select = els.orderForm?.elements?.assignedEmployeeId;
+  if (!select) return;
+  select.innerHTML = '<option value="">Unassigned</option>' + approvedEmployees().map((u) => `<option value="${safeText(u.uid || u.id)}">${safeText(employeeDisplayName(u))}</option>`).join('');
+  select.value = selectedId || '';
+}
+function renderEmployees() {
+  if (!els.employeesList || !isAdminUser()) return;
+  const employees = (state.users || []).filter((u) => u.role === 'employee').sort((a,b) => (a.status === 'pending' ? -1 : 1) - (b.status === 'pending' ? -1 : 1));
+  els.employeesList.innerHTML = employees.length ? employees.map((u) => `<div class="card" style="padding:16px;"><div class="section-header"><div><strong>${safeText(employeeDisplayName(u))}</strong><div class="small muted">${safeText(u.email || '')} · ${safeText(u.phone || 'No phone')}</div></div><span class="badge ${u.status === 'approved' ? 'badge-green' : 'badge-yellow'}">${safeText(u.status || 'pending')}</span></div><div class="small"><strong>Pickup location:</strong> ${safeText(u.pickupAddress || 'Not provided')}</div>${u.emergencyContactName ? `<div class="small muted">Emergency contact: ${safeText(u.emergencyContactName)} · ${safeText(u.emergencyContactPhone || '')}</div>` : ''}<div style="display:flex;gap:8px;margin-top:12px;">${u.status !== 'approved' ? `<button class="btn btn-primary btn-small" data-approve-employee="${safeText(u.uid || u.id)}">Approve</button>` : `<button class="btn btn-ghost btn-small" data-pend-employee="${safeText(u.uid || u.id)}">Set Pending</button>`}</div></div>`).join('') : '<div class="empty-state">No employee signups yet.</div>';
+}
+async function handleEmployeeListClick(event) {
+  const approve = event.target.closest('[data-approve-employee]');
+  const pend = event.target.closest('[data-pend-employee]');
+  const id = approve?.dataset.approveEmployee || pend?.dataset.pendEmployee;
+  if (!id) return;
+  const user = state.users.find((u) => (u.uid || u.id) === id);
+  if (!user) return;
+  user.status = approve ? 'approved' : 'pending';
+  await withBusy(() => saveUserProfile(user), 'Updating employee…');
+  renderEmployees();
+}
+async function copyEmployeeSignupLink() {
+  const url = new URL('../employee-signup/index.html', window.location.href).href;
+  await navigator.clipboard.writeText(url);
+  if (els.employeeSignupLinkStatus) els.employeeSignupLinkStatus.textContent = 'Private employee signup link copied.';
+}
+
 function bindLogin() {
   els.loginForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -460,6 +512,8 @@ function bindApp() {
     window.location.reload();
   });
   els.copyPickupAddressBtn?.addEventListener('click', openCopyPasteMenu);
+  els.copyEmployeeSignupLinkBtn?.addEventListener('click', copyEmployeeSignupLink);
+  els.employeesList?.addEventListener('click', handleEmployeeListClick);
   els.copyPasteModalWrap?.addEventListener('click', (event) => { if (event.target === els.copyPasteModalWrap) closeCopyPasteMenu(); });
   document.querySelectorAll('[data-close-copy-paste-modal]').forEach((btn) => btn.addEventListener('click', closeCopyPasteMenu));
   els.copyPasteOptions?.addEventListener('click', handleCopyPasteOptionClick);
@@ -718,18 +772,27 @@ function handleInventoryImagePreview() {
 }
 async function loadData() {
   state.inventory = await getInventory();
+  if (state.currentUser?.role === 'admin') state.users = await getUsers().catch(() => []);
+  else state.users = [state.currentUser];
   state.settings = await getSettings();
-  const normalizedOrders = (await getOrders()).map((order) => ({
+  const rawOrders = state.currentUser?.role === 'employee' ? await getAssignedOrders(state.currentUser.uid) : await getOrders();
+  const normalizedOrders = rawOrders.map((order) => ({
     ...order,
     paymentStatus: order.paymentStatus === 'Deposit' ? 'Deposit Paid' : order.paymentStatus
   }));
   const tracked = ensureOrdersHaveTrackingCodes(normalizedOrders);
-  state.orders = tracked.orders;
+  state.orders = tracked.orders.map((order) => ({ assignedEmployeeId: '', assignedEmployeeName: '', ...order }));
+  if (state.currentUser?.role === 'employee') state.orders = state.orders.filter((order) => order.assignedEmployeeId === state.currentUser.uid);
   const paymentMigrated = syncAllOrdersToDepositRule();
   state.reviews = await getPublicReviews().catch(() => []);
   state.costs = await getCostRecords().catch(() => []);
   state.averages = Array.isArray(state.settings?.averageTasks) ? state.settings.averageTasks : [];
-  if (tracked.changed || paymentMigrated) await saveOrders(state.orders, { actor: tracked.changed ? 'tracking-payment-backfill' : 'deposit-paid-lock-migration' });
+  // Legacy orders intentionally remain unassigned until an admin edits or assigns them.
+  // Do not backfill employee fields during startup: rewriting the entire orders collection
+  // can exhaust Firestore's queued write stream and freeze the admin panel.
+  if (tracked.changed || paymentMigrated) {
+    await saveOrders(state.orders, { actor: tracked.changed ? 'tracking-payment-backfill' : 'deposit-paid-lock-migration' });
+  }
 }
 function setBusyState(isBusy, message = 'Saving…') {
   if (!els.appBusyOverlay) return;
@@ -785,6 +848,7 @@ async function saveOrderOnly(order, before = null, actor = 'admin-order') {
     renderDeliveryRoute();
     renderAdminReviews();
     renderNumbers();
+  renderEmployees();
   }, 'Saving order…');
 }
 function renderAll() {
@@ -797,6 +861,7 @@ function renderAll() {
   renderSettings();
   renderAdminReviews();
   renderNumbers();
+  renderEmployees();
 }
 function setTab(tab) {
   state.activeTab = tab;
@@ -2268,7 +2333,7 @@ function renderOrderAccordion(order, mode) {
       <button type="button" class="order-accordion-summary" data-expand-order="${order.id}">
         <div class="order-summary-main">
           <div class="order-summary-title separated-order-title">${headerTitle}</div>
-          <div class="order-summary-sub">${headerSub} · Remaining ${currency(getOrderAmountRemaining(order))}</div>
+          <div class="order-summary-sub">${headerSub}${order.assignedEmployeeName ? ` · Assigned to ${safeText(order.assignedEmployeeName)}` : ''} · Remaining ${currency(getOrderAmountRemaining(order))}</div>
           <div>${order.newInquiry ? `<button type="button" class="badge badge-blue new-inquiry-clear" data-clear-new-inquiry="${order.id}" title="Mark this inquiry as seen">New Inquiry</button>` : ''}</div>
         </div>
         <div class="order-summary-arrow">⌄</div>
@@ -3331,6 +3396,7 @@ function openOrderModal(orderId = null) {
 }
 function resetOrderForm(order) {
   els.orderForm.reset();
+  populateEmployeeAssignmentSelect(order?.assignedEmployeeId || '');
   ['exchangeDate','returnDate'].forEach((name) => { if (els.orderForm.elements[name]) els.orderForm.elements[name].dataset.userEdited = ''; });
   if (els.orderForm.elements.total) els.orderForm.elements.total.dataset.userAdjusted = '';
   const now = new Date();
@@ -3590,6 +3656,8 @@ async function handleOrderSave(event) {
     paymentStatus: form.get('paymentStatus'),
     fulfillmentType: form.get('fulfillmentType'),
     verbalConfirmation: Boolean(form.get('verbalConfirmation')),
+    assignedEmployeeId: isAdminUser() ? String(form.get('assignedEmployeeId') || '') : (existingOrder?.assignedEmployeeId || ''),
+    assignedEmployeeName: isAdminUser() ? employeeDisplayName(approvedEmployees().find((u) => (u.uid || u.id) === String(form.get('assignedEmployeeId') || '')) || {}) : (existingOrder?.assignedEmployeeName || ''),
     address: form.get('address').trim(),
     exchangeDate: form.get('exchangeDate'),
     exchangeTime: form.get('exchangeTime'),

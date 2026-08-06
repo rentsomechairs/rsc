@@ -1,109 +1,46 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() {
-      return request.auth != null;
-    }
+    function signedIn() { return request.auth != null; }
+    function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function isAdmin() { return signedIn() && userDoc().data.role == 'admin' && userDoc().data.status == 'approved'; }
+    function approvedEmployee() { return signedIn() && userDoc().data.role == 'employee' && userDoc().data.status == 'approved'; }
+    function assignedToEmployee() { return approvedEmployee() && resource.data.assignedEmployeeId == request.auth.uid; }
 
+    match /appSecurity/{id} {
+      allow read, create: if signedIn();
+      allow update, delete: if isAdmin();
+    }
+    match /users/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create: if signedIn() && request.auth.uid == uid;
+      allow update: if isAdmin() || (signedIn() && request.auth.uid == uid && request.resource.data.role == resource.data.role && request.resource.data.status == resource.data.status);
+      allow delete: if isAdmin();
+    }
     match /orders/{orderId} {
-      allow read: if signedIn();
-      allow create: if true; // public quick picker inquiry
-      allow update, delete: if signedIn();
+      allow read: if isAdmin() || assignedToEmployee();
+      allow create: if true;
+      allow update, delete: if isAdmin();
     }
-
-    match /inventory/{id} {
-      allow read: if true;
-      allow write: if signedIn();
-    }
-
-    match /settings/{id} {
-      allow read: if true;
-      allow write: if signedIn();
-    }
-
-    match /orderAuditLog/{id} {
-      allow read: if signedIn();
-      allow create: if signedIn();
-      allow update, delete: if false;
-    }
-
-    match /orderSnapshots/{id} {
-      allow read: if signedIn();
-      allow create: if signedIn();
-      allow update, delete: if false;
-    }
-
-    match /orderTracking/{id} {
-      allow read: if true;
-      allow create, update, delete: if signedIn();
-    }
-
-    match /reviews/{id} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if signedIn();
-    }
-
-    match /costs/{id} {
-      allow read, write: if signedIn();
-    }
-
-
-    function ownsFinanceRecord() {
-      return signedIn() && resource.data.ownerId == request.auth.uid;
-    }
-    function createsOwnedFinanceRecord() {
-      return signedIn() && request.resource.data.ownerId == request.auth.uid;
-    }
-
-    match /financeExpenses/{id} {
-      allow create: if createsOwnedFinanceRecord();
-      allow read, update, delete: if ownsFinanceRecord();
-    }
-    match /financeIncome/{id} {
-      allow create: if createsOwnedFinanceRecord();
-      allow read, update, delete: if ownsFinanceRecord();
-    }
-    match /financeMileage/{id} {
-      allow create: if createsOwnedFinanceRecord();
-      allow read, update, delete: if ownsFinanceRecord();
-    }
-    match /financeVehicles/{id} {
-      allow create: if createsOwnedFinanceRecord();
-      allow read, update, delete: if ownsFinanceRecord();
-    }
-    match /financeAssets/{id} {
-      allow create: if createsOwnedFinanceRecord();
-      allow read, update, delete: if ownsFinanceRecord();
-    }
-    match /financeIncidents/{id} {
-      allow create: if createsOwnedFinanceRecord();
-      allow read, update, delete: if ownsFinanceRecord();
-    }
-    match /financeHomeOffice/{id} {
-      allow create: if createsOwnedFinanceRecord();
-      allow read, update, delete: if ownsFinanceRecord();
-    }
-    match /financeCategories/{id} {
-      allow create: if createsOwnedFinanceRecord();
-      allow read, update, delete: if ownsFinanceRecord();
-    }
-    match /financeMileageRates/{id} {
-      allow create: if createsOwnedFinanceRecord();
-      allow read, update, delete: if ownsFinanceRecord();
-    }
-    match /financeAttachments/{id} {
-      allow create: if createsOwnedFinanceRecord();
-      allow read, update, delete: if ownsFinanceRecord();
-    }
-    match /financeAudit/{id} {
-      allow create: if createsOwnedFinanceRecord();
-      allow read: if ownsFinanceRecord();
-      allow update, delete: if false;
-    }
+    match /inventory/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /settings/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /orderAuditLog/{id} { allow read, create: if isAdmin(); allow update, delete: if false; }
+    match /orderSnapshots/{id} { allow read, create: if isAdmin(); allow update, delete: if false; }
+    match /orderTracking/{id} { allow read: if true; allow create, update, delete: if isAdmin(); }
+    match /reviews/{id} { allow read: if true; allow create, update: if true; allow delete: if isAdmin(); }
+    match /costs/{id} { allow read, write: if isAdmin(); }
+    function ownsFinanceRecord() { return signedIn() && resource.data.ownerId == request.auth.uid; }
+    function createsOwnedFinanceRecord() { return signedIn() && request.resource.data.ownerId == request.auth.uid; }
+    match /financeExpenses/{id} { allow create: if createsOwnedFinanceRecord(); allow read, update, delete: if ownsFinanceRecord(); }
+    match /financeIncome/{id} { allow create: if createsOwnedFinanceRecord(); allow read, update, delete: if ownsFinanceRecord(); }
+    match /financeMileage/{id} { allow create: if createsOwnedFinanceRecord(); allow read, update, delete: if ownsFinanceRecord(); }
+    match /financeVehicles/{id} { allow create: if createsOwnedFinanceRecord(); allow read, update, delete: if ownsFinanceRecord(); }
+    match /financeAssets/{id} { allow create: if createsOwnedFinanceRecord(); allow read, update, delete: if ownsFinanceRecord(); }
+    match /financeIncidents/{id} { allow create: if createsOwnedFinanceRecord(); allow read, update, delete: if ownsFinanceRecord(); }
+    match /financeHomeOffice/{id} { allow create: if createsOwnedFinanceRecord(); allow read, update, delete: if ownsFinanceRecord(); }
+    match /financeCategories/{id} { allow create: if createsOwnedFinanceRecord(); allow read, update, delete: if ownsFinanceRecord(); }
+    match /financeMileageRates/{id} { allow create: if createsOwnedFinanceRecord(); allow read, update, delete: if ownsFinanceRecord(); }
+    match /financeAttachments/{id} { allow create: if createsOwnedFinanceRecord(); allow read, update, delete: if ownsFinanceRecord(); }
+    match /financeAudit/{id} { allow create: if createsOwnedFinanceRecord(); allow read: if ownsFinanceRecord(); allow update, delete: if false; }
   }
 }
-
-// Financial recordkeeping collections: add these matches inside the existing
-// /databases/{database}/documents block. Each record is isolated to avoid large payloads.
-// Owner-based access also supports future multi-user/company expansion.

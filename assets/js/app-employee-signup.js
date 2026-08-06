@@ -1,0 +1,3 @@
+import { signupEmployee, logoutAdmin } from './store.js';
+const form=document.getElementById('employeeSignupForm'); const status=document.getElementById('employeeSignupStatus');
+form.addEventListener('submit',async(e)=>{e.preventDefault();status.textContent='';const data=Object.fromEntries(new FormData(form));if(data.password!==data.confirmPassword){status.textContent='Passwords do not match.';return;}try{status.textContent='Creating account…';await signupEmployee(data);await logoutAdmin();form.reset();status.innerHTML='<strong>Signup received.</strong> Your account is pending administrator approval. You can use the admin login page after approval.';}catch(error){status.textContent=error?.message||'Signup failed.';}});
