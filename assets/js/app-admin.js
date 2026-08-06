@@ -1,4 +1,4 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveInventory, saveOrders, saveSettings, saveSingleOrder, saveUserProfile } from './store.js?v=employee-access-load-fix-v3';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveInventory, saveOrders, saveSettings, saveSingleOrder, saveUserProfile, deleteUserProfile } from './store.js?v=employee-access-v4';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
 const state = {
@@ -37,7 +37,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'employee-access-load-fix-v1';
+const ADMIN_VERSION = 'employee-access-v4';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -452,15 +452,41 @@ function populateEmployeeAssignmentSelect(selectedId = '') {
 function renderEmployees() {
   if (!els.employeesList || !isAdminUser()) return;
   const employees = (state.users || []).filter((u) => u.role === 'employee').sort((a,b) => (a.status === 'pending' ? -1 : 1) - (b.status === 'pending' ? -1 : 1));
-  els.employeesList.innerHTML = employees.length ? employees.map((u) => `<div class="card" style="padding:16px;"><div class="section-header"><div><strong>${safeText(employeeDisplayName(u))}</strong><div class="small muted">${safeText(u.email || '')} · ${safeText(u.phone || 'No phone')}</div></div><span class="badge ${u.status === 'approved' ? 'badge-green' : 'badge-yellow'}">${safeText(u.status || 'pending')}</span></div><div class="small"><strong>Pickup location:</strong> ${safeText(u.pickupAddress || 'Not provided')}</div>${u.emergencyContactName ? `<div class="small muted">Emergency contact: ${safeText(u.emergencyContactName)} · ${safeText(u.emergencyContactPhone || '')}</div>` : ''}<div style="display:flex;gap:8px;margin-top:12px;">${u.status !== 'approved' ? `<button class="btn btn-primary btn-small" data-approve-employee="${safeText(u.uid || u.id)}">Approve</button>` : `<button class="btn btn-ghost btn-small" data-pend-employee="${safeText(u.uid || u.id)}">Set Pending</button>`}</div></div>`).join('') : '<div class="empty-state">No employee signups yet.</div>';
+  els.employeesList.innerHTML = employees.length ? employees.map((u) => `<div class="card" style="padding:16px;"><div class="section-header"><div><strong>${safeText(employeeDisplayName(u))}</strong><div class="small muted">${safeText(u.email || '')} · ${safeText(u.phone || 'No phone')}</div></div><span class="badge ${u.status === 'approved' ? 'badge-green' : 'badge-yellow'}">${safeText(u.status || 'pending')}</span></div><div class="small"><strong>Pickup location:</strong> ${safeText(u.pickupAddress || 'Not provided')}</div>${u.emergencyContactName ? `<div class="small muted">Emergency contact: ${safeText(u.emergencyContactName)} · ${safeText(u.emergencyContactPhone || '')}</div>` : ''}<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">${u.status !== 'approved' ? `<button class="btn btn-primary btn-small" data-approve-employee="${safeText(u.uid || u.id)}">Approve</button>` : `<button class="btn btn-ghost btn-small" data-pend-employee="${safeText(u.uid || u.id)}">Set Pending</button>`}<button class="btn btn-danger btn-small" data-delete-employee="${safeText(u.uid || u.id)}">Delete Employee</button></div></div>`).join('') : '<div class="empty-state">No employee signups yet.</div>';
 }
 async function handleEmployeeListClick(event) {
   const approve = event.target.closest('[data-approve-employee]');
   const pend = event.target.closest('[data-pend-employee]');
-  const id = approve?.dataset.approveEmployee || pend?.dataset.pendEmployee;
+  const remove = event.target.closest('[data-delete-employee]');
+  const id = approve?.dataset.approveEmployee || pend?.dataset.pendEmployee || remove?.dataset.deleteEmployee;
   if (!id) return;
   const user = state.users.find((u) => (u.uid || u.id) === id);
   if (!user) return;
+
+  if (remove) {
+    const assignedOrders = state.orders.filter((order) => order.assignedEmployeeId === id);
+    const warning = assignedOrders.length
+      ? `This employee is assigned to ${assignedOrders.length} order${assignedOrders.length === 1 ? '' : 's'}. Deleting them will return those orders to Unassigned. Continue?`
+      : `Delete ${employeeDisplayName(user)}?`;
+    if (!window.confirm(warning)) return;
+    await withBusy(async () => {
+      for (const order of assignedOrders) {
+        const before = JSON.parse(JSON.stringify(order));
+        order.assignedEmployeeId = '';
+        order.assignedEmployeeName = '';
+        order.assignedEmployeePickupAddress = '';
+        order.updatedAt = new Date().toISOString();
+        await saveSingleOrder(order, before, { actor: 'admin-delete-employee' });
+      }
+      await deleteUserProfile(id);
+      state.users = state.users.filter((entry) => (entry.uid || entry.id) !== id);
+    }, 'Deleting employee…');
+    populateEmployeeAssignmentSelect('');
+    renderEmployees();
+    renderOrders();
+    return;
+  }
+
   user.status = approve ? 'approved' : 'pending';
   await withBusy(() => saveUserProfile(user), 'Updating employee…');
   renderEmployees();
@@ -2565,11 +2591,14 @@ function getReminderTimingText(order) {
   if (dayDiff === -1) return 'yesterday';
   return `on ${new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(target)}`;
 }
+function getOrderPickupAddress(order = {}) {
+  return order.assignedEmployeePickupAddress || state.settings?.pickupAddress || 'the pickup location on file';
+}
 function getReminderLocationText(order) {
   if (order.fulfillmentType === 'Delivery') {
     return `delivered to ${order.address || order.addressSnapshot || 'the provided delivery address'}`;
   }
-  return `picked up at ${state.settings?.pickupAddress || 'the pickup location on file'}`;
+  return `picked up at ${getOrderPickupAddress(order)}`;
 }
 function getTextPhoneNumber(order) {
   const raw = order?.contactMethods?.text || '';
@@ -2605,7 +2634,7 @@ function buildReminderMessage(order, options = {}) {
     lines.push('');
     lines.push(order.fulfillmentType === 'Delivery'
       ? `Delivery Address: ${order.address || order.addressSnapshot || 'Not set'}`
-      : `Pickup Address: ${state.settings?.pickupAddress || 'the pickup location on file'}`);
+      : `Pickup Address: ${getOrderPickupAddress(order)}`);
   }
 
   const totalBefore = getListedOrderTotal(order);
@@ -3658,6 +3687,7 @@ async function handleOrderSave(event) {
     verbalConfirmation: Boolean(form.get('verbalConfirmation')),
     assignedEmployeeId: isAdminUser() ? String(form.get('assignedEmployeeId') || '') : (existingOrder?.assignedEmployeeId || ''),
     assignedEmployeeName: isAdminUser() ? employeeDisplayName(approvedEmployees().find((u) => (u.uid || u.id) === String(form.get('assignedEmployeeId') || '')) || {}) : (existingOrder?.assignedEmployeeName || ''),
+    assignedEmployeePickupAddress: isAdminUser() ? String(approvedEmployees().find((u) => (u.uid || u.id) === String(form.get('assignedEmployeeId') || ''))?.pickupAddress || '') : (existingOrder?.assignedEmployeePickupAddress || ''),
     address: form.get('address').trim(),
     exchangeDate: form.get('exchangeDate'),
     exchangeTime: form.get('exchangeTime'),

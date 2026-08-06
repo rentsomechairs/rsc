@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, uploadFile, waitForAuthReady } from './firebase-service.js?v=employee-access-load-fix-v3';
+import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, uploadFile, waitForAuthReady } from './firebase-service.js?v=employee-access-v4';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -341,7 +341,7 @@ function createTrackingSnapshot(order = {}, settings = cacheSettings) {
     returnTime: order.returnTime || '',
     address: order.address || '',
     contactMethods: order.contactMethods && typeof order.contactMethods === 'object' ? order.contactMethods : {},
-    pickupAddress: settings?.pickupAddress || '',
+    pickupAddress: order.assignedEmployeePickupAddress || settings?.pickupAddress || '',
     total: Number(order.total || 0),
     deliveryFee: Number(order.deliveryFee || 0),
     setupFee: Number(order.setupFee || 0),
@@ -608,6 +608,12 @@ export async function saveUserProfile(profile) {
   await upsertDoc(COLLECTIONS.users, next.uid, next);
   cacheUsers = cacheUsers.filter((u) => (u.uid || u.id) !== next.uid).concat(next);
   return clone(next);
+}
+
+export async function deleteUserProfile(uid) {
+  if (!uid) return;
+  if (isFirebaseEnabled()) await deleteDocById(COLLECTIONS.users, uid);
+  cacheUsers = cacheUsers.filter((u) => (u.uid || u.id) !== uid);
 }
 
 export async function signupEmployee(data) {
