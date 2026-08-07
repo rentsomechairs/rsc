@@ -141,3 +141,46 @@ export async function bootstrapOrGetUserProfile(user) {
     return { id: user.uid, ...profile };
   });
 }
+
+
+export async function reauthenticateCurrentUser(password) {
+  const { auth } = await initFirebase();
+  const user = auth.currentUser;
+  if (!user?.email) throw new Error('No signed-in email/password user was found.');
+  const authMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js');
+  const credential = authMod.EmailAuthProvider.credential(user.email, String(password || ''));
+  await authMod.reauthenticateWithCredential(user, credential);
+  return true;
+}
+
+export async function callAdminFunction(name, data = {}) {
+  const { firebaseApp } = await initFirebase();
+  const functionsMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-functions.js');
+  const functions = functionsMod.getFunctions(firebaseApp, 'us-central1');
+  const callable = functionsMod.httpsCallable(functions, name);
+  const result = await callable(data);
+  return result.data;
+}
+
+export async function callAdminHttpFunction(name, data = {}) {
+  const { auth } = await initFirebase();
+  const user = auth.currentUser;
+  if (!user) throw new Error('You must be signed in.');
+  const token = await user.getIdToken(true);
+  const projectId = APP_CONFIG.firebase?.config?.projectId;
+  const url = `https://us-central1-${projectId}.cloudfunctions.net/${encodeURIComponent(name)}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify(data)
+  });
+  let payload = {};
+  try { payload = await response.json(); } catch (_) {}
+  if (!response.ok || payload?.ok === false) {
+    throw new Error(payload?.error || `Admin action failed (${response.status}).`);
+  }
+  return payload;
+}

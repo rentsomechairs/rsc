@@ -1,6 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveInventory, saveOrders, saveSettings, saveSingleOrder, saveUserProfile, deleteUserProfile } from './store.js?v=employee-unit-payments-v6';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveInventory, saveOrders, saveSettings, saveSingleOrder, saveUserProfile, deleteUserProfile, deleteEmployeeAuthAccount } from './store.js?v=completed-revenue-fix-v12';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
+import { syncCompletedOrderIncome } from './finance-service.js?v=completed-revenue-fix-v12';
 const state = {
   inventory: [],
   orders: [],
@@ -38,7 +39,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'employee-unit-payments-v6';
+const ADMIN_VERSION = 'completed-revenue-fix-v12';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -727,6 +728,7 @@ async function handleEmployeeListClick(event) {
         order.updatedAt = new Date().toISOString();
         await saveSingleOrder(order, before, { actor: 'admin-delete-employee' });
       }
+      await deleteEmployeeAuthAccount(id);
       await deleteUserProfile(id);
       state.users = state.users.filter((entry) => (entry.uid || entry.id) !== id);
       await syncPublicPickupLocations();
@@ -1626,7 +1628,7 @@ function sumOrderAdjustment(order = {}) {
 }
 
 function buildEarningsReport() {
-  const completed = (state.orders || []).filter((order) => getOrderColumn(order.status) === 'completed');
+  const completed = (state.orders || []).filter((order) => getOrderColumn(order.status) === 'completed' && isRevenueOrder(order));
   const periodMap = new Map();
   const itemMap = new Map();
   const totals = { orders: completed.length, gross: 0, itemRentals: 0, deliveryFees: 0, setupFees: 0, tips: 0, adjustments: 0 };
@@ -1714,7 +1716,9 @@ function getCompletedItemQuantityForInventory(inventoryId = '') {
   return getCompletedOrders().reduce((sum, order) => sum + (order.items || []).reduce((itemSum, item) => (!inventoryId || item.inventoryId === inventoryId) ? itemSum + Number(item.quantity || 0) : itemSum, 0), 0);
 }
 function getCompletedItemRevenueForInventory(inventoryId = '') {
-  return getCompletedOrders().reduce((sum, order) => sum + (order.items || []).reduce((itemSum, item) => (!inventoryId || item.inventoryId === inventoryId) ? itemSum + Number(item.subtotal || 0) : itemSum, 0), 0);
+  return getCompletedOrders()
+    .filter(isRevenueOrder)
+    .reduce((sum, order) => sum + (order.items || []).reduce((itemSum, item) => (!inventoryId || item.inventoryId === inventoryId) ? itemSum + Number(item.subtotal || 0) : itemSum, 0), 0);
 }
 function formatDuration(seconds = 0) {
   const total = Math.round(Number(seconds || 0));
@@ -2470,7 +2474,7 @@ function renderOrders() {
   fillList(els.completedList, renderOrderGroups(completed, 'completed'), 'No completed orders yet.');
   if (els.pendingTotal) els.pendingTotal.textContent = `Total: ${currency(sumOrderTotals(pending))}`;
   if (els.confirmedTotal) els.confirmedTotal.textContent = `Total: ${currency(sumOrderTotals(confirmed))}`;
-  if (els.completedTotal) els.completedTotal.textContent = `Total: ${currency(sumOrderTotals(completed))}`;
+  if (els.completedTotal) els.completedTotal.textContent = `Total: ${currency(sumOrderTotals(completed, { revenueOnly: true }))}`;
   applyOrderColumnCollapseState();
   updateNewInquiryBadge();
   bindOrderCardActions();
@@ -2478,8 +2482,15 @@ function renderOrders() {
 function fillList(el, html, emptyText) {
   el.innerHTML = html || `<div class="empty-state">${emptyText}</div>`;
 }
-function sumOrderTotals(orders = []) {
-  return orders.reduce((sum, order) => sum + getEffectiveOrderTotal(order), 0);
+function isRevenueOrder(order = {}) {
+  const isFree = Boolean(order.free) || String(order.paymentStatus || '').toLowerCase() === 'free';
+  return !isFree && Number(getEffectiveOrderTotal(order) || 0) > 0;
+}
+function sumOrderTotals(orders = [], { revenueOnly = false } = {}) {
+  return orders.reduce((sum, order) => {
+    if (revenueOnly && !isRevenueOrder(order)) return sum;
+    return sum + getEffectiveOrderTotal(order);
+  }, 0);
 }
 function renderOrderGroups(orders, mode) {
   if (!orders.length) return '';
@@ -3225,8 +3236,15 @@ async function updateOrderStatus(id, status) {
   order.updatedAt = new Date().toISOString();
   if (status === 'Completed' && !order.completedAt) order.completedAt = new Date().toISOString();
   if (status !== 'Completed') order.completedAt = '';
+  const isFreeOrder = Boolean(order.free) || String(order.paymentStatus || '').toLowerCase() === 'free' || Number(getEffectiveOrderTotal(order) || 0) === 0;
+  if (status === 'Completed' && !isFreeOrder) {
+    order.paymentStatus = 'Paid';
+    order.amountPaid = roundMoney(getEffectiveOrderTotal(order));
+    order.depositPaidAmount = roundMoney(getEffectiveOrderTotal(order));
+  }
   appendOrderUpdate(order, collectOrderChanges(before, order));
   await saveOrderOnly(order, before, 'admin-status');
+  await syncCompletedOrderIncome(order).catch((error) => console.error('Financial income sync failed:', error));
 }
 async function updateOrderPayment(id, paymentStatus) {
   const order = state.orders.find((item) => item.id === id);

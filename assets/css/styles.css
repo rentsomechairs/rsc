@@ -1801,3 +1801,20 @@ body.employee-view .admin-only { display: none !important; }
 .employee-allocation-grid{display:grid;gap:8px;margin-top:12px}.employee-allocation-row{display:grid;grid-template-columns:minmax(180px,1fr) 90px 110px 120px;gap:8px;align-items:end;padding:10px;border:1px solid var(--border,#e5e7eb);border-radius:10px}.employee-allocation-row .form-row{margin:0}.employee-allocation-summary{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}.employee-payment-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}.employee-payment-stat{padding:14px;border:1px solid var(--border,#e5e7eb);border-radius:12px;background:#fff}.employee-payment-stat strong{display:block;font-size:1.25rem;margin-top:4px}.employee-payment-equipment{display:grid;gap:8px}.employee-payment-equipment-row{display:grid;grid-template-columns:minmax(180px,1fr) repeat(4,minmax(90px,auto));gap:10px;align-items:center;padding:10px;border-bottom:1px solid var(--border,#e5e7eb)}.employee-order-details{display:grid;gap:12px;padding:14px}.employee-order-kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}.employee-order-kv>div{padding:10px;border:1px solid var(--border,#e5e7eb);border-radius:10px;background:#fff}.employee-order-kv span{display:block;font-size:.78rem;color:var(--muted,#6b7280);margin-bottom:3px}.employee-assigned-order{border-left:5px solid #7c3aed!important;background:linear-gradient(90deg,rgba(124,58,237,.08),transparent 38%)}.employee-assigned-order .order-accordion-summary{background:rgba(124,58,237,.035)}.employee-assigned-chip{background:#ede9fe;color:#5b21b6;border:1px solid #ddd6fe}.location-stock-note{font-size:.78rem;color:var(--muted,#6b7280)}@media(max-width:760px){.employee-allocation-row{grid-template-columns:1fr 1fr}.employee-payment-equipment-row{grid-template-columns:1fr 1fr}.employee-payment-equipment-row>div:first-child{grid-column:1/-1}}
 
 .employee-payment-settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.employee-payment-settings .form-row{margin:0}.employee-payment-equipment-row{grid-template-columns:minmax(180px,1fr) repeat(5,minmax(90px,auto))}@media(max-width:760px){.employee-payment-equipment-row{grid-template-columns:1fr 1fr}.employee-payment-equipment-row>div:first-child{grid-column:1/-1}}
+
+/* Financial guided-entry wizard */
+.finance-wizard{display:flex;flex-direction:column;gap:18px}
+.finance-wizard-page{display:none;min-height:330px}
+.finance-wizard-page.active{display:block}
+.wizard-heading{margin-bottom:18px}
+.wizard-heading h3{margin:4px 0 0;font-size:1.35rem}
+.wizard-kicker{font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#64748b}
+.wizard-progress{display:flex;gap:7px}
+.wizard-progress span{height:7px;flex:1;border-radius:999px;background:#e2e8f0}
+.wizard-progress span.active{background:#334155}
+.wizard-footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;border-top:1px solid #e2e8f0;padding-top:16px}
+.finance-wizard .form-row[hidden]{display:none!important}
+@media(max-width:700px){.wizard-footer{flex-wrap:wrap}.wizard-footer .btn{flex:1 1 auto}}
+
+.danger-btn{border-color:#dc2626!important;color:#b91c1c!important}
+.danger-btn:hover{background:#fef2f2!important}
