@@ -62,7 +62,14 @@
           <button type="button" class="step-toggle" data-step-target="3"><span class="step-toggle-meta">Step 2</span><span class="step-toggle-title">Category Selection</span></button>
           <div class="staged-body">
             <h2 class="step-title">Category Selection</h2>
-            <p class="muted">Choose the category types you want first. You will pick the exact equipment and quantities in Step 3.</p>
+            <div class="note-block" style="margin-bottom:14px;">
+              <div class="form-row" style="margin:0;">
+                <label>Equipment / pickup location</label>
+                <select id="quotePickupLocationSelect"></select>
+                <div id="quotePickupLocationHelp" class="small muted" style="margin-top:6px;"></div>
+              </div>
+            </div>
+            <p class="muted">Choose the category types you want first. Availability below is specific to the location selected above.</p>
             <div id="categoryChips" class="category-chips"></div>
             <div class="step-actions"><button type="button" id="nextStep3" class="btn btn-primary">Next</button></div>
           </div>
@@ -159,6 +166,6 @@
     <div id="responseMessage" class="hidden"></div>
   </div>
 
-  <script type="module" src="../assets/js/app-quick.js"></script>
+  <script type="module" src="../assets/js/app-quick.js?v=employee-unit-payments-v6"></script>
 </body>
 </html>

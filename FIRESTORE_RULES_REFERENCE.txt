@@ -2,67 +2,154 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function isMe() {
+      return request.auth != null &&
+             request.auth.uid == "2OjzWe94F5RJrFdgx3fSF8gceuF2";
+    }
+
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function isAdmin() {
-      return isSignedIn()
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    function employeeProfileExists() {
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
-    // USERS (roles/profile)
-    match /users/{userId} {
-      allow read: if isSignedIn() && request.auth.uid == userId;
-      allow write: if isAdmin();
+    function isApprovedEmployee() {
+      return employeeProfileExists() &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "employee" &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == "approved";
     }
 
-    // PUBLIC CATALOG DATA (read by anyone, write by admins only)
-    match /categories/{id} {
+    function isAssignedEmployee() {
+      return isApprovedEmployee() &&
+             resource.data.assignedEmployeeId == request.auth.uid;
+    }
+
+    function isQuickPickerOrder() {
+      return request.resource.data.source == "quick-picker" &&
+             request.resource.data.status == "Pending";
+    }
+
+    function isExistingQuickPickerOrder() {
+      return resource.data.source == "quick-picker" &&
+             request.resource.data.source == "quick-picker" &&
+             request.resource.data.status == "Pending";
+    }
+
+    function isValidEmployeeSignup(uid) {
+      return isSignedIn() &&
+             request.auth.uid == uid &&
+             request.resource.data.uid == uid &&
+             request.resource.data.role == "employee" &&
+             request.resource.data.status == "pending" &&
+             request.resource.data.email == request.auth.token.email &&
+             request.resource.data.firstName is string &&
+             request.resource.data.lastName is string &&
+             request.resource.data.phone is string &&
+             request.resource.data.pickupAddress is string;
+    }
+
+    match /users/{uid} {
+      allow get: if isMe() || (isSignedIn() && request.auth.uid == uid);
+      allow list: if isMe();
+      allow create: if isValidEmployeeSignup(uid);
+
+      // Employee-controlled financial/equipment fields are intentionally blocked.
+      // Profile, approval, pickup coordinates, equipment allocations and unit costs
+      // are changed only by the owner/admin application.
+      allow update, delete: if isMe();
+    }
+
+    match /settings/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isMe();
     }
 
-    match /equipment/{id} {
+    match /inventory/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isMe();
     }
 
-    match /locations/{id} {
+    match /equipment/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isMe();
     }
 
-    match /coupons/{id} {
+    match /categories/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isMe();
     }
 
-    match /settings/{id} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    // BOOKINGS
-    match /bookings/{bookingId} {
-      allow create: if isSignedIn()
-        && request.resource.data.uid == request.auth.uid;
-
-      allow read: if isSignedIn();
-
-      allow update, delete: if isAdmin();
-    }
-
-    // ORDERS
     match /orders/{orderId} {
-      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == resource.data.uid);
-      allow create: if isAdmin() || (isSignedIn() && request.resource.data.uid == request.auth.uid);
-      allow update, delete: if isAdmin();
+      // Public Quick Picker currently reads orders to calculate availability.
+      // Approved employees may only query orders assigned to their own UID.
+      allow get, list: if request.auth == null || isMe() || isAssignedEmployee();
+      allow create: if isMe() || (request.auth == null && isQuickPickerOrder());
+      allow update: if isMe() || (request.auth == null && isExistingQuickPickerOrder());
+      allow delete: if isMe();
     }
 
-    // DEFAULT: lock everything else
+    match /orderTracking/{trackingCode} {
+      allow read: if true;
+      allow create: if isMe() || (request.auth == null && request.resource.data.status == "Pending");
+      allow update: if isMe() || (
+        request.auth == null &&
+        resource.data.status == "Pending" &&
+        request.resource.data.status == "Pending"
+      );
+      allow delete: if isMe();
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isMe();
+    }
+
+    match /inquiries/{docId} {
+      allow create: if true;
+      allow read, update, delete: if isMe();
+    }
+
+    match /customers/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /costs/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /orderAuditLog/{docId} {
+      allow create: if isMe() || (
+        request.auth == null &&
+        request.resource.data.actor in ["quick-picker", "quick-picker-notify"]
+      );
+      allow read, update, delete: if isMe();
+    }
+
+    match /orderSnapshots/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /financeExpenses/{docId} { allow read, write: if isMe(); }
+    match /financeIncome/{docId} { allow read, write: if isMe(); }
+    match /financeMileage/{docId} { allow read, write: if isMe(); }
+    match /financeVehicles/{docId} { allow read, write: if isMe(); }
+    match /financeAssets/{docId} { allow read, write: if isMe(); }
+    match /financeIncidents/{docId} { allow read, write: if isMe(); }
+    match /financeHomeOffice/{docId} { allow read, write: if isMe(); }
+    match /financeCategories/{docId} { allow read, write: if isMe(); }
+    match /financeMileageRates/{docId} { allow read, write: if isMe(); }
+    match /financeAttachments/{docId} { allow read, write: if isMe(); }
+    match /financeAudit/{docId} {
+      allow read, create: if isMe();
+      allow update, delete: if false;
+    }
+
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if isMe();
     }
   }
 }

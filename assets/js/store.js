@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, uploadFile, waitForAuthReady } from './firebase-service.js?v=employee-access-v4';
+import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, uploadFile, waitForAuthReady } from './firebase-service.js?v=employee-unit-payments-v6';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -768,7 +768,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js');
+  const { getDocById } = await import('./firebase-service.js?v=employee-unit-payments-v6');
   return getDocById(COLLECTIONS.reviews, code);
 }
 

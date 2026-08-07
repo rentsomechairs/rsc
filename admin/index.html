@@ -34,7 +34,8 @@
         <button class="nav-btn" data-tab-btn="reviews">Reviews</button>
         <button class="nav-btn" data-tab-btn="numbers">The Numbers</button>
         <button class="nav-btn admin-only" data-tab-btn="employees">Employees</button>
-        <a class="nav-btn" href="../finance/index.html" style="text-decoration:none;display:block;">Financial Records</a>
+        <a class="nav-btn admin-only" href="../finance/index.html" style="text-decoration:none;display:block;">Financial Records</a>
+        <button class="nav-btn employee-only hidden" data-tab-btn="payments">Payments</button>
         <button class="nav-btn" data-tab-btn="settings">Settings</button>
       </div>
       <div class="sidebar-footer">
@@ -65,7 +66,7 @@
             <h2 style="margin:0;">Orders</h2>
             <div class="muted small">Pending stays unreserved. Confirmed and In-Progress reduce stock.</div>
           </div>
-          <button class="btn btn-primary" id="addOrderBtn">Add Order</button>
+          <button class="btn btn-primary admin-only" id="addOrderBtn">Add Order</button>
         </div>
         <div class="collapsed-columns-rail" id="collapsedColumnsRail"></div>
         <div class="columns columns-orders" id="ordersColumns">
@@ -111,6 +112,7 @@
             <label class="quick-peek-date-field"><span>Return Date</span><input type="date" id="quickPeekReturnDateInput" /></label>
             <button type="button" class="btn btn-ghost btn-small" id="calendarTodayBtn">Today</button>
             <button type="button" class="btn btn-ghost btn-small" id="calendarNextBtn">→</button>
+            <label class="quick-peek-date-field"><span>Location</span><select id="quickPeekLocationSelect"></select></label>
             <div id="calendarDateLabel" class="small muted"></div>
           </div>
           <div id="calendarAvailabilityBoard" class="calendar-availability-board"></div>
@@ -204,6 +206,14 @@
         </div>
       </section>
 
+
+
+      <section class="tab-panel employee-only hidden" data-tab-panel="payments">
+        <div class="section-header">
+          <div><h2 style="margin:0;">Payments</h2><div class="muted small">Your equipment payoff, earnings split, and paid-order breakdown.</div></div>
+        </div>
+        <div id="employeePaymentsPanel" class="stack-sm"></div>
+      </section>
 
       <section class="tab-panel admin-only" data-tab-panel="employees">
         <div class="section-header">
@@ -476,6 +486,6 @@
     </div>
   </div>
 
-  <script type="module" src="../assets/js/app-admin.js?v=employee-access-v4"></script>
+  <script type="module" src="../assets/js/app-admin.js?v=employee-unit-payments-v6"></script>
 </body>
 </html>

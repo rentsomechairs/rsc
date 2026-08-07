@@ -1,9 +1,9 @@
-import { createQuickPickerOrder, getCategories, getInventory, getOrders, getSettings } from './store.js';
+import { createQuickPickerOrder, getCategories, getInventory, getOrders, getSettings } from './store.js?v=employee-unit-payments-v6';
 import { CONTACT_METHODS, addDays, buildContactMap, currency, overlaps, parseDateTime, safeText, uid, formatShortDate, formatDateTime } from './utils.js';
 import { computeDeliveryEstimate, debounce, geocodeAddress, searchAddresses } from './geo.js';
 import { sendInquiryNotification } from './email-notify.js';
 
-console.log('QUICK PICKER VERSION:', 'browser-autofill-block-fix-v10');
+console.log('QUICK PICKER VERSION:', 'employee-unit-payments-v6');
 
 const state = {
   inventory: [],
@@ -39,7 +39,8 @@ const state = {
   reviewReady: false,
   notificationResult: null,
   googleDeliveryWidgetReady: false,
-  lastSubmittedOrder: null
+  lastSubmittedOrder: null,
+  pickupLocationId: 'main'
 };
 
 const els = {};
@@ -253,6 +254,8 @@ function cacheEls() {
     deliveryFields: document.getElementById('deliveryFields'),
     pickupName: document.getElementById('pickupName'),
     pickupAddress: document.getElementById('pickupAddress'),
+    quotePickupLocationSelect: document.getElementById('quotePickupLocationSelect'),
+    quotePickupLocationHelp: document.getElementById('quotePickupLocationHelp'),
     deliveryAddress: document.getElementById('deliveryAddress'),
     deliveryAddressSuggestions: document.getElementById('deliveryAddressSuggestions'),
     deliveryLookupStatus: document.getElementById('deliveryLookupStatus'),
@@ -273,6 +276,45 @@ function cacheEls() {
   });
 }
 
+function publicPickupLocations() {
+  const employees = Array.isArray(state.settings?.employeePickupLocations) ? state.settings.employeePickupLocations : [];
+  return [
+    { id: 'main', employeeUid: '', employeeName: '', name: state.settings?.pickupName || 'Main Pickup Location', address: state.settings?.pickupAddress || '', pickupCoords: state.settings?.pickupCoords || null, allocations: [] },
+    ...employees
+  ];
+}
+function activePickupLocation() {
+  const locations = publicPickupLocations();
+  return locations.find((loc) => loc.id === state.pickupLocationId) || locations[0];
+}
+function employeeAllocatedQuantity(inventoryId = '') {
+  return (state.settings?.employeePickupLocations || []).reduce((sum, loc) => {
+    const a = (loc.allocations || []).find((entry) => String(entry.inventoryId) === String(inventoryId));
+    return sum + Number(a?.quantity || 0);
+  }, 0);
+}
+function locationStock(inventoryId = '') {
+  const inventory = state.inventory.find((item) => item.id === inventoryId);
+  const companyStock = Math.max(0, Number(inventory?.stock || 0));
+  const location = activePickupLocation();
+  if (!location || location.id === 'main') return Math.max(0, companyStock - employeeAllocatedQuantity(inventoryId));
+  const a = (location.allocations || []).find((entry) => String(entry.inventoryId) === String(inventoryId));
+  return Math.max(0, Number(a?.quantity || 0));
+}
+function orderPickupLocationId(order = {}) {
+  if (order.assignedEmployeeId) return `employee:${order.assignedEmployeeId}`;
+  if (String(order.requestedPickupLocationId || '').startsWith('employee:')) return String(order.requestedPickupLocationId);
+  return 'main';
+}
+function populateQuotePickupLocations() {
+  if (!els.quotePickupLocationSelect) return;
+  const locations = publicPickupLocations();
+  if (!locations.some((loc) => loc.id === state.pickupLocationId)) state.pickupLocationId = 'main';
+  els.quotePickupLocationSelect.innerHTML = locations.map((loc) => `<option value="${safeText(loc.id)}" ${loc.id === state.pickupLocationId ? 'selected' : ''}>${safeText(loc.name || loc.employeeName || 'Pickup Location')}</option>`).join('');
+  const active = activePickupLocation();
+  if (els.quotePickupLocationHelp) els.quotePickupLocationHelp.textContent = active?.address ? `Pickup: ${active.address}` : 'Choose where the equipment will be picked up.';
+}
+function activePickupCoords() { return activePickupLocation()?.pickupCoords || state.settings?.pickupCoords || null; }
 function renderQuickLoadingPlaceholders() {
   const loading = '<div class="section-loading-card"><span class="section-loading-spinner" aria-hidden="true"></span><span>Loading from Firebase…</span></div>';
   [els.categoryChips, els.availabilityBoard, els.itemChooser, els.summaryCard].forEach((target) => { if (target) target.innerHTML = loading; });
@@ -290,6 +332,7 @@ async function loadData() {
   state.inventory = await getInventory();
   state.orders = await getOrders();
   state.settings = await getSettings();
+  populateQuotePickupLocations();
   } finally {
     setFirebaseBusy(false);
   }
@@ -318,6 +361,7 @@ async function initGoogleDeliveryAutocomplete() {
 
 
 function bindEvents() {
+  els.quotePickupLocationSelect?.addEventListener('change', () => { state.pickupLocationId = els.quotePickupLocationSelect.value || 'main'; state.selectedItems = {}; state.selectedAccessories = {}; populateQuotePickupLocations(); render(); });
   els.eventDate.value = state.eventDate;
   els.eventTime.value = state.eventTime;
   els.eventName.value = state.eventName;
@@ -474,7 +518,7 @@ async function lookupDeliverySuggestions(query) {
     return;
   }
   try {
-    const matches = await searchAddresses(text, { limit: 6, origin: state.settings?.pickupCoords || null, context: state.settings || null });
+    const matches = await searchAddresses(text, { limit: 6, origin: activePickupCoords(), context: state.settings || null });
     if (token !== state.deliveryLookupToken) return;
     renderDeliverySuggestions(matches);
     state.deliveryLookupStatus = matches.length
@@ -506,7 +550,7 @@ async function resolveDeliveryAddress(query, preselectedMatch = null) {
       && Number.isFinite(Number(preselectedMatch.lon));
     const destination = preselectedHasCoords
       ? preselectedMatch
-      : await geocodeAddress(text, { origin: state.settings?.pickupCoords || null, context: state.settings || null });
+      : await geocodeAddress(text, { origin: activePickupCoords(), context: state.settings || null });
     if (resolveToken !== state.deliveryResolveToken) return;
     if (!destination) {
       state.deliveryLookupStatus = 'Address not matched. Please check the address so we can calculate delivery automatically.';
@@ -528,7 +572,7 @@ async function resolveDeliveryAddress(query, preselectedMatch = null) {
     }
     state.deliveryCoords = { lat, lon };
     els.deliveryAddress.value = state.deliveryAddress;
-    const estimate = await computeDeliveryEstimate(state.settings.pickupCoords, state.deliveryCoords, state.settings || null);
+    const estimate = await computeDeliveryEstimate(activePickupCoords(), state.deliveryCoords, state.settings || null);
     if (resolveToken !== state.deliveryResolveToken) return;
     state.estimatedMiles = Number(estimate.roundTripMiles.toFixed(1));
     if (els.estimatedMiles) els.estimatedMiles.value = state.estimatedMiles;
@@ -926,7 +970,7 @@ function rangeAvailability(inventoryId, startDate, startTime, endDate, endTime) 
   const pendingQty = quantityBookedForRange(inventoryId, startDate, startTime, endDate, endTime, ['Pending']);
   const totalHeld = confirmedRangeQty + pendingQty;
   return {
-    available: Math.max(0, Number(inventory?.stock || 0) - totalHeld),
+    available: Math.max(0, locationStock(inventoryId) - totalHeld),
     confirmed: confirmedRangeQty,
     pending: pendingQty
   };
@@ -939,6 +983,7 @@ function quantityBookedForRange(inventoryId, startDate, startTime, endDate, endT
   // date-range based and customers should never see looser availability than admin.
   if (!startDate || !endDate) return 0;
   return state.orders
+    .filter((order) => orderPickupLocationId(order) === (state.pickupLocationId || 'main'))
     .filter((order) => statusMatchesOrder(order, statuses))
     .reduce((sum, order) => {
       const qty = orderQuantityForInventory(order, inventoryId);
@@ -1048,8 +1093,10 @@ function renderFulfillment() {
   els.fulfillmentPickup.classList.toggle('active', state.fulfillmentType === 'Pickup');
   els.fulfillmentDelivery.classList.toggle('active', state.fulfillmentType === 'Delivery');
   els.deliveryFields.classList.toggle('hidden', state.fulfillmentType !== 'Delivery');
-  els.pickupName.textContent = state.settings.pickupName || 'Pickup location';
-  els.pickupAddress.textContent = state.settings.pickupAddress || 'Add pickup address in admin settings.';
+  const pickupLocation = activePickupLocation();
+  els.pickupName.textContent = pickupLocation?.name || state.settings.pickupName || 'Pickup location';
+  els.pickupAddress.textContent = pickupLocation?.address || state.settings.pickupAddress || 'Add pickup address in admin settings.';
+  populateQuotePickupLocations();
   if (els.deliveryLookupStatus) els.deliveryLookupStatus.textContent = state.deliveryLookupStatus || '';
   if (els.deliveryEstimateInline) els.deliveryEstimateInline.textContent = state.deliveryLookupStatus || '';
   if (els.deliveryFeeInline) {
@@ -1121,7 +1168,7 @@ function renderReviewSection() {
       <div class="kv-row"><span>Exchange</span><strong>${safeText(formatDateTime(state.receiveDate, state.receiveTime))}</strong></div>
       <div class="kv-row"><span>Return</span><strong>${safeText(formatDateTime(state.returnDate, state.returnTime))}</strong></div>
       <div class="kv-row"><span>Fulfillment</span><strong>${safeText(state.fulfillmentType || '--')}</strong></div>
-      <div class="kv-row"><span>${state.fulfillmentType === 'Delivery' ? 'Delivery address' : 'Pickup address'}</span><strong>${safeText(state.fulfillmentType === 'Delivery' ? (els.deliveryAddress.value || state.deliveryAddress || '--') : (state.settings.pickupAddress || '--'))}</strong></div>
+      <div class="kv-row"><span>${state.fulfillmentType === 'Delivery' ? 'Delivery address' : 'Pickup address'}</span><strong>${safeText(state.fulfillmentType === 'Delivery' ? (els.deliveryAddress.value || state.deliveryAddress || '--') : (activePickupLocation()?.address || state.settings.pickupAddress || '--'))}</strong></div>
       ${contactLines}
       <div class="hr"></div>
       ${itemsHtml}
@@ -1234,7 +1281,13 @@ async function handleSubmit(event) {
     deliveryNeedsReview: Boolean(form.get('deliveryReviewFlag')),
     deliveryEstimateSource: state.fulfillmentType === 'Delivery' ? (state.deliveryEstimateSource || (Number(state.estimatedMinutes || 0) > 0 ? 'auto-minutes' : '')) : '',
     deliveryCoords: state.fulfillmentType === 'Delivery' ? state.deliveryCoords : null,
-    pickupCoordsSnapshot: state.fulfillmentType === 'Delivery' ? (state.settings.pickupCoords || null) : null,
+    pickupCoordsSnapshot: state.fulfillmentType === 'Delivery' ? (activePickupCoords() || null) : null,
+    requestedPickupLocationId: activePickupLocation()?.id || 'main',
+    requestedPickupLocationName: activePickupLocation()?.name || '',
+    requestedPickupAddress: activePickupLocation()?.address || '',
+    assignedEmployeeId: activePickupLocation()?.employeeUid || '',
+    assignedEmployeeName: activePickupLocation()?.employeeName || '',
+    assignedEmployeePickupAddress: activePickupLocation()?.employeeUid ? (activePickupLocation()?.address || '') : '',
     addressSnapshot: state.fulfillmentType === 'Delivery' ? state.deliveryAddress : '',
     total,
     amountPaid: 0,
@@ -1306,6 +1359,8 @@ function resetAfterSubmit() {
   state.submitted = false;
   state.summaryVisible = false;
   state.lastSubmittedOrder = null;
+  state.pickupLocationId = 'main';
+  populateQuotePickupLocations();
   if (els.deliveryReviewFlag) els.deliveryReviewFlag.checked = false;
   setDefaultDates();
   els.eventDate.value = state.eventDate;
