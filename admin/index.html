@@ -27,16 +27,26 @@
     <aside class="sidebar">
       <div class="brand">Rent Some Orders</div>
       <div class="nav-list">
-        <button class="nav-btn active" data-tab-btn="orders">Orders</button>
-        <button class="nav-btn" data-tab-btn="route">Delivery Route</button>
-        <button class="nav-btn" data-tab-btn="inventory">Inventory</button>
-        <button class="nav-btn" data-tab-btn="calendar">Quick Peek</button>
-        <button class="nav-btn" data-tab-btn="reviews">Reviews</button>
-        <button class="nav-btn" data-tab-btn="numbers">The Numbers</button>
-        <button class="nav-btn admin-only" data-tab-btn="employees">Employees</button>
-        <a class="nav-btn admin-only" href="../finance/index.html" style="text-decoration:none;display:block;">Financial Records</a>
-        <button class="nav-btn employee-only hidden" data-tab-btn="payments">Payments</button>
-        <button class="nav-btn" data-tab-btn="settings">Settings</button>
+        <div class="nav-section-label">Workspace</div>
+        <button class="nav-btn active" data-tab-btn="orders"><span class="nav-icon">▦</span><span>Orders</span></button>
+        <button class="nav-btn admin-only" data-tab-btn="route"><span class="nav-icon">↗</span><span>Delivery Route</span></button>
+        <button class="nav-btn admin-only" data-tab-btn="calendar"><span class="nav-icon">□</span><span>Quick Peek</span></button>
+
+        <div class="nav-section-label admin-only">Operations</div>
+        <button class="nav-btn admin-only" data-tab-btn="inventory"><span class="nav-icon">◇</span><span>Inventory</span></button>
+        <button class="nav-btn admin-only" data-tab-btn="reviews"><span class="nav-icon">☆</span><span>Reviews</span></button>
+        <button class="nav-btn admin-only" data-tab-btn="employees"><span class="nav-icon">○</span><span>Employees</span></button>
+
+        <div class="nav-section-label admin-only">Business</div>
+        <button class="nav-btn admin-only" data-tab-btn="numbers"><span class="nav-icon">↗</span><span>The Numbers</span></button>
+        <a class="nav-btn admin-only" href="../finance/index.html"><span class="nav-icon">$</span><span>Financial Records</span></a>
+
+        <div class="nav-section-label employee-only hidden">My Account</div>
+        <button class="nav-btn employee-only hidden" data-tab-btn="payments"><span class="nav-icon">$</span><span>Payments</span></button>
+        <button class="nav-btn employee-only hidden" data-tab-btn="documents"><span class="nav-icon">≡</span><span>Documents</span></button>
+
+        <div class="nav-section-label admin-only">System</div>
+        <button class="nav-btn admin-only" data-tab-btn="settings"><span class="nav-icon">⚙</span><span>Settings</span></button>
       </div>
       <div class="sidebar-footer">
         <div class="small muted">Quick links</div>
@@ -54,10 +64,14 @@
     <main class="main">
       <div class="topbar">
         <div>
-          <h1 style="margin:0;">Admin Dashboard</h1>
-          <div class="muted small">Track inquiries, inventory, and settings.</div>
+          <h1 id="dashboardTitle" style="margin:0;">Admin Dashboard</h1>
+          <div id="dashboardSubtitle" class="muted small">Track inquiries, inventory, and settings.</div>
         </div>
         <button id="newInquiryBell" class="notification-bell" type="button" aria-label="New quote submissions">🔔<span id="newInquiryBadge" class="notification-badge hidden">0</span></button>
+      </div>
+      <div id="viewAsBanner" class="view-as-banner hidden">
+        <div><strong id="viewAsName">Employee preview</strong><div class="small">You are previewing exactly the employee-facing navigation and read-only content. Your admin account remains signed in.</div></div>
+        <button type="button" class="btn btn-secondary btn-small" id="exitViewAsBtn">Exit View As</button>
       </div>
 
       <section class="tab-panel active" data-tab-panel="orders">
@@ -215,6 +229,13 @@
         <div id="employeePaymentsPanel" class="stack-sm"></div>
       </section>
 
+      <section class="tab-panel employee-only hidden" data-tab-panel="documents">
+        <div class="section-header">
+          <div><h2 style="margin:0;">Documents</h2><div class="muted small">Documents provided by the company for your records.</div></div>
+        </div>
+        <div id="employeeDocumentsPanel" class="stack-sm"></div>
+      </section>
+
       <section class="tab-panel admin-only" data-tab-panel="employees">
         <div class="section-header">
           <div><h2 style="margin:0;">Employees</h2><div class="muted small">Approve employee accounts, review pickup locations, and copy the private signup link.</div></div>
@@ -231,90 +252,121 @@
             <div class="muted small">Pickup location and quote defaults.</div>
           </div>
         </div>
-        <form id="settingsForm" class="card" style="padding:18px;">
-          <div class="settings-grid">
-            <div class="form-row"><label>Business Name</label><input name="businessName" required /></div>
-            <div class="form-row"><label>Pickup Location Name</label><input name="pickupName" required /></div>
-            <div class="form-row">
-              <label>Pickup Address</label>
-              <div class="address-autocomplete">
-                <input name="pickupAddress" id="pickupAddressInput" required />
-                <div id="pickupAddressSuggestions" class="address-suggestions hidden"></div>
-              </div>
-              <div id="pickupLookupStatus" class="small muted" style="margin-top:6px;"></div>
-            </div>
-            <div class="form-row"><label>Delivery Rate Per Mile (round trip)</label><input type="number" step="0.01" min="0" name="deliveryRatePerMile" required /></div>
-            <div class="form-row"><label>Minimum Order for 35% Deposit</label><input type="number" step="0.01" min="0" name="depositMinimumOrder" required /><div class="small muted" style="margin-top:6px;">Orders above this total can use the 35% deposit option. Orders at or below this must be paid in full.</div></div>
-            <div class="form-row"><label>Notification Email</label><input type="email" name="notificationEmail" required /></div>
-            <div class="form-row"><label>Notification From Name</label><input name="notificationFromName" placeholder="Rent Some Orders" /></div>
-            <div class="form-row" style="grid-column:1/-1;">
-              <label style="display:flex; gap:10px; align-items:center;"><input type="checkbox" name="emailNotificationsEnabled" /> Enable inquiry email notifications</label>
-              <div class="small muted" style="margin-top:6px;">Free setup option: EmailJS. Add your EmailJS Public Key, Service ID, and Template ID below.</div>
-            </div>
-            <div class="form-row"><label>EmailJS Public Key</label><input name="emailjsPublicKey" placeholder="public_xxxxx" /></div>
-            <div class="form-row"><label>EmailJS Service ID</label><input name="emailjsServiceId" placeholder="service_xxxxx" /></div>
-            <div class="form-row"><label>EmailJS Template ID</label><input name="emailjsTemplateId" placeholder="template_xxxxx" /></div>
-            <div class="form-row"><label>Google Maps API Key</label><input name="googleMapsApiKey" placeholder="AIza..." /></div>
-            <div class="form-row" style="grid-column:1/-1;"><hr style="border:0; border-top:1px solid var(--line); margin:4px 0;" /></div>
-            <div class="form-row" style="grid-column:1/-1;">
-              <strong>Homepage Images</strong>
-              <div class="small muted" style="margin-top:6px;">Optional. Upload homepage images the same way inventory images work. Leave blank and the homepage will pull real images from inventory.</div>
-            </div>
-            <div class="form-row homepage-image-row">
-              <label>Hero Image</label>
-              <input type="file" id="homeHeroImageUpload" accept="image/*" />
-              <input type="hidden" name="homeHeroImageData" id="homeHeroImageData" />
-              <img id="homeHeroImagePreview" class="inventory-image" alt="Hero image preview" hidden />
-              <button type="button" class="btn ghost" data-clear-home-image="Hero">Clear Hero Image</button>
-            </div>
-            <div class="form-row homepage-image-row">
-              <label>Quick Quote Card Image</label>
-              <input type="file" id="homeQuoteImageUpload" accept="image/*" />
-              <input type="hidden" name="homeQuoteImageData" id="homeQuoteImageData" />
-              <img id="homeQuoteImagePreview" class="inventory-image" alt="Quick quote image preview" hidden />
-              <button type="button" class="btn ghost" data-clear-home-image="Quote">Clear Quick Quote Image</button>
-            </div>
-            <div class="form-row homepage-image-row">
-              <label>Browse Rentals Card Image</label>
-              <input type="file" id="homeBrowseImageUpload" accept="image/*" />
-              <input type="hidden" name="homeBrowseImageData" id="homeBrowseImageData" />
-              <img id="homeBrowseImagePreview" class="inventory-image" alt="Browse rentals image preview" hidden />
-              <button type="button" class="btn ghost" data-clear-home-image="Browse">Clear Browse Image</button>
-            </div>
-            <div class="form-row homepage-image-row">
-              <label>Track Order Card Image</label>
-              <input type="file" id="homeTrackImageUpload" accept="image/*" />
-              <input type="hidden" name="homeTrackImageData" id="homeTrackImageData" />
-              <img id="homeTrackImagePreview" class="inventory-image" alt="Track order image preview" hidden />
-              <button type="button" class="btn ghost" data-clear-home-image="Track">Clear Track Image</button>
-            </div>
-          </div>
-          <div class="small muted" style="margin-top:10px;">Address autocomplete uses Google Maps when a Google Maps API key is saved here. If the key is blank or fails, it falls back to OpenStreetMap. Restrict your key to your site domain in Google Cloud.</div>
-          <div class="card" style="padding:16px; margin-top:16px;">
-            <div class="section-header">
-              <div>
-                <strong>Payment Options</strong>
-                <div class="small muted">Turn methods on or off and add the handle, link, or destination customers should use.</div>
+        <form id="settingsForm" class="settings-workspace">
+          <section class="settings-section">
+            <div class="settings-section-copy"><strong>Business & pickup</strong><span>The information used across orders, quotes, tracking, and pickup instructions.</span></div>
+            <div class="settings-section-fields">
+              <div class="settings-grid">
+                <div class="form-row"><label>Business Name</label><input name="businessName" required /></div>
+                <div class="form-row"><label>Pickup Location Name</label><input name="pickupName" required /></div>
+                <div class="form-row settings-wide">
+                  <label>Pickup Address</label>
+                  <div class="address-autocomplete">
+                    <input name="pickupAddress" id="pickupAddressInput" required />
+                    <div id="pickupAddressSuggestions" class="address-suggestions hidden"></div>
+                  </div>
+                  <div id="pickupLookupStatus" class="small muted"></div>
+                </div>
               </div>
             </div>
-            <div id="paymentOptionsBox" class="stack-sm"></div>
-          </div>
-          <div style="margin-top:16px; display:flex; gap:10px; align-items:center;">
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-copy"><strong>Order defaults</strong><span>Rules used when calculating delivery and customer deposits.</span></div>
+            <div class="settings-section-fields">
+              <div class="settings-grid">
+                <div class="form-row"><label>Delivery Rate Per Mile <span class="field-hint">round trip</span></label><input type="number" step="0.01" min="0" name="deliveryRatePerMile" required /></div>
+                <div class="form-row"><label>Minimum Order for 35% Deposit</label><input type="number" step="0.01" min="0" name="depositMinimumOrder" required /><div class="small muted">Orders above this total can use the 35% deposit option. Orders at or below it are paid in full.</div></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-copy"><strong>Notifications</strong><span>Where new inquiry emails go and how those messages identify the business.</span></div>
+            <div class="settings-section-fields">
+              <label class="settings-toggle"><input type="checkbox" name="emailNotificationsEnabled" /><span><strong>Inquiry email notifications</strong><small>Send an email when a new inquiry is submitted.</small></span></label>
+              <div class="settings-grid">
+                <div class="form-row"><label>Notification Email</label><input type="email" name="notificationEmail" required /></div>
+                <div class="form-row"><label>Notification From Name</label><input name="notificationFromName" placeholder="Rent Some Orders" /></div>
+              </div>
+              <details class="settings-advanced">
+                <summary>Email service connection <span>EmailJS</span></summary>
+                <div class="settings-grid settings-advanced-body">
+                  <div class="form-row"><label>EmailJS Public Key</label><input name="emailjsPublicKey" placeholder="public_xxxxx" /></div>
+                  <div class="form-row"><label>EmailJS Service ID</label><input name="emailjsServiceId" placeholder="service_xxxxx" /></div>
+                  <div class="form-row"><label>EmailJS Template ID</label><input name="emailjsTemplateId" placeholder="template_xxxxx" /></div>
+                </div>
+              </details>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-copy"><strong>Maps & addresses</strong><span>Optional Google Maps connection for address autocomplete and routing.</span></div>
+            <div class="settings-section-fields">
+              <div class="form-row"><label>Google Maps API Key</label><input name="googleMapsApiKey" placeholder="AIza..." /><div class="small muted">If blank or unavailable, address lookup falls back to OpenStreetMap. Restrict a Google key to your site domain.</div></div>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-copy"><strong>Payment options</strong><span>Choose which methods customers can use and the handle, link, or destination shown to them.</span></div>
+            <div class="settings-section-fields"><div id="paymentOptionsBox" class="stack-sm"></div></div>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-copy"><strong>Homepage images</strong><span>Optional overrides for public homepage imagery. Blank images continue to use inventory photos.</span></div>
+            <div class="settings-section-fields">
+              <div class="homepage-settings-grid">
+                <div class="homepage-image-row">
+                  <label>Hero Image</label>
+                  <div class="settings-image-preview"><img id="homeHeroImagePreview" class="inventory-image" alt="Hero image preview" hidden /></div>
+                  <input type="file" id="homeHeroImageUpload" accept="image/*" />
+                  <input type="hidden" name="homeHeroImageData" id="homeHeroImageData" />
+                  <button type="button" class="btn btn-ghost btn-small" data-clear-home-image="Hero">Clear</button>
+                </div>
+                <div class="homepage-image-row">
+                  <label>Quick Quote Card</label>
+                  <div class="settings-image-preview"><img id="homeQuoteImagePreview" class="inventory-image" alt="Quick quote image preview" hidden /></div>
+                  <input type="file" id="homeQuoteImageUpload" accept="image/*" />
+                  <input type="hidden" name="homeQuoteImageData" id="homeQuoteImageData" />
+                  <button type="button" class="btn btn-ghost btn-small" data-clear-home-image="Quote">Clear</button>
+                </div>
+                <div class="homepage-image-row">
+                  <label>Browse Rentals Card</label>
+                  <div class="settings-image-preview"><img id="homeBrowseImagePreview" class="inventory-image" alt="Browse rentals image preview" hidden /></div>
+                  <input type="file" id="homeBrowseImageUpload" accept="image/*" />
+                  <input type="hidden" name="homeBrowseImageData" id="homeBrowseImageData" />
+                  <button type="button" class="btn btn-ghost btn-small" data-clear-home-image="Browse">Clear</button>
+                </div>
+                <div class="homepage-image-row">
+                  <label>Track Order Card</label>
+                  <div class="settings-image-preview"><img id="homeTrackImagePreview" class="inventory-image" alt="Track order image preview" hidden /></div>
+                  <input type="file" id="homeTrackImageUpload" accept="image/*" />
+                  <input type="hidden" name="homeTrackImageData" id="homeTrackImageData" />
+                  <button type="button" class="btn btn-ghost btn-small" data-clear-home-image="Track">Clear</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section settings-safety-section">
+            <div class="settings-section-copy"><strong>Backup & recovery</strong><span>Manual safety tools. These do not affect normal order operation.</span></div>
+            <div class="settings-section-fields">
+              <div class="settings-backup-actions">
+                <button type="button" class="btn btn-secondary" id="backupExportBtn">Download Backup JSON</button>
+                <button type="button" class="btn btn-ghost" id="backupSnapshotBtn">Create Snapshot</button>
+                <button type="button" class="btn btn-ghost" id="backupImportBtn">Restore Backup JSON</button>
+                <input type="file" id="backupImportFile" accept="application/json" class="hidden" />
+                <span id="backupStatus" class="small badge badge-blue"></span>
+              </div>
+              <div class="small muted">Includes append-only audit logging, manual JSON export, snapshots, and backup restore.</div>
+            </div>
+          </section>
+
+          <div class="settings-save-bar">
+            <div><strong>Settings</strong><span id="settingsSaved" class="small badge badge-green"></span></div>
             <button class="btn btn-primary" type="submit">Save Settings</button>
-            <span id="settingsSaved" class="small badge badge-green"></span>
           </div>
-          <div class="note-block small">
-            Free safety tools: append-only audit log, manual JSON backup export, manual snapshot save, and backup restore.
-          </div>
-          <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-            <button type="button" class="btn btn-secondary" id="backupExportBtn">Download Backup JSON</button>
-            <button type="button" class="btn btn-ghost" id="backupSnapshotBtn">Create Snapshot</button>
-            <button type="button" class="btn btn-ghost" id="backupImportBtn">Restore Backup JSON</button>
-            <input type="file" id="backupImportFile" accept="application/json" class="hidden" />
-            <span id="backupStatus" class="small badge badge-blue"></span>
-          </div>
-          
-</form>
+        </form>
       </section>
     </main>
   </div>
@@ -325,66 +377,82 @@
         <h2 id="orderModalTitle" style="margin:0;">Add Order</h2>
         <button type="button" class="btn btn-ghost" data-close-modal>Close</button>
       </div>
-      <form id="orderForm" class="form-grid">
-        <div class="form-row two">
-          <div class="form-row"><label>First Name</label><input name="firstName" required /></div>
-          <div class="form-row"><label>Last Name</label><input name="lastName" /></div>
+      <form id="orderForm" class="form-grid sectioned-full-order-form">
+        <div class="order-editor-nav full-editor-nav" role="tablist">
+          <button type="button" class="order-editor-nav-btn active" data-full-editor-tab="overview">Overview</button>
+          <button type="button" class="order-editor-nav-btn" data-full-editor-tab="schedule">Schedule</button>
+          <button type="button" class="order-editor-nav-btn" data-full-editor-tab="equipment">Equipment</button>
+          <button type="button" class="order-editor-nav-btn" data-full-editor-tab="money">Money</button>
+          <button type="button" class="order-editor-nav-btn" data-full-editor-tab="contact">Contact & Notes</button>
         </div>
-        <div class="form-row three">
-          <div class="form-row"><label>Status</label><select name="status"> <option>Pending</option><option>Confirmed</option><option>In-Progress</option><option>Completed</option></select></div>
-          <div class="form-row"><label>Payment Status</label><select name="paymentStatus"> <option>Un-Paid</option><option>Deposit Paid</option><option>Paid</option><option>Free</option></select></div>
-          <div class="form-row"><label>Pickup / Delivery</label><select name="fulfillmentType"> <option>Pickup</option><option>Delivery</option><option>To Be Determined</option></select></div>
-        </div>
-        <div class="form-row">
-          <div class="form-row"><label>Delivery Address</label><input name="address" placeholder="Delivery address if needed" /></div>
-          <div class="form-row admin-only"><label>Assigned Employee</label><select name="assignedEmployeeId"><option value="">Unassigned</option></select></div>
-        </div>
-        <div class="form-row" style="grid-column:1/-1;">
+
+        <section class="order-editor-section active" data-full-editor-panel="overview">
+          <div class="order-editor-section-head"><div><strong>Order overview</strong><span>Customer, status, fulfillment, and assignment</span></div></div>
+          <div class="form-row two">
+            <div class="form-row"><label>First Name</label><input name="firstName" required /></div>
+            <div class="form-row"><label>Last Name</label><input name="lastName" /></div>
+          </div>
+          <div class="form-row three">
+            <div class="form-row"><label>Status</label><select name="status"><option>Pending</option><option>Confirmed</option><option>In-Progress</option><option>Completed</option></select></div>
+            <div class="form-row"><label>Payment Status</label><select name="paymentStatus"><option>Un-Paid</option><option>Deposit Paid</option><option>Paid</option><option>Free</option></select></div>
+            <div class="form-row"><label>Pickup / Delivery</label><select name="fulfillmentType"><option>Pickup</option><option>Delivery</option><option>To Be Determined</option></select></div>
+          </div>
+          <div class="form-row two">
+            <div class="form-row"><label>Delivery Address</label><input name="address" placeholder="Delivery address if needed" /></div>
+            <div class="form-row admin-only"><label>Assigned Employee</label><select name="assignedEmployeeId"><option value="">Unassigned</option></select></div>
+          </div>
           <label class="inline-check"><input type="checkbox" name="verbalConfirmation" /> Verbal Confirmation Received</label>
-        </div>
-        <div class="form-row two">
-          <div class="form-row"><label>Event Date</label><input type="date" name="eventDate" /></div>
-          <div class="form-row"><label>Event Time</label><input type="hidden" name="eventTime" /><div class="time-select-row" data-time-control="eventTime"></div></div>
-        </div>
-        <div class="form-row"><label>Event</label><input name="eventName" placeholder="Birthday party, wedding, school event, or leave blank" /></div>
-        <div class="form-row three compact-date-row">
-          <div class="form-row"><label>Exchange Date</label><input type="date" name="exchangeDate" required /></div>
-          <div class="form-row"><label>Exchange Time</label><input type="hidden" name="exchangeTime" required /><div class="time-select-row" data-time-control="exchangeTime"></div></div>
-          <div class="form-row"><label>Return Date</label><input type="date" name="returnDate" required /></div>
-          <div class="form-row"><label>Return Time</label><input type="hidden" name="returnTime" required /><div class="time-select-row" data-time-control="returnTime"></div></div>
-        </div>
-        <div class="form-row three">
-          <div class="form-row"><label>Delivery Fee</label><input type="number" step="0.01" min="0" name="deliveryFee" /></div>
-          <div class="form-row"><label>Setup Fee</label><input type="number" step="0.01" min="0" name="setupFee" /></div>
-          <div class="form-row"><label>Tip</label><input type="number" step="0.01" min="0" name="tipAmount" /></div>
-          <div class="form-row"><label>Total <span id="orderAdjustedBadge" class="small muted"></span></label><input type="number" step="0.01" min="0" name="total" /></div>
-          <div class="form-row"><label>Deposit</label><input type="number" step="0.01" min="0" name="depositPreview" readonly /></div>
-        </div>
-        <div id="orderDiscountPreview" class="small muted"></div>
+        </section>
 
-        <div class="form-row"><label>Notes</label><textarea name="notes" placeholder="Optional notes for this order"></textarea></div>
-
-        <div class="card" style="padding:16px;">
-          <div class="section-header">
-            <div><strong>Contact Methods</strong></div>
+        <section class="order-editor-section" data-full-editor-panel="schedule">
+          <div class="order-editor-section-head"><div><strong>Schedule</strong><span>Event date plus equipment exchange and return</span></div></div>
+          <div class="form-row two">
+            <div class="form-row"><label>Event Date</label><input type="date" name="eventDate" /></div>
+            <div class="form-row"><label>Event Time</label><input type="hidden" name="eventTime" /><div class="time-select-row" data-time-control="eventTime"></div></div>
           </div>
-          <div id="contactMethodChecks" class="contact-options"></div>
-          <div id="contactMethodInputs" style="margin-top:12px; display:grid; gap:12px;"></div>
-        </div>
-
-        <div class="card" style="padding:16px;">
-          <div class="section-header">
-            <div><strong>Items</strong></div>
+          <div class="form-row"><label>Event</label><input name="eventName" placeholder="Birthday party, wedding, school event, or leave blank" /></div>
+          <div class="form-row four compact-date-row">
+            <div class="form-row"><label>Exchange Date</label><input type="date" name="exchangeDate" required /></div>
+            <div class="form-row"><label>Exchange Time</label><input type="hidden" name="exchangeTime" required /><div class="time-select-row" data-time-control="exchangeTime"></div></div>
+            <div class="form-row"><label>Return Date</label><input type="date" name="returnDate" required /></div>
+            <div class="form-row"><label>Return Time</label><input type="hidden" name="returnTime" required /><div class="time-select-row" data-time-control="returnTime"></div></div>
           </div>
+        </section>
+
+        <section class="order-editor-section" data-full-editor-panel="equipment">
+          <div class="order-editor-section-head"><div><strong>Equipment</strong><span>Choose a category, then the item. Frequently rented items automatically rise to the top.</span></div></div>
           <div id="orderItemsBox"></div>
-        </div>
+        </section>
 
-        <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <section class="order-editor-section" data-full-editor-panel="money">
+          <div class="order-editor-section-head"><div><strong>Money</strong><span>Fees, tip, order total, and deposit</span></div></div>
+          <div class="form-row three">
+            <div class="form-row"><label>Delivery Fee</label><input type="number" step="0.01" min="0" name="deliveryFee" /></div>
+            <div class="form-row"><label>Setup Fee</label><input type="number" step="0.01" min="0" name="setupFee" /></div>
+            <div class="form-row"><label>Tip</label><input type="number" step="0.01" min="0" name="tipAmount" /></div>
+          </div>
+          <div class="form-row two">
+            <div class="form-row"><label>Total <span id="orderAdjustedBadge" class="small muted"></span></label><input type="number" step="0.01" min="0" name="total" /></div>
+            <div class="form-row"><label>Deposit</label><input type="number" step="0.01" min="0" name="depositPreview" readonly /></div>
+          </div>
+          <div id="orderDiscountPreview" class="small muted"></div>
+        </section>
+
+        <section class="order-editor-section" data-full-editor-panel="contact">
+          <div class="order-editor-section-head"><div><strong>Contact & notes</strong><span>Customer communication and internal notes</span></div></div>
+          <div class="card editor-inner-card">
+            <div class="section-header"><div><strong>Contact Methods</strong></div></div>
+            <div id="contactMethodChecks" class="contact-options"></div>
+            <div id="contactMethodInputs" style="margin-top:12px; display:grid; gap:12px;"></div>
+          </div>
+          <div class="form-row"><label>Notes</label><textarea name="notes" placeholder="Optional notes for this order"></textarea></div>
+        </section>
+
+        <div class="full-editor-actions">
           <button type="button" class="btn btn-ghost" data-close-modal>Cancel</button>
           <button type="submit" class="btn btn-primary">Save Order</button>
         </div>
-        
-</form>
+      </form>
     </div>
   </div>
 
@@ -403,6 +471,14 @@
         <div class="form-row two">
           <div class="form-row"><label>Price Per Unit</label><input type="number" step="0.01" min="0" name="price" required /></div>
           <div class="form-row"><label>Total In Stock</label><input type="number" min="0" name="stock" required /></div>
+        </div>
+        <div class="card inventory-labor-card">
+          <div class="section-header"><div><strong>Average handling time</strong><div class="small muted">Minutes per individual unit. Used only to estimate employee hourly rate.</div></div></div>
+          <div class="form-row three">
+            <div class="form-row"><label>Cleaning time</label><input type="text" inputmode="numeric" name="averageCleaningTime" placeholder="00:00:00" pattern="\d{1,3}:\d{2}:\d{2}" title="HH:MM:SS, for example 00:00:45" /></div>
+            <div class="form-row"><label>Loading time</label><input type="text" inputmode="numeric" name="averageLoadingTime" placeholder="00:00:00" pattern="\d{1,3}:\d{2}:\d{2}" title="HH:MM:SS, for example 00:01:30" /></div>
+            <div class="form-row"><label>Unloading time</label><input type="text" inputmode="numeric" name="averageUnloadingTime" placeholder="00:00:00" pattern="\d{1,3}:\d{2}:\d{2}" title="HH:MM:SS, for example 00:00:30" /></div>
+          </div>
         </div>
         <div class="form-row two">
           <div class="form-row"><label>Small Picture</label><input type="file" name="imageUpload" id="imageUpload" accept="image/*" /><div class="small muted" style="margin-top:6px;">Choose an image from your computer. It will be resized and saved with the item.</div><input type="hidden" name="imageData" id="imageData" value="" /></div>
@@ -479,6 +555,69 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="contractModalWrap">
+    <div class="modal contract-editor-modal">
+      <div class="section-header">
+        <div><h2 id="contractModalTitle" style="margin:0;">Contract Agreement</h2><div class="small muted">Set the contract terms here. The employee confirms their legal name and chooses their payout schedule the first time they open it.</div></div>
+        <button type="button" class="btn btn-ghost" data-close-contract-modal>Close</button>
+      </div>
+      <form id="contractForm" class="stack-sm">
+        <div class="contract-meta-grid">
+          <label class="form-row"><span>Contract status</span><select name="status"><option>Draft</option><option>Ready for Signature</option><option>Signed</option></select></label>
+          <label class="form-row"><span>Effective date</span><input type="date" name="effectiveDate" /></label>
+        </div>
+        <div class="card" style="padding:14px;">
+          <div class="section-header"><div><strong>Contract percentages</strong><div class="small muted">These are saved as this employee's active payout percentages and used by the Payments calculations.</div></div></div>
+          <div class="employee-payment-settings">
+            <label class="form-row"><span>Employee % — unqualified units</span><input type="number" min="0" max="100" step="0.01" name="unpaidEmployee" /></label>
+            <label class="form-row"><span>Qualified Unit allocation %</span><input type="number" min="0" max="100" step="0.01" name="equipmentPayoff" /></label>
+            <label class="form-row"><span>Company % — unqualified units</span><input type="number" min="0" max="100" step="0.01" name="unpaidCompany" /></label>
+            <label class="form-row"><span>Employee % — Qualified Units</span><input type="number" min="0" max="100" step="0.01" name="paidEmployee" /></label>
+            <label class="form-row"><span>Company % — Qualified Units</span><input type="number" min="0" max="100" step="0.01" name="paidCompany" /></label>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="section-header" style="margin-bottom:6px;"><div><label style="margin:0;">Contract body</label><div class="small muted">The template is editable. Bracketed placeholders are replaced from the fields above when the employee views it.</div></div><button type="button" class="btn btn-secondary btn-small" id="loadBlankContractBtn">Load Blank Template</button></div>
+          <textarea name="body" id="contractBodyInput" rows="30" spellcheck="true"></textarea>
+        </div>
+        <div class="small muted" id="contractSaveStatus"></div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <button type="button" class="btn btn-ghost" data-close-contract-modal>Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Contract</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="employeeContractSetupModal">
+    <div class="modal" style="max-width:640px;">
+      <div class="section-header">
+        <div><h2 style="margin:0;">Confirm Contract Information</h2><div class="small muted">Please confirm the name that should appear on your agreement and choose how you want eligible payouts scheduled.</div></div>
+      </div>
+      <form id="employeeContractSetupForm" class="stack-sm">
+        <div class="card" style="padding:14px;">
+          <div class="small muted">Name from your employee signup</div>
+          <strong id="signupEmployeeName"></strong>
+        </div>
+        <label class="form-row"><span>Legal name for contract</span><input name="legalName" required /></label>
+        <label class="form-row"><span>Payout preference</span>
+          <select name="payoutMethod" required>
+            <option value="">Select one…</option>
+            <option value="Every completed transaction">Every completed transaction</option>
+            <option value="$500 threshold">$500 threshold</option>
+            <option value="$1,000 threshold">$1,000 threshold</option>
+            <option value="Every 2 weeks">Every 2 weeks</option>
+            <option value="Every month">Every month</option>
+          </select>
+        </label>
+        <label class="check-pill"><input type="checkbox" name="legalNameConfirmed" required /> I confirm the legal name above is the name I want used on this contract.</label>
+        <div class="small muted">Your payout preference is stored with this agreement. If you want to change it later, you can request a change from the company.</div>
+        <div id="employeeContractSetupError" class="small" style="color:#b91c1c;"></div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;"><button type="submit" class="btn btn-primary">Confirm and Open Contract</button></div>
+      </form>
+    </div>
+  </div>
+
   <div id="appBusyOverlay" class="app-busy-overlay" aria-hidden="true">
     <div class="app-busy-card">
       <div class="app-busy-spinner" aria-hidden="true"></div>
@@ -486,6 +625,6 @@
     </div>
   </div>
 
-  <script type="module" src="../assets/js/app-admin.js?v=completed-revenue-fix-v12"></script>
+  <script type="module" src="../assets/js/app-admin.js?v=employee-time-format-v21"></script>
 </body>
 </html>

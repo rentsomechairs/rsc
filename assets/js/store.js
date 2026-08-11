@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, uploadFile, waitForAuthReady , callAdminHttpFunction } from './firebase-service.js?v=completed-revenue-fix-v12';
+import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminHttpFunction } from './firebase-service.js?v=employee-time-format-v21';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -506,6 +506,73 @@ export async function saveSingleOrder(order, previousOrder = null, meta = { acto
   return clone(cleanOrder);
 }
 
+
+export async function saveEmployeeOrderProgress(orderId, employeeUid, changes = {}) {
+  const current = cacheOrders.find((item) => item.id === orderId);
+  if (!current) throw new Error('Assigned order was not found.');
+  if (String(current.assignedEmployeeId || '') !== String(employeeUid || '')) throw new Error('This order is not assigned to you.');
+
+  const allowedStatus = new Set(['Confirmed', 'In-Progress', 'Completed']);
+  const next = clone(current);
+  if (changes.exchangeTime !== undefined) next.exchangeTime = String(changes.exchangeTime || '');
+  if (changes.returnTime !== undefined) next.returnTime = String(changes.returnTime || '');
+  if (changes.status !== undefined) {
+    const status = String(changes.status || '');
+    if (!allowedStatus.has(status)) throw new Error('That order status is not available to employees.');
+    next.status = status;
+    if (status === 'Completed') {
+      next.completedAt = next.completedAt || new Date().toISOString();
+      const isFree = Boolean(next.free) || String(next.paymentStatus || '').toLowerCase() === 'free' || getSnapshotEffectiveTotal(next) <= 0;
+      if (!isFree) {
+        const total = getSnapshotEffectiveTotal(next);
+        next.paymentStatus = 'Paid';
+        next.amountPaid = total;
+        next.depositPaidAmount = total;
+        next.amountRemaining = 0;
+      }
+    } else {
+      next.completedAt = '';
+    }
+  }
+  next.updatedAt = new Date().toISOString();
+
+  cacheOrders = cacheOrders.map((item) => item.id === next.id ? next : item);
+  if (!isFirebaseEnabled()) {
+    const previous = read(STORAGE_KEYS.orders, []);
+    write(STORAGE_KEYS.orders, previous.map((item) => item.id === next.id ? next : item));
+    await syncSingleTrackingRecord(next);
+    return clone(next);
+  }
+
+  // Use partial updates so employee writes contain only the explicitly allowed
+  // progress fields. Firestore rules independently enforce the same field list.
+  const orderPatch = { updatedAt: next.updatedAt };
+  if (changes.exchangeTime !== undefined) orderPatch.exchangeTime = next.exchangeTime;
+  if (changes.returnTime !== undefined) orderPatch.returnTime = next.returnTime;
+  if (changes.status !== undefined) {
+    orderPatch.status = next.status;
+    orderPatch.completedAt = next.completedAt;
+    orderPatch.paymentStatus = next.paymentStatus;
+    orderPatch.amountPaid = next.amountPaid ?? 0;
+    orderPatch.depositPaidAmount = next.depositPaidAmount ?? '';
+    orderPatch.amountRemaining = next.amountRemaining ?? getSnapshotAmountRemaining(next);
+  }
+  await updateDocFields(COLLECTIONS.orders, next.id, orderPatch);
+
+  const trackingPatch = { updatedAt: next.updatedAt };
+  if (changes.exchangeTime !== undefined) trackingPatch.exchangeTime = next.exchangeTime;
+  if (changes.returnTime !== undefined) trackingPatch.returnTime = next.returnTime;
+  if (changes.status !== undefined) {
+    trackingPatch.status = next.status;
+    trackingPatch.paymentStatus = next.paymentStatus;
+    trackingPatch.amountPaid = getSnapshotAmountPaid(next);
+    trackingPatch.depositPaidAmount = next.depositPaidAmount ?? '';
+    trackingPatch.amountRemaining = getSnapshotAmountRemaining(next);
+  }
+  await updateDocFields(COLLECTIONS.tracking, next.id, trackingPatch);
+  return clone(next);
+}
+
 export async function deleteSingleOrder(orderOrId, meta = { actor: 'app' }) {
   const id = typeof orderOrId === 'string' ? orderOrId : orderOrId?.id;
   if (!id) return;
@@ -608,6 +675,18 @@ export async function saveUserProfile(profile) {
   await upsertDoc(COLLECTIONS.users, next.uid, next);
   cacheUsers = cacheUsers.filter((u) => (u.uid || u.id) !== next.uid).concat(next);
   return clone(next);
+}
+
+
+export async function saveOwnContractAcceptance(profile, acceptance = {}) {
+  const uidValue = profile?.uid || profile?.id;
+  if (!uidValue) throw new Error('Employee profile UID is required.');
+  const next = { ...clone(profile), uid: uidValue, contractAcceptance: clone(acceptance), updatedAt: new Date().toISOString() };
+  delete next.id;
+  await upsertDoc(COLLECTIONS.users, uidValue, next);
+  const cached = { id: uidValue, ...next };
+  cacheUsers = cacheUsers.filter((u) => (u.uid || u.id) !== uidValue).concat(cached);
+  return clone(cached);
 }
 
 export async function deleteUserProfile(uid) {
@@ -774,7 +853,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js?v=completed-revenue-fix-v12');
+  const { getDocById } = await import('./firebase-service.js?v=employee-time-format-v21');
   return getDocById(COLLECTIONS.reviews, code);
 }
 

@@ -1,4 +1,5 @@
 const { onRequest } = require("firebase-functions/v2/https");
+const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
@@ -58,5 +59,65 @@ exports.deleteEmployeeAuth = onRequest(
       console.error("deleteEmployeeAuth failed", error);
       return res.status(403).json({ ok: false, error: error?.message || "Employee authentication deletion failed." });
     }
+  }
+);
+
+
+function orderEffectiveTotal(order = {}) {
+  if (order.adjustedTotal !== "" && order.adjustedTotal != null && Number.isFinite(Number(order.adjustedTotal))) {
+    return Number(order.adjustedTotal || 0);
+  }
+  if (Number.isFinite(Number(order.total))) return Number(order.total || 0);
+  return Number(order.baseTotal || 0);
+}
+
+exports.syncCompletedOrderIncome = onDocumentWritten(
+  { document: "orders/{orderId}", region: "us-central1" },
+  async (event) => {
+    const orderId = event.params.orderId;
+    const after = event.data?.after?.exists ? event.data.after.data() : null;
+    const incomeRef = admin.firestore().collection("financeIncome").doc(`order_${orderId}`);
+
+    if (!after) {
+      await incomeRef.delete().catch(() => {});
+      return;
+    }
+
+    const total = orderEffectiveTotal(after);
+    const isFree = Boolean(after.free) || String(after.paymentStatus || "").toLowerCase() === "free" || total <= 0;
+    const eligible = String(after.status || "") === "Completed" && !isFree;
+
+    if (!eligible) {
+      await incomeRef.delete().catch(() => {});
+      return;
+    }
+
+    const rawDate = String(after.completedAt || after.returnDate || after.exchangeDate || new Date().toISOString());
+    const date = rawDate.slice(0, 10);
+    const existing = await incomeRef.get();
+    const payload = {
+      ownerId: OWNER_UID,
+      companyId: OWNER_UID,
+      recordType: "income",
+      source: "completed-order",
+      sourceOrderId: orderId,
+      orderId,
+      payer: [after.firstName, after.lastName].filter(Boolean).join(" ") || "Customer",
+      grossAmount: total,
+      amount: total,
+      processingFee: 0,
+      netDeposit: total,
+      description: `Completed rental order ${after.orderNumber || orderId}`,
+      paymentMethod: after.paymentMethod || "",
+      date,
+      taxYear: Number(date.slice(0, 4)) || new Date().getFullYear(),
+      reviewStatus: "Reviewed",
+      documentationStatus: "Complete",
+      archived: false,
+      deletedAt: null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+    if (!existing.exists) payload.createdAt = admin.firestore.FieldValue.serverTimestamp();
+    await incomeRef.set(payload, { merge: true });
   }
 );

@@ -97,6 +97,12 @@ export async function upsertDoc(collectionName, id, data) {
   await fireMod.setDoc(fireMod.doc(db, collectionName, id), data, { merge: false });
 }
 
+export async function updateDocFields(collectionName, id, data = {}) {
+  const { db } = await initFirebase();
+  const fireMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js');
+  await fireMod.updateDoc(fireMod.doc(db, collectionName, id), data);
+}
+
 export async function deleteDocById(collectionName, id) {
   const { db } = await initFirebase();
   const fireMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js');

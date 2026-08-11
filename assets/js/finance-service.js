@@ -1,4 +1,4 @@
-import { initFirebase, isFirebaseEnabled, waitForAuthReady, reauthenticateCurrentUser } from './firebase-service.js?v=completed-revenue-fix-v12';
+import { initFirebase, isFirebaseEnabled, waitForAuthReady, reauthenticateCurrentUser } from './firebase-service.js?v=employee-time-format-v21';
 
 export const FINANCE_COLLECTIONS = {
   expense: 'financeExpenses', income: 'financeIncome', mileage: 'financeMileage',

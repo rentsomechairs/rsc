@@ -27,6 +27,75 @@ service cloud.firestore {
              resource.data.assignedEmployeeId == request.auth.uid;
     }
 
+    function isOwnContractAcceptanceUpdate(uid) {
+      return isSignedIn() &&
+             request.auth.uid == uid &&
+             resource.data.role == "employee" &&
+             request.resource.data.role == resource.data.role &&
+             request.resource.data.status == resource.data.status &&
+             request.resource.data.uid == resource.data.uid &&
+             request.resource.data.email == resource.data.email &&
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               "contractAcceptance",
+               "updatedAt"
+             ]) &&
+             request.resource.data.contractAcceptance.legalName is string &&
+             request.resource.data.contractAcceptance.legalName.size() > 0 &&
+             request.resource.data.contractAcceptance.legalNameConfirmed == true &&
+             request.resource.data.contractAcceptance.payoutMethod in [
+               "Every completed transaction",
+               "$500 threshold",
+               "$1,000 threshold",
+               "Every 2 weeks",
+               "Every month"
+             ];
+    }
+
+    function isEmployeeOrderProgressUpdate() {
+      return isApprovedEmployee() &&
+             resource.data.assignedEmployeeId == request.auth.uid &&
+             request.resource.data.assignedEmployeeId == request.auth.uid &&
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               "exchangeTime",
+               "returnTime",
+               "status",
+               "completedAt",
+               "paymentStatus",
+               "amountPaid",
+               "depositPaidAmount",
+               "amountRemaining",
+               "updatedAt"
+             ]) &&
+             (
+               request.resource.data.status == resource.data.status ||
+               (resource.data.status != "Completed" &&
+                 request.resource.data.status in ["In-Progress", "Completed"])
+             ) &&
+             (
+               request.resource.data.status != "Completed" ||
+               resource.data.paymentStatus == "Free" ||
+               (
+                 request.resource.data.paymentStatus == "Paid" &&
+                 request.resource.data.amountRemaining == 0
+               )
+             );
+    }
+
+    function isEmployeeTrackingProgressUpdate(orderId) {
+      return isApprovedEmployee() &&
+             get(/databases/$(database)/documents/orders/$(orderId)).data.assignedEmployeeId == request.auth.uid &&
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               "exchangeTime",
+               "returnTime",
+               "status",
+               "paymentStatus",
+               "amountPaid",
+               "depositPaidAmount",
+               "amountRemaining",
+               "updatedAt"
+             ]);
+    }
+
     function isQuickPickerOrder() {
       return request.resource.data.source == "quick-picker" &&
              request.resource.data.status == "Pending";
@@ -56,10 +125,11 @@ service cloud.firestore {
       allow list: if isMe();
       allow create: if isValidEmployeeSignup(uid);
 
-      // Employee-controlled financial/equipment fields are intentionally blocked.
-      // Profile, approval, pickup coordinates, equipment allocations and unit costs
-      // are changed only by the owner/admin application.
-      allow update, delete: if isMe();
+      // Employees may only confirm their own contract legal name and payout
+      // preference. All admin, equipment, percentage, approval, and profile fields
+      // remain owner-controlled.
+      allow update: if isMe() || isOwnContractAcceptanceUpdate(uid);
+      allow delete: if isMe();
     }
 
     match /settings/{docId} {
@@ -87,18 +157,22 @@ service cloud.firestore {
       // Approved employees may only query orders assigned to their own UID.
       allow get, list: if request.auth == null || isMe() || isAssignedEmployee();
       allow create: if isMe() || (request.auth == null && isQuickPickerOrder());
-      allow update: if isMe() || (request.auth == null && isExistingQuickPickerOrder());
+      allow update: if isMe() ||
+                    isEmployeeOrderProgressUpdate() ||
+                    (request.auth == null && isExistingQuickPickerOrder());
       allow delete: if isMe();
     }
 
     match /orderTracking/{trackingCode} {
       allow read: if true;
       allow create: if isMe() || (request.auth == null && request.resource.data.status == "Pending");
-      allow update: if isMe() || (
-        request.auth == null &&
-        resource.data.status == "Pending" &&
-        request.resource.data.status == "Pending"
-      );
+      allow update: if isMe() ||
+                    isEmployeeTrackingProgressUpdate(trackingCode) ||
+                    (
+                      request.auth == null &&
+                      resource.data.status == "Pending" &&
+                      request.resource.data.status == "Pending"
+                    );
       allow delete: if isMe();
     }
 
