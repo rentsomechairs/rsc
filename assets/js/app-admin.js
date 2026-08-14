@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveInventory, saveOrders, saveSettings, saveSingleOrder, saveUserProfile, deleteUserProfile, deleteEmployeeAuthAccount, saveEmployeeOrderProgress, saveOwnContractAcceptance } from './store.js?v=employee-time-format-v21';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveInventory, saveOrders, saveSettings, saveSingleOrder, saveUserProfile, deleteUserProfile, deleteEmployeeAuthAccount, saveEmployeeOrderProgress, saveOwnContractAcceptance } from './store.js?v=mobile-sidebar-v23';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
-import { syncCompletedOrderIncome } from './finance-service.js?v=employee-time-format-v21';
+import { syncCompletedOrderIncome } from './finance-service.js?v=mobile-sidebar-v23';
 const state = {
   inventory: [],
   orders: [],
@@ -41,7 +41,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'employee-time-format-v21';
+const ADMIN_VERSION = 'mobile-sidebar-v23';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -326,6 +326,7 @@ function cacheEls() {
     completedColumn: document.getElementById('completedColumn'),
     newInquiryBell: document.getElementById('newInquiryBell'),
     newInquiryBadge: document.getElementById('newInquiryBadge'),
+    employeeEarnedBalance: document.getElementById('employeeEarnedBalance'),
     collapsedColumnsRail: document.getElementById('collapsedColumnsRail'),
     addOrderBtn: document.getElementById('addOrderBtn'),
     routeDateInput: document.getElementById('routeDateInput'),
@@ -437,6 +438,10 @@ function cacheEls() {
     exitViewAsBtn: document.getElementById('exitViewAsBtn'),
     dashboardTitle: document.getElementById('dashboardTitle'),
     dashboardSubtitle: document.getElementById('dashboardSubtitle'),
+    mobileMenuBtn: document.getElementById('mobileMenuBtn'),
+    sidebarCloseBtn: document.getElementById('sidebarCloseBtn'),
+    sidebarOverlay: document.getElementById('sidebarOverlay'),
+    appSidebar: document.getElementById('appSidebar'),
     contractModalWrap: document.getElementById('contractModalWrap'),
     contractModalTitle: document.getElementById('contractModalTitle'),
     contractForm: document.getElementById('contractForm'),
@@ -480,6 +485,7 @@ function applyRoleAccess() {
     document.querySelector('[data-tab-panel="orders"]')?.insertAdjacentHTML('afterbegin', '<div class="card" data-pending-account-notice style="padding:18px;margin-bottom:16px;"><strong>Account pending approval</strong><div class="small muted">Your signup was received. Assigned orders become available after an administrator approves the account.</div></div>');
   }
   renderTabs();
+  renderEmployeeEarnedBalance();
 }
 function approvedEmployees() { return (state.users || []).filter((u) => u.role === 'employee' && u.status === 'approved'); }
 function employeeDisplayName(user = {}) { return `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Employee'; }
@@ -575,7 +581,7 @@ function calculateEmployeePaymentLedger(user = {}, orders = state.orders) {
   let employeeEarnings = 0, companyShare = 0, payoffTotal = 0, recognizedRevenue = 0;
   const lines = [];
   const sorted = (orders || [])
-    .filter((o) => o.assignedEmployeeId === (user.uid || user.id) && eligiblePaidFraction(o) > 0 && !o.free)
+    .filter((o) => o.assignedEmployeeId === (user.uid || user.id) && o.status === 'Completed' && eligiblePaidFraction(o) > 0 && !o.free)
     .slice()
     .sort((a,b) => String(a.completedAt || a.updatedAt || a.eventDate || a.createdAt || '').localeCompare(String(b.completedAt || b.updatedAt || b.eventDate || b.createdAt || '')));
 
@@ -993,9 +999,9 @@ function estimateEmployeeOrderLabor(employee = {}, order = {}, employeeEarnings 
   const hourlyRate = totalMinutes > 0 ? (Math.max(0, Number(employeeEarnings || 0)) / totalMinutes) * 60 : null;
   return { cleaning, loading, unloading, handlingMinutes, exchangeMinutes, travelMinutes, totalMinutes, hourlyRate };
 }
-function employeeHourlyEstimateHtml(employee, order, earnings) {
+function employeeHourlyEstimateHtml(employee, order, earnings, plain = false) {
   const estimate = estimateEmployeeOrderLabor(employee, order, earnings);
-  if (estimate.totalMinutes <= 0) return `<span class="badge badge-light" title="Add handling/exchange time to calculate an hourly estimate.">Hourly rate —</span>`;
+  if (estimate.totalMinutes <= 0) return plain ? '—' : `<span class="badge badge-light" title="Add handling/exchange time to calculate an hourly estimate.">Hourly rate —</span>`;
   const pieces = [
     estimate.cleaning ? `${estimate.cleaning.toFixed(1)}m clean` : '',
     estimate.loading ? `${estimate.loading.toFixed(1)}m load` : '',
@@ -1003,7 +1009,27 @@ function employeeHourlyEstimateHtml(employee, order, earnings) {
     estimate.exchangeMinutes ? `${estimate.exchangeMinutes.toFixed(1)}m exchanges` : '',
     estimate.travelMinutes ? `${estimate.travelMinutes.toFixed(1)}m driving` : ''
   ].filter(Boolean).join(' + ');
-  return `<span class="badge employee-hourly-badge" title="${safeText(`${pieces} = ${estimate.totalMinutes.toFixed(1)} estimated minutes`)}">${currency(estimate.hourlyRate)}/hr · ${estimate.totalMinutes.toFixed(0)} min</span>`;
+  const label = `${currency(estimate.hourlyRate)}/hr · ${estimate.totalMinutes.toFixed(0)} min`;
+  return plain ? safeText(label) : `<span class="badge employee-hourly-badge" title="${safeText(`${pieces} = ${estimate.totalMinutes.toFixed(1)} estimated minutes`)}">${label}</span>`;
+}
+function renderEmployeeEarnedBalance() {
+  if (!els.employeeEarnedBalance) return;
+  if (!isEmployeeUser()) {
+    els.employeeEarnedBalance.classList.add('hidden');
+    return;
+  }
+  const employee = getExperienceUser();
+  const ledger = calculateEmployeePaymentLedger(employee, state.orders);
+  els.employeeEarnedBalance.classList.remove('hidden');
+  const strong = els.employeeEarnedBalance.querySelector('strong');
+  if (strong) strong.textContent = currency(ledger.employeeEarnings);
+}
+function formatEmployeeActionTime(value = '') {
+  const raw = String(value || '').trim();
+  if (!/^\d{2}:\d{2}$/.test(raw)) return '';
+  return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' })
+    .format(new Date(`2000-01-01T${raw}:00`))
+    .toLowerCase();
 }
 function renderEmployeePayments() {
   if (!els.employeePaymentsPanel || !isEmployeeUser()) return;
@@ -1012,24 +1038,160 @@ function renderEmployeePayments() {
   const split = ledger.split || employeePaymentSettings(employee);
   const equipmentValue = equipmentValueForUser(employee);
   const remaining = Math.max(0, equipmentValue - ledger.payoffTotal);
+  const totalProgressPercent = equipmentValue > 0 ? Math.min(100, (ledger.payoffTotal / equipmentValue) * 100) : 0;
+
   const equipmentRows = ledger.buckets.length ? ledger.buckets.map((b) => {
     const item = inventoryById(b.inventoryId) || {};
     const paidUnits = b.unitCost > 0 ? Math.min(b.quantity, Math.floor((b.payoff + 1e-9) / b.unitCost)) : b.quantity;
     const progressIntoNext = b.unitCost > 0 && paidUnits < b.quantity ? Math.max(0, b.payoff - (paidUnits * b.unitCost)) : 0;
     const nextPercent = b.unitCost > 0 && paidUnits < b.quantity ? Math.min(100, (progressIntoNext / b.unitCost) * 100) : 100;
-    const nextProgress = paidUnits < b.quantity
-      ? `<div><span class="small muted">Next unit</span><strong>${currency(progressIntoNext)} / ${currency(b.unitCost)}</strong><div class="small muted">${nextPercent.toFixed(0)}% complete</div></div>`
-      : `<div><span class="small muted">Next unit</span><strong>All paid</strong></div>`;
-    return `<div class="employee-payment-equipment-row"><div><strong>${safeText(item.name || 'Equipment')}</strong><div class="small muted">${b.quantity} assigned × ${currency(b.unitCost)} each</div></div><div><span class="small muted">Value</span><strong>${currency(b.totalCost)}</strong></div><div><span class="small muted">Units paid off</span><strong>${paidUnits}/${b.quantity}</strong></div>${nextProgress}<div><span class="small muted">Total applied</span><strong>${currency(b.payoff)}</strong></div><div><span class="small muted">Remaining</span><strong>${currency(Math.max(0,b.totalCost-b.payoff))}</strong></div></div>`;
+    const overallPercent = b.totalCost > 0 ? Math.min(100, (b.payoff / b.totalCost) * 100) : 100;
+    const nextLabel = paidUnits >= b.quantity
+      ? 'All units qualified'
+      : `${currency(progressIntoNext)} of ${currency(b.unitCost)} toward unit ${paidUnits + 1}`;
+
+    return `<div class="employee-progress-card">
+      <div class="employee-progress-card-head">
+        <div>
+          <strong>${safeText(item.name || 'Equipment')}</strong>
+          <div class="small muted">${b.quantity} assigned · ${currency(b.unitCost)} each</div>
+        </div>
+        <div class="qualified-unit-count"><strong>${paidUnits}</strong><span>of ${b.quantity}<br>qualified</span></div>
+      </div>
+      <div class="employee-progress-track large" aria-label="${overallPercent.toFixed(0)} percent qualified">
+        <span style="width:${overallPercent}%"></span>
+      </div>
+      <div class="employee-progress-card-summary">
+        <span>${currency(b.payoff)} applied</span>
+        <span>${currency(Math.max(0,b.totalCost-b.payoff))} remaining</span>
+      </div>
+      <div class="employee-next-unit">
+        <div class="employee-next-unit-label"><span>${safeText(nextLabel)}</span><strong>${nextPercent.toFixed(0)}%</strong></div>
+        <div class="employee-progress-track small"><span style="width:${nextPercent}%"></span></div>
+      </div>
+    </div>`;
   }).join('') : '<div class="empty-state">No equipment has been assigned to you yet.</div>';
-  const paidRows = ledger.lines.length ? ledger.lines.slice().reverse().map((line) => `<div class="calendar-stock-row"><div><strong>${safeText((line.order.firstName || '') + ' ' + (line.order.lastName || ''))}</strong><div class="small muted">${safeText(line.order.eventDate || line.order.exchangeDate || '')} · ${safeText(summarizeOrderItems(line.order.items || []))}</div></div><div class="calendar-stock-metrics"><span class="badge badge-green">You ${currency(line.employee)}</span><span class="badge badge-yellow">Qualified Units ${currency(line.payoff)}</span><span class="badge badge-blue">Company ${currency(line.company)}</span>${employeeHourlyEstimateHtml(employee, line.order, line.employee)}</div></div>`).join('') : '<div class="empty-state">No paid assigned orders have contributed to your payment totals yet.</div>';
+
+  const paidRows = ledger.lines.length ? ledger.lines.slice().reverse().map((line) => {
+    const order = line.order;
+    return `<div class="employee-payment-order-card completed-payment">
+      <div class="employee-payment-order-head">
+        <div>
+          <span class="employee-payment-order-state">Completed</span>
+          <strong>${safeText(`${order.firstName || ''} ${order.lastName || ''}`.trim() || 'Customer')}</strong>
+          <div class="small muted">${safeText(order.completedAt ? new Date(order.completedAt).toLocaleDateString() : (order.eventDate || order.exchangeDate || ''))} · ${safeText(summarizeOrderItems(order.items || []))}</div>
+        </div>
+        <div class="employee-order-earned"><span>You earned</span><strong>${currency(line.employee)}</strong></div>
+      </div>
+      <div class="employee-payment-split-row">
+        <div><span>Qualified Unit progress</span><strong>${currency(line.payoff)}</strong></div>
+        <div><span>Company</span><strong>${currency(line.company)}</strong></div>
+        <div><span>Estimated rate</span><strong>${employeeHourlyEstimateHtml(employee, order, line.employee, true)}</strong></div>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty-state">Complete an assigned order to see its final payment breakdown here.</div>';
+
   const employeeId = employee.uid || employee.id;
-  const confirmedOrders = (state.orders || []).filter((order) => order.assignedEmployeeId === employeeId && ['Confirmed','In-Progress'].includes(order.status) && String(order.paymentStatus || '').toLowerCase() !== 'free');
-  const projectedRows = confirmedOrders.length ? confirmedOrders.map((order) => {
+  const projectedOrders = (state.orders || [])
+    .filter((order) =>
+      order.assignedEmployeeId === employeeId &&
+      ['Confirmed','In-Progress'].includes(order.status) &&
+      String(order.paymentStatus || '').toLowerCase() !== 'free'
+    )
+    .sort(compareNextActionAsc);
+
+  const projectedRows = projectedOrders.length ? projectedOrders.map((order) => {
     const projection = projectEmployeeOrderCompletion(employee, order);
-    return `<div class="calendar-stock-row projected-payment-row"><div><strong>${safeText((order.firstName || '') + ' ' + (order.lastName || ''))}</strong><div class="small muted">${safeText(order.exchangeDate || order.eventDate || '')} · ${safeText(summarizeOrderItems(order.items || []))}<br>Projected if this order is completed and fully paid.</div></div><div class="calendar-stock-metrics"><span class="badge badge-green">You ${currency(projection.employee)}</span><span class="badge badge-yellow">Qualified Units ${currency(projection.payoff)}</span><span class="badge badge-blue">Company ${currency(projection.company)}</span>${employeeHourlyEstimateHtml(employee, order, projection.employee)}</div></div>`;
+    const actionLabel = order.status === 'In-Progress' ? 'Return' : 'Exchange';
+    const actionDate = getOrderNextActionDate(order);
+    const actionTime = formatEmployeeActionTime(getOrderNextActionTime(order) || '');
+    return `<div class="employee-payment-order-card projected-payment">
+      <div class="employee-payment-order-head">
+        <div>
+          <span class="employee-payment-order-state projection">${safeText(order.status === 'In-Progress' ? 'In progress' : 'Confirmed')}</span>
+          <strong>${safeText(`${order.firstName || ''} ${order.lastName || ''}`.trim() || 'Customer')}</strong>
+          <div class="small muted">${safeText(summarizeOrderItems(order.items || []))}</div>
+        </div>
+        <div class="employee-order-earned projected"><span>Projected earnings</span><strong>${currency(projection.employee)}</strong></div>
+      </div>
+      <div class="employee-projection-next-action"><strong>${safeText(actionLabel)}</strong><span>${safeText(formatFriendlyShortDate(actionDate))}${actionTime ? ` · ${safeText(actionTime)}` : ''}</span></div>
+      <div class="employee-payment-split-row">
+        <div><span>Qualified Unit progress</span><strong>${currency(projection.payoff)}</strong></div>
+        <div><span>Company</span><strong>${currency(projection.company)}</strong></div>
+        <div><span>Estimated rate</span><strong>${employeeHourlyEstimateHtml(employee, order, projection.employee, true)}</strong></div>
+      </div>
+    </div>`;
   }).join('') : '<div class="empty-state">No confirmed or in-progress assigned orders are waiting for completion.</div>';
-  els.employeePaymentsPanel.innerHTML = `<div class="employee-payment-grid"><div class="employee-payment-stat"><span class="small muted">Equipment sent</span><strong>${currency(equipmentValue)}</strong></div><div class="employee-payment-stat"><span class="small muted">Qualified Unit allocation applied</span><strong>${currency(ledger.payoffTotal)}</strong></div><div class="employee-payment-stat"><span class="small muted">Equipment remaining</span><strong>${currency(remaining)}</strong></div><div class="employee-payment-stat"><span class="small muted">Your earnings</span><strong>${currency(ledger.employeeEarnings)}</strong></div><div class="employee-payment-stat"><span class="small muted">Company earnings</span><strong>${currency(ledger.companyShare)}</strong></div></div><div class="card" style="padding:16px;"><div class="section-header"><div><strong>Your payout rates</strong><div class="small muted">While a unit is unqualified: ${split.unpaidEmployee}% to you, ${split.equipmentPayoff}% toward Qualified Unit progress, ${split.unpaidCompany}% company. Once that unit qualifies: ${split.paidEmployee}% to you, ${split.paidCompany}% company. Delivery, setup, and tips are 100% yours.</div></div></div></div><div class="card" style="padding:16px;"><div class="section-header"><div><strong>Qualified Unit progress — unit by unit</strong><div class="small muted">Allocation accumulates toward individual units. A unit switches to the Qualified Unit payout rate only after its full assigned unit value has been reached.</div></div></div><div class="employee-payment-equipment">${equipmentRows}</div></div><div class="card" style="padding:16px;"><div class="section-header"><div><strong>Upcoming order projections</strong><div class="small muted">Confirmed and in-progress orders showing the expected split if each order is completed and fully paid.</div></div></div><div class="calendar-stock-list">${projectedRows}</div></div><div class="card" style="padding:16px;"><div class="section-header"><div><strong>Paid order breakdown</strong><div class="small muted">Uses the amount actually marked paid on each assigned order.</div></div></div><div class="calendar-stock-list">${paidRows}</div></div>`;
+
+  const unpaidRateWidth = Math.max(0, Math.min(100, split.unpaidEmployee));
+  const paidRateWidth = Math.max(0, Math.min(100, split.paidEmployee));
+
+  els.employeePaymentsPanel.innerHTML = `
+    <section class="employee-payment-hero">
+      <div class="employee-payment-hero-main">
+        <span class="employee-payment-eyebrow">Completed-order earnings</span>
+        <strong>${currency(ledger.employeeEarnings)}</strong>
+        <span>earned from completed assigned orders</span>
+      </div>
+      <div class="employee-payment-hero-progress">
+        <div class="employee-payment-progress-heading"><span>Overall Qualified Unit progress</span><strong>${totalProgressPercent.toFixed(0)}%</strong></div>
+        <div class="employee-progress-track hero"><span style="width:${totalProgressPercent}%"></span></div>
+        <div class="employee-payment-progress-foot"><span>${currency(ledger.payoffTotal)} applied</span><span>${currency(remaining)} remaining</span></div>
+      </div>
+    </section>
+
+    <section class="employee-payment-summary-grid">
+      <div class="employee-payment-summary-card"><span>Equipment value</span><strong>${currency(equipmentValue)}</strong><small>assigned to your location</small></div>
+      <div class="employee-payment-summary-card"><span>Qualified Unit progress</span><strong>${currency(ledger.payoffTotal)}</strong><small>from completed orders</small></div>
+      <div class="employee-payment-summary-card"><span>Company share</span><strong>${currency(ledger.companyShare)}</strong><small>from completed orders</small></div>
+    </section>
+
+    <section class="employee-payments-section">
+      <div class="employee-payments-section-head">
+        <div><span class="employee-section-kicker">Your rates</span><h3>How each equipment rental is split</h3></div>
+      </div>
+      <div class="employee-rate-cards">
+        <div class="employee-rate-card">
+          <div><span>Before a unit qualifies</span><strong>${split.unpaidEmployee}% to you</strong></div>
+          <div class="employee-rate-bar">
+            <span class="employee-rate-you" style="width:${unpaidRateWidth}%"></span>
+            <span class="employee-rate-progress" style="width:${Math.max(0,Math.min(100,split.equipmentPayoff))}%"></span>
+            <span class="employee-rate-company" style="width:${Math.max(0,Math.min(100,split.unpaidCompany))}%"></span>
+          </div>
+          <div class="employee-rate-legend"><span>● You ${split.unpaidEmployee}%</span><span>● Qualified progress ${split.equipmentPayoff}%</span><span>● Company ${split.unpaidCompany}%</span></div>
+        </div>
+        <div class="employee-rate-card">
+          <div><span>After a unit qualifies</span><strong>${split.paidEmployee}% to you</strong></div>
+          <div class="employee-rate-bar">
+            <span class="employee-rate-you qualified" style="width:${paidRateWidth}%"></span>
+            <span class="employee-rate-company" style="width:${Math.max(0,Math.min(100,split.paidCompany))}%"></span>
+          </div>
+          <div class="employee-rate-legend"><span>● You ${split.paidEmployee}%</span><span>● Company ${split.paidCompany}%</span></div>
+        </div>
+      </div>
+      <div class="small muted employee-direct-fees-note">Delivery fees, setup fees, and tips are 100% yours.</div>
+    </section>
+
+    <section class="employee-payments-section">
+      <div class="employee-payments-section-head">
+        <div><span class="employee-section-kicker">Progress</span><h3>Qualified Units</h3><p>Watch each equipment type move toward the higher payout rate.</p></div>
+      </div>
+      <div class="employee-progress-grid">${equipmentRows}</div>
+    </section>
+
+    <section class="employee-payments-section">
+      <div class="employee-payments-section-head">
+        <div><span class="employee-section-kicker">Next up</span><h3>Upcoming order projections</h3><p>These are estimates only. They move to the completed breakdown after the order is marked Completed.</p></div>
+      </div>
+      <div class="employee-payment-order-list">${projectedRows}</div>
+    </section>
+
+    <section class="employee-payments-section">
+      <div class="employee-payments-section-head">
+        <div><span class="employee-section-kicker">History</span><h3>Completed order breakdown</h3><p>Only completed orders appear here, even if an active order has already been marked paid.</p></div>
+      </div>
+      <div class="employee-payment-order-list">${paidRows}</div>
+    </section>`;
 }
 function renderEmployeeOrderDetails(order = {}) {
   const contact = order.contactMethods || {};
@@ -1067,6 +1229,7 @@ async function handleEmployeeOrderProgress(orderId, changes = {}) {
     state.orders = state.orders.map((o) => o.id === orderId ? saved : o);
     renderOrders();
     renderEmployeePayments();
+    renderEmployeeEarnedBalance();
   } catch (error) {
     alert(error?.message || 'Unable to update this order.');
   }
@@ -1355,13 +1518,23 @@ function bindLogin() {
     }
   }, 280);
 function bindApp() {
-  els.tabButtons.forEach((btn) => btn.addEventListener('click', () => setTab(btn.dataset.tabBtn)));
+  els.tabButtons.forEach((btn) => btn.addEventListener('click', () => {
+    setTab(btn.dataset.tabBtn);
+    closeMobileSidebar();
+  }));
   els.logoutBtn.addEventListener('click', async () => {
     await logoutAdmin();
     window.location.reload();
   });
   els.copyPickupAddressBtn?.addEventListener('click', openCopyPasteMenu);
   els.copyEmployeeSignupLinkBtn?.addEventListener('click', copyEmployeeSignupLink);
+  els.mobileMenuBtn?.addEventListener('click', toggleMobileSidebar);
+  els.sidebarCloseBtn?.addEventListener('click', closeMobileSidebar);
+  els.sidebarOverlay?.addEventListener('click', closeMobileSidebar);
+  els.appSidebar?.addEventListener('click', (event) => {
+    if (event.target.closest('a.nav-btn')) closeMobileSidebar();
+  });
+  window.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeMobileSidebar(); });
   els.employeesList?.addEventListener('click', handleEmployeeListClick);
   els.employeesList?.addEventListener('input', (event) => {
     const colorInput = event.target.closest('[data-employee-color]');
@@ -1753,11 +1926,30 @@ function renderAll() {
   renderEmployees();
   populateQuickPeekLocationSelect();
   renderEmployeePayments();
+  renderEmployeeEarnedBalance();
   renderEmployeeDocuments();
 }
 function setTab(tab) {
   state.activeTab = tab;
   renderTabs();
+}
+function openMobileSidebar() {
+  document.body.classList.add('sidebar-open');
+  els.appSidebar?.classList.add('mobile-open');
+  els.sidebarOverlay?.classList.add('open');
+  els.sidebarOverlay?.setAttribute('aria-hidden','false');
+  els.mobileMenuBtn?.setAttribute('aria-expanded','true');
+}
+function closeMobileSidebar() {
+  document.body.classList.remove('sidebar-open');
+  els.appSidebar?.classList.remove('mobile-open');
+  els.sidebarOverlay?.classList.remove('open');
+  els.sidebarOverlay?.setAttribute('aria-hidden','true');
+  els.mobileMenuBtn?.setAttribute('aria-expanded','false');
+}
+function toggleMobileSidebar() {
+  if (document.body.classList.contains('sidebar-open')) closeMobileSidebar();
+  else openMobileSidebar();
 }
 function renderTabs() {
   els.tabButtons.forEach((btn) => btn.classList.toggle('active', btn.dataset.tabBtn === state.activeTab));

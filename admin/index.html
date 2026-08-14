@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Admin • Rent Some Orders</title>
   <link rel="stylesheet" href="../assets/css/styles.css" />
 </head>
@@ -24,8 +24,12 @@
   </div>
 
   <div id="appView" class="layout hidden">
-    <aside class="sidebar">
-      <div class="brand">Rent Some Orders</div>
+    <aside class="sidebar" id="appSidebar">
+      <div class="sidebar-mobile-head">
+        <div class="brand">Rent Some Orders</div>
+        <button type="button" class="sidebar-close-btn" id="sidebarCloseBtn" aria-label="Close navigation">×</button>
+      </div>
+      <div class="brand desktop-brand">Rent Some Orders</div>
       <div class="nav-list">
         <div class="nav-section-label">Workspace</div>
         <button class="nav-btn active" data-tab-btn="orders"><span class="nav-icon">▦</span><span>Orders</span></button>
@@ -63,11 +67,15 @@
 
     <main class="main">
       <div class="topbar">
-        <div>
+        <button type="button" class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Open navigation" aria-controls="appSidebar" aria-expanded="false">☰</button>
+        <div class="topbar-title-block">
           <h1 id="dashboardTitle" style="margin:0;">Admin Dashboard</h1>
           <div id="dashboardSubtitle" class="muted small">Track inquiries, inventory, and settings.</div>
         </div>
-        <button id="newInquiryBell" class="notification-bell" type="button" aria-label="New quote submissions">🔔<span id="newInquiryBadge" class="notification-badge hidden">0</span></button>
+        <div class="topbar-actions">
+          <div id="employeeEarnedBalance" class="employee-earned-balance employee-only hidden" title="Earnings from completed orders"><span>Balance</span><strong>$0.00</strong></div>
+          <button id="newInquiryBell" class="notification-bell" type="button" aria-label="New quote submissions">🔔<span id="newInquiryBadge" class="notification-badge hidden">0</span></button>
+        </div>
       </div>
       <div id="viewAsBanner" class="view-as-banner hidden">
         <div><strong id="viewAsName">Employee preview</strong><div class="small">You are previewing exactly the employee-facing navigation and read-only content. Your admin account remains signed in.</div></div>
@@ -618,6 +626,14 @@
     </div>
   </div>
 
+  <div id="sidebarOverlay" class="sidebar-overlay" aria-hidden="true"></div>
+
+  <nav id="employeeMobileNav" class="employee-mobile-nav employee-only hidden" aria-label="Employee navigation">
+    <button class="employee-mobile-nav-btn" type="button" data-tab-btn="orders"><span>▦</span><strong>Orders</strong></button>
+    <button class="employee-mobile-nav-btn" type="button" data-tab-btn="payments"><span>$</span><strong>Payments</strong></button>
+    <button class="employee-mobile-nav-btn" type="button" data-tab-btn="documents"><span>≡</span><strong>Documents</strong></button>
+  </nav>
+
   <div id="appBusyOverlay" class="app-busy-overlay" aria-hidden="true">
     <div class="app-busy-card">
       <div class="app-busy-spinner" aria-hidden="true"></div>
@@ -625,6 +641,6 @@
     </div>
   </div>
 
-  <script type="module" src="../assets/js/app-admin.js?v=employee-time-format-v21"></script>
+  <script type="module" src="../assets/js/app-admin.js?v=mobile-sidebar-v23"></script>
 </body>
 </html>
