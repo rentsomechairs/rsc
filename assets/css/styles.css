@@ -4160,3 +4160,162 @@ textarea{line-height:1.45}
     height:38px;
   }
 }
+
+
+/* =========================================================
+   QUALIFIED UNIT SAME-DAY PRIORITY v24
+   ========================================================= */
+
+.projection-priority-strip{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:5px 10px;
+  border-bottom:1px solid #e0e7ff;
+  background:#f5f7ff;
+  color:#6172f3;
+  font-size:.59rem;
+  font-weight:750;
+  text-transform:uppercase;
+  letter-spacing:.045em;
+}
+.projection-priority-strip strong{
+  color:#3538cd;
+  font-size:.58rem;
+}
+.qualified-boost-row,
+.qualified-unlock-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin:0 13px 10px;
+}
+.qualified-boost-chip{
+  display:inline-flex;
+  align-items:center;
+  min-height:25px;
+  padding:4px 8px;
+  border:1px solid #abefc6;
+  border-radius:999px;
+  background:#ecfdf3;
+  color:#067647;
+  font-size:.63rem;
+  font-weight:800;
+}
+.qualified-boost-row.completed{
+  margin-top:2px;
+}
+.qualified-unlock-row>span{
+  display:inline-flex;
+  align-items:center;
+  padding:4px 8px;
+  border:1px solid #fedf89;
+  border-radius:999px;
+  background:#fffaeb;
+  color:#b54708;
+  font-size:.61rem;
+  font-weight:720;
+}
+
+@media(max-width:760px){
+  .projection-priority-strip{
+    align-items:flex-start;
+    flex-direction:column;
+    gap:2px;
+  }
+}
+
+
+/* =========================================================
+   MOBILE SAFARI DRAWER FIX v25
+   Final override intentionally placed last in stylesheet.
+   ========================================================= */
+
+@media screen and (max-width:1024px){
+  html,
+  body{
+    overflow-x:hidden;
+  }
+
+  body #appSidebar.sidebar{
+    display:block!important;
+    visibility:visible!important;
+    position:fixed!important;
+    top:0!important;
+    bottom:0!important;
+    left:0!important;
+    right:auto!important;
+    z-index:2147483000!important;
+    width:min(86vw,320px)!important;
+    min-width:260px!important;
+    height:100vh!important;
+    height:100dvh!important;
+    max-height:none!important;
+    margin:0!important;
+    padding:14px!important;
+    overflow-y:auto!important;
+    overflow-x:hidden!important;
+    opacity:1!important;
+    pointer-events:auto!important;
+    transform:translate3d(-105%,0,0)!important;
+    -webkit-transform:translate3d(-105%,0,0)!important;
+    transition:transform .22s ease,-webkit-transform .22s ease!important;
+    will-change:transform;
+    -webkit-overflow-scrolling:touch;
+    background:#111827!important;
+  }
+
+  body.sidebar-open #appSidebar.sidebar,
+  body #appSidebar.sidebar.mobile-open{
+    transform:translate3d(0,0,0)!important;
+    -webkit-transform:translate3d(0,0,0)!important;
+  }
+
+  body #sidebarOverlay.sidebar-overlay{
+    position:fixed!important;
+    inset:0!important;
+    z-index:2147482000!important;
+  }
+
+  body.sidebar-open #sidebarOverlay.sidebar-overlay{
+    opacity:1!important;
+    pointer-events:auto!important;
+  }
+
+  body #appSidebar .sidebar-mobile-head{
+    display:flex!important;
+  }
+
+  body #appSidebar .desktop-brand{
+    display:none!important;
+  }
+
+  body #appSidebar .nav-list{
+    display:flex!important;
+    flex-direction:column!important;
+    width:100%!important;
+  }
+
+  body #appSidebar .nav-btn{
+    display:flex!important;
+    width:100%!important;
+  }
+
+  body #appSidebar .sidebar-footer{
+    display:block!important;
+  }
+}
+
+/* Safari sometimes creates an unexpected transformed containing block.
+   Keeping the main app untransformed prevents the fixed drawer from being
+   clipped to the page content. */
+@media screen and (max-width:1024px){
+  .layout,
+  .main{
+    transform:none!important;
+    -webkit-transform:none!important;
+    filter:none!important;
+    perspective:none!important;
+  }
+}

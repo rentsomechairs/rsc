@@ -1,4 +1,4 @@
-import { initFirebase, isFirebaseEnabled, waitForAuthReady, reauthenticateCurrentUser } from './firebase-service.js?v=mobile-sidebar-v23';
+import { initFirebase, isFirebaseEnabled, waitForAuthReady, reauthenticateCurrentUser } from './firebase-service.js?v=mobile-safari-drawer-v25';
 
 export const FINANCE_COLLECTIONS = {
   expense: 'financeExpenses', income: 'financeIncome', mileage: 'financeMileage',

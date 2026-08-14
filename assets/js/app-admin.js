@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveInventory, saveOrders, saveSettings, saveSingleOrder, saveUserProfile, deleteUserProfile, deleteEmployeeAuthAccount, saveEmployeeOrderProgress, saveOwnContractAcceptance } from './store.js?v=mobile-sidebar-v23';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveInventory, saveOrders, saveSettings, saveSingleOrder, saveUserProfile, deleteUserProfile, deleteEmployeeAuthAccount, saveEmployeeOrderProgress, saveOwnContractAcceptance } from './store.js?v=mobile-safari-drawer-v25';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
-import { syncCompletedOrderIncome } from './finance-service.js?v=mobile-sidebar-v23';
+import { syncCompletedOrderIncome } from './finance-service.js?v=mobile-safari-drawer-v25';
 const state = {
   inventory: [],
   orders: [],
@@ -41,7 +41,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'mobile-sidebar-v23';
+const ADMIN_VERSION = 'mobile-safari-drawer-v25';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -567,6 +567,54 @@ function eligiblePaidFraction(order = {}) {
   if (!total) return 0;
   return Math.max(0, Math.min(1, Number(getOrderAmountPaid(order) || 0) / total));
 }
+
+function employeeEquipmentRentalValue(order = {}) {
+  return (order.items || []).reduce((sum, item) => {
+    const qty = Math.max(0, Number(item.quantity || 0));
+    const unit = Math.max(0, Number(
+      item.chargedUnitPrice === '' || item.chargedUnitPrice == null
+        ? item.unitPrice
+        : item.chargedUnitPrice || 0
+    ));
+    return sum + (qty * unit);
+  }, 0);
+}
+
+function employeeQualificationProcessingDate(order = {}) {
+  return String(order.exchangeDate || order.eventDate || order.returnDate || '').slice(0,10);
+}
+
+function compareEmployeeQualificationPriority(a = {}, b = {}) {
+  const ad = employeeQualificationProcessingDate(a);
+  const bd = employeeQualificationProcessingDate(b);
+  if (ad !== bd) return ad.localeCompare(bd);
+
+  // Same rental day: intentionally process the larger equipment-rental order
+  // first so Qualified Units unlocked by it can benefit later same-day orders.
+  const av = employeeEquipmentRentalValue(a);
+  const bv = employeeEquipmentRentalValue(b);
+  if (Math.abs(av - bv) > 0.000001) return bv - av;
+
+  // Stable fallback when order values match.
+  const at = String(a.exchangeTime || a.eventTime || '');
+  const bt = String(b.exchangeTime || b.eventTime || '');
+  if (at !== bt) return at.localeCompare(bt);
+  return String(a.id || '').localeCompare(String(b.id || ''));
+}
+
+function qualifiedUnitEmoji(item = {}) {
+  const name = String(item.name || '').toLowerCase();
+  if (name.includes('chair')) return '🪑';
+  if (name.includes('table')) return '⭐';
+  if (name.includes('tent')) return '⛺';
+  return '✨';
+}
+
+function qualifiedUsageLabel(entry = {}) {
+  const item = inventoryById(entry.inventoryId) || {};
+  const qty = Math.max(0, Number(entry.quantity || 0));
+  return `+${qty} ${qualifiedUnitEmoji(item)} ${item.name || 'Qualified Unit'}`;
+}
 function calculateEmployeePaymentLedger(user = {}, orders = state.orders) {
   const assignments = employeeAssignments(user);
   const split = employeePaymentSettings(user);
@@ -583,11 +631,13 @@ function calculateEmployeePaymentLedger(user = {}, orders = state.orders) {
   const sorted = (orders || [])
     .filter((o) => o.assignedEmployeeId === (user.uid || user.id) && o.status === 'Completed' && eligiblePaidFraction(o) > 0 && !o.free)
     .slice()
-    .sort((a,b) => String(a.completedAt || a.updatedAt || a.eventDate || a.createdAt || '').localeCompare(String(b.completedAt || b.updatedAt || b.eventDate || b.createdAt || '')));
+    .sort(compareEmployeeQualificationPriority);
 
   for (const order of sorted) {
     const paidFraction = eligiblePaidFraction(order);
     let orderEmployee = 0, orderCompany = 0, orderPayoff = 0, orderRecognized = 0;
+    const qualifiedUsage = [];
+    const newlyQualified = [];
 
     for (const item of order.items || []) {
       const bucket = buckets.get(String(item.inventoryId || ''));
@@ -609,6 +659,10 @@ function calculateEmployeePaymentLedger(user = {}, orders = state.orders) {
       const paidRevenue = lineRevenue * (paidQty / qty);
       const unpaidRevenue = lineRevenue * (unpaidQty / qty);
 
+      if (paidQty > 0) {
+        qualifiedUsage.push({ inventoryId: bucket.inventoryId, quantity: paidQty });
+      }
+
       const rawPayoff = unpaidRevenue * (split.equipmentPayoff / 100);
       const remainingCost = Math.max(0, bucket.totalCost - bucket.payoff);
       const appliedPayoff = Math.min(rawPayoff, remainingCost);
@@ -623,6 +677,14 @@ function calculateEmployeePaymentLedger(user = {}, orders = state.orders) {
         unpaidRevenue * (split.unpaidCompany / 100);
 
       bucket.payoff += appliedPayoff;
+      const paidUnitsAfter = bucket.unitCost > 0
+        ? Math.min(bucket.quantity, Math.floor((bucket.payoff + 1e-9) / bucket.unitCost))
+        : bucket.quantity;
+      const unlockedNow = Math.max(0, paidUnitsAfter - paidUnitsBefore);
+      if (unlockedNow > 0) {
+        newlyQualified.push({ inventoryId: bucket.inventoryId, quantity: unlockedNow });
+      }
+
       bucket.employeeEarnings += employeePart;
       bucket.companyShare += companyPart;
       bucket.rentalRevenue += lineRevenue;
@@ -649,7 +711,15 @@ function calculateEmployeePaymentLedger(user = {}, orders = state.orders) {
       companyShare += orderCompany;
       payoffTotal += orderPayoff;
       recognizedRevenue += orderRecognized;
-      lines.push({ order, employee: orderEmployee, company: orderCompany, payoff: orderPayoff, revenue: orderRecognized });
+      lines.push({
+        order,
+        employee: orderEmployee,
+        company: orderCompany,
+        payoff: orderPayoff,
+        revenue: orderRecognized,
+        qualifiedUsage,
+        newlyQualified
+      });
     }
   }
   return { buckets: [...buckets.values()], employeeEarnings, companyShare, payoffTotal, recognizedRevenue, lines, split };
@@ -957,19 +1027,73 @@ function exitViewAsEmployee() {
 }
 
 
-function projectEmployeeOrderCompletion(user = {}, order = {}) {
-  const baseOrders = (state.orders || []).filter((o) => o.id !== order.id);
-  const projected = {
+function buildEmployeeProjectionPlan(user = {}, activeOrders = []) {
+  const userId = user.uid || user.id;
+  const actualCompleted = (state.orders || []).filter((order) =>
+    order.assignedEmployeeId === userId &&
+    order.status === 'Completed' &&
+    eligiblePaidFraction(order) > 0 &&
+    !order.free
+  );
+
+  const active = (activeOrders || [])
+    .filter((order) =>
+      order.assignedEmployeeId === userId &&
+      ['Confirmed','In-Progress'].includes(order.status) &&
+      String(order.paymentStatus || '').toLowerCase() !== 'free'
+    )
+    .slice()
+    .sort(compareEmployeeQualificationPriority);
+
+  const projectedCompleted = active.map((order, index) => ({
     ...order,
     status: 'Completed',
-    paymentStatus: String(order.paymentStatus || '').toLowerCase() === 'free' ? 'Free' : 'Paid',
+    paymentStatus: 'Paid',
     amountPaid: getEffectiveOrderTotal(order),
     depositPaidAmount: getEffectiveOrderTotal(order),
     amountRemaining: 0,
-    completedAt: order.completedAt || `${order.exchangeDate || new Date().toISOString().slice(0,10)}T${order.exchangeTime || '12:00'}:00`
+    // completedAt is only synthetic projection metadata. The ledger priority
+    // itself is controlled by exchange-day / largest-order-first ordering.
+    completedAt: order.completedAt || `${employeeQualificationProcessingDate(order) || new Date().toISOString().slice(0,10)}T12:${String(index).padStart(2,'0')}:00`
+  }));
+
+  const ledger = calculateEmployeePaymentLedger(user, [...actualCompleted, ...projectedCompleted]);
+  const lineById = new Map(ledger.lines.map((line) => [line.order.id, line]));
+
+  return active.map((order, index) => {
+    const line = lineById.get(order.id) || {
+      employee: 0, company: 0, payoff: 0, revenue: 0,
+      qualifiedUsage: [], newlyQualified: []
+    };
+    const previous = active[index - 1] || null;
+    const sameDayRank = active
+      .filter((candidate) => employeeQualificationProcessingDate(candidate) === employeeQualificationProcessingDate(order))
+      .findIndex((candidate) => candidate.id === order.id) + 1;
+    const sameDayCount = active
+      .filter((candidate) => employeeQualificationProcessingDate(candidate) === employeeQualificationProcessingDate(order))
+      .length;
+
+    return {
+      order,
+      ...line,
+      priorityIndex: index + 1,
+      sameDayRank,
+      sameDayCount,
+      followsOrderId: previous?.id || ''
+    };
+  });
+}
+
+function projectEmployeeOrderCompletion(user = {}, order = {}) {
+  const plan = buildEmployeeProjectionPlan(user, (state.orders || []).filter((candidate) =>
+    candidate.assignedEmployeeId === (user.uid || user.id) &&
+    ['Confirmed','In-Progress'].includes(candidate.status) &&
+    String(candidate.paymentStatus || '').toLowerCase() !== 'free'
+  ));
+  return plan.find((entry) => entry.order.id === order.id) || {
+    employee:0, company:0, payoff:0, revenue:0,
+    qualifiedUsage:[], newlyQualified:[]
   };
-  const ledger = calculateEmployeePaymentLedger(user, [...baseOrders, projected]);
-  return ledger.lines.find((line) => line.order.id === order.id) || { employee:0, company:0, payoff:0, revenue:0 };
 }
 
 function estimateEmployeeOrderLabor(employee = {}, order = {}, employeeEarnings = 0) {
@@ -1083,6 +1207,7 @@ function renderEmployeePayments() {
         </div>
         <div class="employee-order-earned"><span>You earned</span><strong>${currency(line.employee)}</strong></div>
       </div>
+      ${(line.qualifiedUsage || []).length ? `<div class="qualified-boost-row completed">${line.qualifiedUsage.map((entry) => `<span class="qualified-boost-chip">${safeText(qualifiedUsageLabel(entry))} at qualified rate</span>`).join('')}</div>` : ''}
       <div class="employee-payment-split-row">
         <div><span>Qualified Unit progress</span><strong>${currency(line.payoff)}</strong></div>
         <div><span>Company</span><strong>${currency(line.company)}</strong></div>
@@ -1097,15 +1222,24 @@ function renderEmployeePayments() {
       order.assignedEmployeeId === employeeId &&
       ['Confirmed','In-Progress'].includes(order.status) &&
       String(order.paymentStatus || '').toLowerCase() !== 'free'
-    )
-    .sort(compareNextActionAsc);
+    );
+  const projectionPlan = buildEmployeeProjectionPlan(employee, projectedOrders);
 
-  const projectedRows = projectedOrders.length ? projectedOrders.map((order) => {
-    const projection = projectEmployeeOrderCompletion(employee, order);
+  const projectedRows = projectionPlan.length ? projectionPlan.map((projection) => {
+    const order = projection.order;
     const actionLabel = order.status === 'In-Progress' ? 'Return' : 'Exchange';
     const actionDate = getOrderNextActionDate(order);
     const actionTime = formatEmployeeActionTime(getOrderNextActionTime(order) || '');
+    const qualifiedBoosts = (projection.qualifiedUsage || []).map(qualifiedUsageLabel);
+    const unlocked = (projection.newlyQualified || []).map((entry) => {
+      const item = inventoryById(entry.inventoryId) || {};
+      return `Unlocked +${entry.quantity} ${qualifiedUnitEmoji(item)} ${item.name || 'Qualified Unit'}`;
+    });
     return `<div class="employee-payment-order-card projected-payment">
+      <div class="projection-priority-strip">
+        <span>Same-day priority ${projection.sameDayRank}${projection.sameDayCount > 1 ? ` of ${projection.sameDayCount}` : ''}</span>
+        ${projection.sameDayCount > 1 ? '<strong>Largest equipment order first</strong>' : ''}
+      </div>
       <div class="employee-payment-order-head">
         <div>
           <span class="employee-payment-order-state projection">${safeText(order.status === 'In-Progress' ? 'In progress' : 'Confirmed')}</span>
@@ -1115,6 +1249,8 @@ function renderEmployeePayments() {
         <div class="employee-order-earned projected"><span>Projected earnings</span><strong>${currency(projection.employee)}</strong></div>
       </div>
       <div class="employee-projection-next-action"><strong>${safeText(actionLabel)}</strong><span>${safeText(formatFriendlyShortDate(actionDate))}${actionTime ? ` · ${safeText(actionTime)}` : ''}</span></div>
+      ${qualifiedBoosts.length ? `<div class="qualified-boost-row">${qualifiedBoosts.map((label) => `<span class="qualified-boost-chip">${safeText(label)} at qualified rate</span>`).join('')}</div>` : ''}
+      ${unlocked.length ? `<div class="qualified-unlock-row">${unlocked.map((label) => `<span>${safeText(label)} for later orders</span>`).join('')}</div>` : ''}
       <div class="employee-payment-split-row">
         <div><span>Qualified Unit progress</span><strong>${currency(projection.payoff)}</strong></div>
         <div><span>Company</span><strong>${currency(projection.company)}</strong></div>
@@ -1181,7 +1317,7 @@ function renderEmployeePayments() {
 
     <section class="employee-payments-section">
       <div class="employee-payments-section-head">
-        <div><span class="employee-section-kicker">Next up</span><h3>Upcoming order projections</h3><p>These are estimates only. They move to the completed breakdown after the order is marked Completed.</p></div>
+        <div><span class="employee-section-kicker">Next up</span><h3>Upcoming order projections</h3><p>Same-day orders are projected largest equipment-rental value first so newly Qualified Units can benefit later orders that day.</p></div>
       </div>
       <div class="employee-payment-order-list">${projectedRows}</div>
     </section>
@@ -1935,14 +2071,24 @@ function setTab(tab) {
 }
 function openMobileSidebar() {
   document.body.classList.add('sidebar-open');
-  els.appSidebar?.classList.add('mobile-open');
+  if (els.appSidebar) {
+    els.appSidebar.classList.add('mobile-open');
+    // Inline transform is deliberate: iOS Safari can occasionally retain an
+    // earlier media-query transform even after the class changes.
+    els.appSidebar.style.transform = 'translate3d(0,0,0)';
+    els.appSidebar.style.webkitTransform = 'translate3d(0,0,0)';
+  }
   els.sidebarOverlay?.classList.add('open');
   els.sidebarOverlay?.setAttribute('aria-hidden','false');
   els.mobileMenuBtn?.setAttribute('aria-expanded','true');
 }
 function closeMobileSidebar() {
   document.body.classList.remove('sidebar-open');
-  els.appSidebar?.classList.remove('mobile-open');
+  if (els.appSidebar) {
+    els.appSidebar.classList.remove('mobile-open');
+    els.appSidebar.style.transform = '';
+    els.appSidebar.style.webkitTransform = '';
+  }
   els.sidebarOverlay?.classList.remove('open');
   els.sidebarOverlay?.setAttribute('aria-hidden','true');
   els.mobileMenuBtn?.setAttribute('aria-expanded','false');

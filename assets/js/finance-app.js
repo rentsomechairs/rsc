@@ -1,4 +1,4 @@
-import { archiveFinanceRecord, currentFinanceUser, getFinanceRecord, listAttachments, listFinanceRecords, listReferenceRecords, permanentlyDeleteFinanceRecord, restoreFinanceRecord, saveFinanceRecord, seedFinanceCategories, uploadFinanceAttachment, nukeAllFinancialRecords, importMasterFinancialRows, reconcileCompletedOrdersIncome } from './finance-service.js?v=mobile-sidebar-v23';
+import { archiveFinanceRecord, currentFinanceUser, getFinanceRecord, listAttachments, listFinanceRecords, listReferenceRecords, permanentlyDeleteFinanceRecord, restoreFinanceRecord, saveFinanceRecord, seedFinanceCategories, uploadFinanceAttachment, nukeAllFinancialRecords, importMasterFinancialRows, reconcileCompletedOrdersIncome } from './finance-service.js?v=mobile-safari-drawer-v25';
 import { currency, safeText, uid } from './utils.js';
 
 const RECORDS=['expense','income','mileage','vehicle','asset','incident','homeOffice'];
