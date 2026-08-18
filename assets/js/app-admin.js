@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveInventory, saveOrders, saveSettings, saveSingleOrder, saveUserProfile, deleteUserProfile, deleteEmployeeAuthAccount, saveEmployeeOrderProgress, saveOwnContractAcceptance } from './store.js?v=mobile-safari-drawer-v25';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, deleteEmployeeAuthAccount, saveEmployeeOrderProgress, saveOwnContractAcceptance } from './store.js?v=targeted-firestore-writes-v27';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
-import { syncCompletedOrderIncome } from './finance-service.js?v=mobile-safari-drawer-v25';
+import { syncCompletedOrderIncome } from './finance-service.js?v=targeted-firestore-writes-v27';
 const state = {
   inventory: [],
   orders: [],
@@ -41,7 +41,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'mobile-safari-drawer-v25';
+const ADMIN_VERSION = 'targeted-firestore-writes-v27';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -1952,22 +1952,23 @@ async function loadData() {
   state.settings = await getSettings();
   const rawOrders = state.currentUser?.role === 'employee' ? await getAssignedOrders(state.currentUser.uid) : await getOrders();
   const normalizedOrders = rawOrders.map((order) => ({
+    assignedEmployeeId: '',
+    assignedEmployeeName: '',
     ...order,
     paymentStatus: order.paymentStatus === 'Deposit' ? 'Deposit Paid' : order.paymentStatus
   }));
   const tracked = ensureOrdersHaveTrackingCodes(normalizedOrders);
-  state.orders = tracked.orders.map((order) => ({ assignedEmployeeId: '', assignedEmployeeName: '', ...order }));
+  state.orders = tracked.orders;
   if (state.currentUser?.role === 'employee') state.orders = state.orders.filter((order) => order.assignedEmployeeId === state.currentUser.uid);
-  const paymentMigrated = syncAllOrdersToDepositRule();
+
+  // IMPORTANT: load-time normalization is runtime-only. Loading the admin must be read-only.
+  // Deposit/payment derived values, legacy status labels, missing optional assignment fields,
+  // and temporary tracking codes are allowed to normalize in memory, but are persisted only
+  // when that specific order is later edited/saved by a real user action.
+  syncAllOrdersToDepositRule({ touchUpdatedAt: false });
   state.reviews = await getPublicReviews().catch(() => []);
   state.costs = await getCostRecords().catch(() => []);
   state.averages = Array.isArray(state.settings?.averageTasks) ? state.settings.averageTasks : [];
-  // Legacy orders intentionally remain unassigned until an admin edits or assigns them.
-  // Do not backfill employee fields during startup: rewriting the entire orders collection
-  // can exhaust Firestore's queued write stream and freeze the admin panel.
-  if (tracked.changed || paymentMigrated) {
-    await saveOrders(state.orders, { actor: tracked.changed ? 'tracking-payment-backfill' : 'deposit-paid-lock-migration' });
-  }
 }
 function setBusyState(isBusy, message = 'Saving…') {
   if (!els.appBusyOverlay) return;
@@ -2005,16 +2006,6 @@ function renderLoadingPlaceholders(message = 'Loading from Firebase…') {
   targets.forEach((target) => { if (target) target.innerHTML = loadingCard(message); });
   if (els.inventoryStats) els.inventoryStats.innerHTML = `<span class="badge badge-blue">Loading…</span>`;
 }
-async function saveAndRefresh(actor = 'admin') {
-  await withBusy(async () => {
-    await saveInventory(state.inventory);
-    await saveOrders(state.orders, { actor });
-    await saveSettings(state.settings);
-    await loadData();
-    renderAll();
-  }, 'Saving changes…');
-}
-
 async function saveOrderOnly(order, before = null, actor = 'admin-order') {
   await withBusy(async () => {
     await saveSingleOrder(order, before, { actor });
@@ -2860,7 +2851,7 @@ function syncOrderDepositRule(order = {}) {
   order.depositAmount = requiresDeposit ? roundDepositAmount(total * DEPOSIT_RATE) : 0;
   return syncOrderPaymentAmounts(order);
 }
-function syncAllOrdersToDepositRule() {
+function syncAllOrdersToDepositRule({ touchUpdatedAt = true } = {}) {
   let changed = false;
   state.orders.forEach((order) => {
     const before = JSON.stringify({
@@ -2879,7 +2870,7 @@ function syncAllOrdersToDepositRule() {
       amountRemaining: order.amountRemaining
     });
     if (before !== after) {
-      order.updatedAt = new Date().toISOString();
+      if (touchUpdatedAt) order.updatedAt = new Date().toISOString();
       changed = true;
     }
   });
@@ -4486,7 +4477,8 @@ function openAccessoryCostModal(inventoryId) {
       state.costs = [cost, ...(state.costs || [])];
     }
     await withBusy(async () => {
-      await saveInventory(state.inventory);
+      const changedInventory = state.inventory.find((entry) => entry.id === inventoryId);
+      if (changedInventory) await saveSingleInventoryItem(changedInventory);
       if (total > 0) state.costs = await saveCostRecords(collectCostsFromTable());
       modal.classList.remove('open');
       renderInventory();
@@ -4583,7 +4575,12 @@ async function deleteInventory(id) {
   if (!item) return;
   if (!window.confirm(`Delete inventory item ${item.name}?`)) return;
   state.inventory = state.inventory.filter((entry) => entry.id !== id);
-  await saveAndRefresh('admin-status');
+  await withBusy(async () => {
+    await deleteSingleInventoryItem(id);
+    renderInventory();
+    renderCalendarView();
+    renderNumbers();
+  }, 'Deleting inventory item…');
 }
 function renderSettings() {
   const settings = state.settings;
@@ -4736,9 +4733,15 @@ async function handleSettingsSave(event) {
     }
   }
   state.settings = nextSettings;
+  const beforeDepositSync = new Map(state.orders.map((order) => [order.id, JSON.parse(JSON.stringify(order))]));
   const depositRuleChangedOrders = syncAllOrdersToDepositRule();
   await saveSettings(state.settings);
-  if (depositRuleChangedOrders) await saveOrders(state.orders, { actor: 'deposit-rule-settings-update' });
+  if (depositRuleChangedOrders) {
+    const changedOrders = state.orders.filter((order) => JSON.stringify(beforeDepositSync.get(order.id)) !== JSON.stringify(order));
+    for (const order of changedOrders) {
+      await saveSingleOrder(order, beforeDepositSync.get(order.id), { actor: 'deposit-rule-settings-update' });
+    }
+  }
   renderSettings();
   renderOrders();
   renderCalendarView();
@@ -5189,7 +5192,7 @@ async function handleInventorySave(event) {
   } else {
     state.inventory.unshift(item);
   }
-  await saveInventory(state.inventory);
+  await saveSingleInventoryItem(item);
   closeModals();
   await loadData();
   renderInventory();

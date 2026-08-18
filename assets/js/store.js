@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminHttpFunction } from './firebase-service.js?v=mobile-safari-drawer-v25';
+import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminHttpFunction } from './firebase-service.js?v=targeted-firestore-writes-v27';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -270,6 +270,33 @@ export async function saveInventory(items) {
 }
 
 
+// Routine inventory edits must never rewrite/synchronize the whole collection.
+export async function saveSingleInventoryItem(item) {
+  const cleanItem = clone(item);
+  if (!cleanItem?.id) throw new Error('Inventory item ID is required.');
+  cacheInventory = cacheInventory.some((entry) => entry.id === cleanItem.id)
+    ? cacheInventory.map((entry) => entry.id === cleanItem.id ? cleanItem : entry)
+    : [cleanItem, ...cacheInventory];
+  if (!isFirebaseEnabled()) {
+    write(STORAGE_KEYS.inventory, cacheInventory);
+    return clone(cleanItem);
+  }
+  await upsertDoc(COLLECTIONS.inventory, cleanItem.id, cleanItem);
+  return clone(cleanItem);
+}
+
+export async function deleteSingleInventoryItem(itemOrId) {
+  const id = typeof itemOrId === 'string' ? itemOrId : itemOrId?.id;
+  if (!id) return;
+  cacheInventory = cacheInventory.filter((entry) => entry.id !== id);
+  if (!isFirebaseEnabled()) {
+    write(STORAGE_KEYS.inventory, cacheInventory);
+    return;
+  }
+  await deleteDocById(COLLECTIONS.inventory, id);
+}
+
+
 export async function getAssignedOrders(employeeUid) {
   if (!isFirebaseEnabled()) return clone(cacheOrders.filter((order) => order.assignedEmployeeId === employeeUid));
   cacheOrders = await listCollectionWhere(COLLECTIONS.orders, 'assignedEmployeeId', '==', employeeUid);
@@ -426,11 +453,13 @@ export async function createQuickPickerOrder(order) {
     }
     write(STORAGE_KEYS.orders, [cleanOrder, ...previous]);
     cacheOrders = [cleanOrder, ...previous];
+    await syncSingleTrackingRecord(cleanOrder);
     return clone(cleanOrder);
   }
   try {
     await upsertDoc(COLLECTIONS.orders, cleanOrder.id, cleanOrder);
     cacheOrders = [cleanOrder, ...cacheOrders.filter((item) => item.id !== cleanOrder.id)];
+    await syncSingleTrackingRecord(cleanOrder);
     return clone(cleanOrder);
   } catch (error) {
     if (error?.code === 'permission-denied' || error?.code === 'already-exists') {
@@ -814,35 +843,55 @@ export async function getCostRecords() {
 }
 
 export async function saveCostRecords(records = []) {
-  cacheCosts = clone(records).map((record) => ({
+  const incoming = clone(records).map((record) => ({
     ...record,
     id: record.id || uid('cost'),
     category: String(record.category || '').trim(),
     name: String(record.name || '').trim(),
     quantity: record.quantity === '' || record.quantity == null ? '' : Number(record.quantity || 0),
     price: record.price === '' || record.price == null ? '' : Number(record.price || 0),
-    updatedAt: new Date().toISOString(),
     createdAt: record.createdAt || new Date().toISOString()
   })).filter((record) => record.category || record.name || record.quantity !== '' || record.price !== '');
 
   if (!isFirebaseEnabled()) {
+    const previousMap = new Map(cacheCosts.map((item) => [item.id, item]));
+    cacheCosts = incoming.map((item) => {
+      const old = previousMap.get(item.id);
+      const candidate = { ...item, updatedAt: old?.updatedAt || item.updatedAt || new Date().toISOString() };
+      if (!old) return candidate;
+      const oldComparable = { ...old }; delete oldComparable.updatedAt;
+      const newComparable = { ...candidate }; delete newComparable.updatedAt;
+      return docsAreDifferent(oldComparable, newComparable) ? { ...candidate, updatedAt: new Date().toISOString() } : old;
+    });
     write(STORAGE_KEYS.costs, cacheCosts);
     return clone(cacheCosts);
   }
 
   const current = await listCollection(COLLECTIONS.costs);
   const currentMap = new Map(current.map((item) => [item.id, item]));
-  const nextIds = new Set(cacheCosts.map((item) => item.id));
+  const nextIds = new Set(incoming.map((item) => item.id));
+  const nextCache = [];
 
-  for (const item of cacheCosts) {
-    if (docsAreDifferent(currentMap.get(item.id), item)) {
-      await upsertDoc(COLLECTIONS.costs, item.id, item);
+  for (const item of incoming) {
+    const old = currentMap.get(item.id);
+    const candidate = { ...item, updatedAt: old?.updatedAt || item.updatedAt || new Date().toISOString() };
+    const oldComparable = old ? { ...old } : null;
+    const newComparable = { ...candidate };
+    if (oldComparable) delete oldComparable.updatedAt;
+    delete newComparable.updatedAt;
+    if (!old || docsAreDifferent(oldComparable, newComparable)) {
+      candidate.updatedAt = new Date().toISOString();
+      await upsertDoc(COLLECTIONS.costs, candidate.id, candidate);
+      nextCache.push(candidate);
+    } else {
+      nextCache.push(old);
     }
   }
 
   for (const [id] of currentMap.entries()) {
     if (!nextIds.has(id)) await deleteDocById(COLLECTIONS.costs, id);
   }
+  cacheCosts = nextCache;
   return clone(cacheCosts);
 }
 
@@ -853,7 +902,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js?v=mobile-safari-drawer-v25');
+  const { getDocById } = await import('./firebase-service.js?v=targeted-firestore-writes-v27');
   return getDocById(COLLECTIONS.reviews, code);
 }
 

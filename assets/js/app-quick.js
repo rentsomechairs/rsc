@@ -1,9 +1,9 @@
-import { createQuickPickerOrder, getCategories, getInventory, getOrders, getSettings } from './store.js?v=employee-unit-payments-v6';
+import { createQuickPickerOrder, getCategories, getInventory, getOrders, getSettings } from './store.js?v=targeted-firestore-writes-v27';
 import { CONTACT_METHODS, addDays, buildContactMap, currency, overlaps, parseDateTime, safeText, uid, formatShortDate, formatDateTime } from './utils.js';
 import { computeDeliveryEstimate, debounce, geocodeAddress, searchAddresses } from './geo.js';
 import { sendInquiryNotification } from './email-notify.js';
 
-console.log('QUICK PICKER VERSION:', 'employee-unit-payments-v6');
+console.log('QUICK PICKER VERSION:', 'targeted-firestore-writes-v27');
 
 const state = {
   inventory: [],
@@ -1234,6 +1234,25 @@ function updateFloatingTotalVisibility() {
   els.mobileTotalBar.classList.remove('faded');
 }
 
+function generateQuoteTrackingCode(existingCodes = new Set()) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  do {
+    code = Array.from({ length: 8 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+    code = `${code.slice(0, 4)}-${code.slice(4)}`;
+  } while (existingCodes.has(code));
+  return code;
+}
+
+function generateQuoteAccessCode(existingCodes = new Set()) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  do {
+    code = Array.from({ length: 4 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+  } while (existingCodes.has(code));
+  return code;
+}
+
 function stableOrderFingerprint(order) {
   const normalized = {
     firstName: String(order.firstName || '').trim().toLowerCase(),
@@ -1296,6 +1315,8 @@ async function handleSubmit(event) {
     depositAmount: getDepositAmount(total),
     items,
     contactMethods: contactMap,
+    trackingCode: generateQuoteTrackingCode(new Set(state.orders.map((entry) => String(entry.trackingCode || '').trim()).filter(Boolean))),
+    trackingAccessCode: generateQuoteAccessCode(new Set(state.orders.map((entry) => String(entry.trackingAccessCode || '').trim()).filter(Boolean))),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     completedAt: '',
