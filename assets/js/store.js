@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminHttpFunction } from './firebase-service.js?v=targeted-firestore-writes-v27';
+import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminHttpFunction } from './firebase-service.js?v=ticket-single-read-v28';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -653,6 +653,23 @@ export async function getPublicTrackingRecords() {
   const items = await listCollection(COLLECTIONS.tracking);
   cacheTracking = items;
   return clone(cacheTracking);
+}
+
+export async function getPublicTrackingRecord(trackingCode) {
+  const code = String(trackingCode || '').trim().toUpperCase();
+  if (!code) return null;
+  if (!isFirebaseEnabled()) {
+    hydrateCachesFromLocal();
+    return clone(cacheTracking.find((entry) => String(entry.trackingCode || '').trim().toUpperCase() === code) || null);
+  }
+  const items = await listCollectionWhere(COLLECTIONS.tracking, 'trackingCode', '==', code);
+  const item = items[0] || null;
+  if (item) {
+    cacheTracking = cacheTracking.some((entry) => entry.id === item.id)
+      ? cacheTracking.map((entry) => entry.id === item.id ? item : entry)
+      : [item, ...cacheTracking];
+  }
+  return clone(item);
 }
 
 export async function getSettings() {

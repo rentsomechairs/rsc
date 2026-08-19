@@ -1,8 +1,8 @@
-import { getPublicReview, getPublicTrackingRecords, getSettings, getSession, savePublicReview } from './store.js';
+import { getPublicReview, getPublicTrackingRecord, getPublicTrackingRecords, getSettings, getSession, savePublicReview } from './store.js?v=ticket-single-read-v28';
 import { currency, formatDateTime, safeText } from './utils.js';
 
 const els = {};
-const TRACKING_VERSION = 'v21-four-character-access-code';
+const TRACKING_VERSION = 'v28-single-ticket-ios-safe';
 const state = { records: [], settings: {}, trackingUrl: '', activeRecord: null, activeReview: null, verifiedCodes: new Set(), adminSession: null };
 const PAYMENT_METHOD_ORDER = ['cash', 'invoice', 'venmo', 'paypal', 'cashapp', 'zelle', 'googlepay', 'crypto'];
 const PAYMENT_METHOD_LABELS = {
@@ -30,18 +30,43 @@ async function init() {
   const code = getRequestedCode();
   if (code) showTicketLoading(code);
   else if (els.trackingStatus) els.trackingStatus.innerHTML = '<div class="section-loading-card"><span class="section-loading-spinner" aria-hidden="true"></span><span>Loading from Firebase…</span></div>';
-  state.settings = await getSettings().catch(() => ({}));
-  state.adminSession = await getSession().catch(() => null);
-  state.records = await getPublicTrackingRecords();
   els.trackingForm?.addEventListener('submit', handleSubmit);
   if (code) {
-    els.trackingCodeInput.value = code.toUpperCase();
+    // Public ticket links must not wait for Firebase Auth or download every ticket.
+    // Fetch only the requested tracking record and settings needed to render it.
+    const [record, settings] = await withTimeout(
+      Promise.all([
+        getPublicTrackingRecord(normalizeCode(code)),
+        getSettings().catch(() => ({}))
+      ]),
+      12000,
+      'Ticket loading timed out. Please check your connection and try again.'
+    );
+    state.settings = settings || {};
+    state.records = record ? [record] : [];
+    state.adminSession = null;
+    els.trackingCodeInput.value = normalizeCode(code);
     await renderTracking(code);
-  } else if (state.adminSession) {
+    return;
+  }
+
+  // The no-code tracking screen may show the admin list, so Auth is only needed here.
+  state.settings = await getSettings().catch(() => ({}));
+  state.adminSession = await getSession().catch(() => null);
+  state.records = state.adminSession ? await getPublicTrackingRecords() : [];
+  if (state.adminSession) {
     renderAdminTrackingList();
   } else if (els.trackingStatus) {
     els.trackingStatus.textContent = 'Enter your tracking number.';
   }
+}
+
+function withTimeout(promise, ms, message = 'Request timed out.') {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timer));
 }
 
 function cacheEls() {
@@ -399,6 +424,13 @@ async function copyToClipboard(text, trigger = null) {
 }
 
 function handleFatalError(error) {
-  console.error(error);
-  if (els.trackingStatus) els.trackingStatus.textContent = 'Could not load tracking right now.';
+  console.error('Tracking load failed:', error);
+  if (els.trackingForm) els.trackingForm.classList.remove('hidden');
+  if (els.trackingResult) els.trackingResult.classList.add('hidden');
+  if (els.trackingStatus) {
+    const timedOut = /timed out/i.test(String(error?.message || ''));
+    els.trackingStatus.textContent = timedOut
+      ? 'This ticket is taking too long to load. Check your connection, then refresh or open the link in Safari/Chrome.'
+      : 'Could not load tracking right now. Please refresh and try again.';
+  }
 }
