@@ -1,4 +1,4 @@
-import { getPublicReview, getPublicTrackingRecord, getPublicTrackingRecords, getSettings, getSession, savePublicReview } from './store.js?v=ticket-single-read-v28';
+import { getPublicReview, getPublicTrackingRecord, getPublicTrackingRecords, getSettings, getSession, savePublicReview } from './store.js?v=rental-ux-v33';
 import { currency, formatDateTime, safeText } from './utils.js';
 
 const els = {};
@@ -32,19 +32,22 @@ async function init() {
   else if (els.trackingStatus) els.trackingStatus.innerHTML = '<div class="section-loading-card"><span class="section-loading-spinner" aria-hidden="true"></span><span>Loading from Firebase…</span></div>';
   els.trackingForm?.addEventListener('submit', handleSubmit);
   if (code) {
-    // Public ticket links must not wait for Firebase Auth or download every ticket.
-    // Fetch only the requested tracking record and settings needed to render it.
-    const [record, settings] = await withTimeout(
+    // Normal customer links stay single-read and do not wait for Auth. Admin order links
+    // include ?admin=1 so an already signed-in admin can bypass the 4-character gate.
+    const adminRequested = new URLSearchParams(window.location.search).get('admin') === '1';
+    const [record, settings, session] = await withTimeout(
       Promise.all([
         getPublicTrackingRecord(normalizeCode(code)),
-        getSettings().catch(() => ({}))
+        getSettings().catch(() => ({})),
+        adminRequested ? getSession().catch(() => null) : Promise.resolve(null)
       ]),
       12000,
       'Ticket loading timed out. Please check your connection and try again.'
     );
     state.settings = settings || {};
     state.records = record ? [record] : [];
-    state.adminSession = null;
+    state.adminSession = session || null;
+    if (state.adminSession && record) state.verifiedCodes.add(normalizeCode(record.trackingCode || code));
     els.trackingCodeInput.value = normalizeCode(code);
     await renderTracking(code);
     return;

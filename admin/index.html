@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Admin • Rent Some Orders</title>
-  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v33" />
 </head>
 <body>
   <div id="loginView" class="login-shell hidden">
@@ -91,19 +91,17 @@
           <button class="btn btn-primary admin-only" id="addOrderBtn">Add Order</button>
         </div>
         <div class="collapsed-columns-rail" id="collapsedColumnsRail"></div>
-        <div class="columns columns-orders" id="ordersColumns">
-          <div class="column column-side" id="pendingColumn" data-column="pending">
-            <button class="column-head order-column-toggle" type="button" data-toggle-column="pending" aria-expanded="false"><span class="column-head-title"><h3>Pending Orders</h3><span id="pendingTotal" class="badge badge-yellow inline-total"></span></span><span class="column-chevron" aria-hidden="true">⌄</span></button>
-            <div id="pendingList" class="order-list"></div>
-          </div>
-          <div class="column column-main" id="confirmedColumn" data-column="confirmed">
-            <button class="column-head order-column-toggle" type="button" data-toggle-column="confirmed" aria-expanded="false"><span class="column-head-title"><h3>Confirmed Orders</h3><span id="confirmedTotal" class="badge badge-blue inline-total"></span></span><span class="column-chevron" aria-hidden="true">⌄</span></button>
+        <div class="columns columns-orders active-orders-layout" id="ordersColumns">
+          <div class="column column-main active-orders-column" id="confirmedColumn" data-column="confirmed">
+            <div class="column-head active-orders-head"><span class="column-head-title"><h3>Active Orders</h3><span id="pendingTotal" class="badge badge-red inline-total"></span><span id="confirmedTotal" class="badge badge-blue inline-total"></span></span></div>
             <div id="confirmedList" class="order-list"></div>
           </div>
-          <div class="column column-side" id="completedColumn" data-column="completed">
-            <button class="column-head order-column-toggle" type="button" data-toggle-column="completed" aria-expanded="false"><span class="column-head-title"><h3>Completed Orders</h3><span id="completedTotal" class="badge badge-green inline-total"></span></span><span class="column-chevron" aria-hidden="true">⌄</span></button>
-            <div id="completedList" class="order-list"></div>
+          <div class="column column-side completed-archive-column collapsed" id="completedColumn" data-column="completed">
+            <button class="column-head order-column-toggle" type="button" data-toggle-column="completed" aria-expanded="false"><span class="column-head-title"><h3>Completed Archive</h3><span id="completedTotal" class="badge badge-green inline-total">Not loaded</span></span><span class="column-chevron" aria-hidden="true">⌄</span></button>
+            <div class="step-actions" style="padding:10px 12px 0;"><button class="btn btn-ghost btn-small" type="button" id="backToActiveOrdersBtn">Back to Active Orders &amp; Unload Completed</button></div>
+            <div id="completedList" class="order-list"><div class="empty-state">Completed orders load only when you open this archive.</div></div>
           </div>
+          <div id="pendingColumn" class="hidden" data-column="pending"><div id="pendingList"></div></div>
         </div>
       </section>
 
@@ -641,6 +639,6 @@
     </div>
   </div>
 
-  <script type="module" src="../assets/js/app-admin.js?v=targeted-firestore-writes-v27"></script>
+  <script type="module" src="../assets/js/app-admin.js?v=rental-ux-v33"></script>
 </body>
 </html>

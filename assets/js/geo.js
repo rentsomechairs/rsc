@@ -364,6 +364,40 @@ export function debounce(fn, delay = 250) {
   };
 }
 
+
+async function geocodeAddressCensus(query) {
+  const text = String(query || '').trim();
+  if (!text) return null;
+  const url = new URL('https://geocoding.geo.census.gov/geocoder/locations/onelineaddress');
+  url.searchParams.set('address', text);
+  url.searchParams.set('benchmark', 'Public_AR_Current');
+  url.searchParams.set('format', 'json');
+  const response = await fetch(url.toString(), {
+    headers: { 'Accept': 'application/json' },
+    mode: 'cors',
+    cache: 'no-store'
+  });
+  if (!response.ok) throw new Error(`Census geocode failed (${response.status})`);
+  const payload = await response.json();
+  const match = payload?.result?.addressMatches?.[0];
+  const lat = Number(match?.coordinates?.y);
+  const lon = Number(match?.coordinates?.x);
+  if (!match || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const label = String(match.matchedAddress || text).trim();
+  const { primaryLine, secondaryLine } = splitLabel(label);
+  return {
+    label,
+    primaryLine,
+    secondaryLine,
+    lat,
+    lon,
+    placeId: match.tigerLine?.tigerLineId || label,
+    distanceFromOriginMiles: null,
+    raw: match,
+    provider: 'census'
+  };
+}
+
 async function fetchPhoton(query, { limit = 10, origin = null } = {}) {
   const url = new URL('/api', PHOTON_BASE);
   url.searchParams.set('q', query);
@@ -456,13 +490,35 @@ export async function geocodeAddress(query, options = {}) {
   const context = options?.context || null;
   if (getGoogleMapsApiKey(context)) {
     try {
-      return await geocodeAddressGoogle(query, options);
+      const googleMatch = await geocodeAddressGoogle(query, options);
+      if (googleMatch) return googleMatch;
     } catch (error) {
-      // Fall through to Photon below.
+      console.warn('Google geocode failed; trying fallback providers.', error);
     }
   }
-  const matches = await searchAddressesPhoton(query, { limit: 1, origin: options?.origin || null });
-  return matches[0] || null;
+
+  // The Quick Picker collects a complete US street/city/state/ZIP address.
+  // Census is much more reliable than Photon for exact US postal addresses,
+  // so use it first as the no-key fallback.
+  try {
+    const censusMatch = await geocodeAddressCensus(query);
+    if (censusMatch) {
+      censusMatch.distanceFromOriginMiles = options?.origin
+        ? haversineMiles(options.origin, censusMatch)
+        : null;
+      return censusMatch;
+    }
+  } catch (error) {
+    console.warn('Census geocode failed; trying Photon.', error);
+  }
+
+  try {
+    const matches = await searchAddressesPhoton(query, { limit: 1, origin: options?.origin || null });
+    return matches[0] || null;
+  } catch (error) {
+    console.warn('Photon geocode failed.', error);
+    return null;
+  }
 }
 
 export function haversineMiles(origin, destination) {

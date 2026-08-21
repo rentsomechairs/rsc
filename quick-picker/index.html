@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quick Picker • Rent Some Orders</title>
-  <link rel="stylesheet" href="../assets/css/styles.css" />
+  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v33" />
 </head>
 <body>
   <div id="firebaseLoadingOverlay" class="firebase-loading-overlay hidden" role="status" aria-live="polite"><div class="firebase-loading-card"><span class="section-loading-spinner" aria-hidden="true"></span><strong id="firebaseLoadingText">Loading…</strong></div></div>
@@ -37,7 +37,7 @@
                 <button type="button" id="eventNameSkip" class="btn btn-ghost btn-small">No thank you</button>
               </div>
             </div>
-            <div class="note-block small">Exchange will auto-fill to the day before your event, and return will auto-fill to the day after. You can still change them below.</div>
+            <div class="note-block small">Date and time of the equipment exchanges will be discussed with you before the order is confirmed.</div>
             <div class="step-actions"><button type="button" id="nextStep1" class="btn btn-primary">Next</button></div>
           </div>
         </section>
@@ -67,6 +67,8 @@
                 <label>Equipment / pickup location</label>
                 <select id="quotePickupLocationSelect"></select>
                 <div id="quotePickupLocationHelp" class="small muted" style="margin-top:6px;"></div>
+                <div class="small muted" style="margin-top:6px;">Equipment quantities can be different at each location. Choose the pickup address closest to you when possible.</div>
+                <div id="pickupLocationWarning" class="note-block location-equipment-warning hidden" style="margin-top:10px;"></div>
               </div>
             </div>
             <p class="muted">Choose the category types you want first. Availability below is specific to the location selected above.</p>
@@ -104,30 +106,20 @@
               </button>
               <button type="button" id="fulfillmentDelivery" class="choice-card">
                 <strong>Delivery</strong>
-                <p class="small muted">Get a quick delivery quote by adding your drop off address here.</p>
-                <div class="small">Live quote with address autocomplete.</div>
+                <p class="small muted">Enter the delivery address. A delivery fee will be discussed.</p>
               </button>
             </div>
             <div id="deliveryFields" class="hidden" style="margin-top:16px; display:grid; gap:14px;">
               <div class="form-row">
                 <label>Delivery address</label>
-                <div class="address-autocomplete">
-                  <input id="deliveryAddress" name="rsc_delivery_lookup" type="search" autocomplete="one-time-code" autocapitalize="words" spellcheck="false" inputmode="text" readonly data-lpignore="true" data-1p-ignore="true" data-form-type="other" aria-autocomplete="list" aria-controls="deliveryAddressSuggestions" placeholder="Start typing your drop off address" />
-                  <div id="deliveryAddressSuggestions" class="address-suggestions hidden"></div>
+                <div class="delivery-address-grid">
+                  <input id="deliveryStreet" autocomplete="street-address" placeholder="Street address" />
+                  <input id="deliveryCity" autocomplete="address-level2" placeholder="City" />
+                  <input id="deliveryState" autocomplete="address-level1" placeholder="State" maxlength="2" value="NC" />
+                  <input id="deliveryZip" autocomplete="postal-code" inputmode="numeric" placeholder="ZIP code" />
                 </div>
-                <div id="deliveryLookupStatus" class="small muted" style="margin-top:6px;"></div>
-              </div>
-              <input id="estimatedMiles" name="estimatedMiles" type="hidden" value="0" />
-              <input id="estimatedMinutes" name="estimatedMinutes" type="hidden" value="0" />
-              <div class="review-flag-box delivery-review-box">
-                <div class="delivery-review-copy">
-                  <div class="delivery-review-fee-row"><span>Estimated delivery fee</span><strong id="deliveryFeeInline">$0.00</strong></div>
-                  <div id="deliveryEstimateInline" class="small muted"></div>
-                  <label class="review-flag-check">
-                    <input id="deliveryReviewFlag" name="deliveryReviewFlag" type="checkbox" />
-                    <span><strong>Does this estimation look incorrect?</strong> Mark it for review!</span>
-                  </label>
-                </div>
+                <input id="deliveryAddress" name="deliveryAddress" type="hidden" />
+                <div id="deliveryLookupStatus" class="small muted" style="margin-top:6px;">A delivery fee will be discussed.</div>
               </div>
             </div>
             <div class="step-actions"><button type="button" id="nextStep5" class="btn btn-primary">Next</button></div>
@@ -166,6 +158,6 @@
     <div id="responseMessage" class="hidden"></div>
   </div>
 
-  <script type="module" src="../assets/js/app-quick.js?v=targeted-firestore-writes-v27"></script>
+  <script type="module" src="../assets/js/app-quick.js?v=rental-ux-v33"></script>
 </body>
 </html>

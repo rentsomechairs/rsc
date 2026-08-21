@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, deleteEmployeeAuthAccount, saveEmployeeOrderProgress, saveOwnContractAcceptance } from './store.js?v=targeted-firestore-writes-v27';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, deleteEmployeeAuthAccount, saveEmployeeOrderProgress, saveOwnContractAcceptance } from './store.js?v=rental-ux-v33';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
-import { syncCompletedOrderIncome } from './finance-service.js?v=targeted-firestore-writes-v27';
+import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v33';
 const state = {
   inventory: [],
   orders: [],
@@ -30,6 +30,8 @@ const state = {
   orderActionDelegatesBound: false,
   activeOrderColumn: 'confirmed',
   collapsedColumns: { pending: true, confirmed: false, completed: true },
+  completedOrdersLoaded: false,
+  completedOrdersLoading: false,
   busyCount: 0,
   activeTemplateField: null,
   reminderComposer: null,
@@ -41,7 +43,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'targeted-firestore-writes-v27';
+const ADMIN_VERSION = 'rental-ux-v33';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -324,6 +326,7 @@ function cacheEls() {
     pendingColumn: document.getElementById('pendingColumn'),
     confirmedColumn: document.getElementById('confirmedColumn'),
     completedColumn: document.getElementById('completedColumn'),
+    backToActiveOrdersBtn: document.getElementById('backToActiveOrdersBtn'),
     newInquiryBell: document.getElementById('newInquiryBell'),
     newInquiryBadge: document.getElementById('newInquiryBadge'),
     employeeEarnedBalance: document.getElementById('employeeEarnedBalance'),
@@ -1654,7 +1657,8 @@ function bindLogin() {
     }
   }, 280);
 function bindApp() {
-  els.tabButtons.forEach((btn) => btn.addEventListener('click', () => {
+  els.tabButtons.forEach((btn) => btn.addEventListener('click', async () => {
+    if (['numbers','employees'].includes(btn.dataset.tabBtn) && !state.completedOrdersLoaded && isAdminUser()) await ensureCompletedOrdersLoaded();
     setTab(btn.dataset.tabBtn);
     closeMobileSidebar();
   }));
@@ -1730,16 +1734,22 @@ function bindApp() {
   ['exchangeDate', 'returnDate'].forEach((name) => {
     els.orderForm.elements[name]?.addEventListener('input', () => { els.orderForm.elements[name].dataset.userEdited = 'true'; });
   });
-  document.querySelectorAll('[data-toggle-column]').forEach((btn) => btn.addEventListener('click', () => {
+  document.querySelectorAll('[data-toggle-column]').forEach((btn) => btn.addEventListener('click', async () => {
+    if (btn.dataset.toggleColumn === 'completed' && !state.completedOrdersLoaded) await ensureCompletedOrdersLoaded();
     state.activeOrderColumn = btn.dataset.toggleColumn || 'confirmed';
     applyOrderColumnCollapseState();
   }));
+  els.backToActiveOrdersBtn?.addEventListener('click', () => {
+    unloadCompletedOrders();
+    applyOrderColumnCollapseState();
+    els.confirmedColumn?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
   els.newInquiryBell?.addEventListener('click', () => {
     state.activeTab = 'orders';
-    state.activeOrderColumn = 'pending';
+    state.activeOrderColumn = 'confirmed';
     document.querySelector('[data-tab-btn="orders"]')?.click();
     applyOrderColumnCollapseState();
-    els.pendingColumn?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    els.confirmedColumn?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   els.inventoryForm.addEventListener('submit', handleInventorySave);
   els.settingsForm.addEventListener('submit', handleSettingsSave);
@@ -1950,7 +1960,7 @@ async function loadData() {
   if (state.currentUser?.role === 'admin') state.users = await getUsers().catch(() => []);
   else state.users = [state.currentUser];
   state.settings = await getSettings();
-  const rawOrders = state.currentUser?.role === 'employee' ? await getAssignedOrders(state.currentUser.uid) : await getOrders();
+  const rawOrders = state.currentUser?.role === 'employee' ? await getAssignedOrders(state.currentUser.uid) : await getOpenOrders();
   const normalizedOrders = rawOrders.map((order) => ({
     assignedEmployeeId: '',
     assignedEmployeeName: '',
@@ -2915,10 +2925,11 @@ function ensureOrdersHaveTrackingCodes(orders = []) {
   });
   return { orders: nextOrders, changed };
 }
-function getTrackingLinkForOrder(order = {}) {
+function getTrackingLinkForOrder(order = {}, { admin = false } = {}) {
   const code = encodeURIComponent(order?.trackingCode || '');
   const trackingUrl = new URL('../tracking/', window.location.href);
   trackingUrl.searchParams.set('c', code);
+  if (admin) trackingUrl.searchParams.set('admin', '1');
   return trackingUrl.toString();
 }
 function getReminderTemplates() { return TEMPLATE_DEFAULTS; }
@@ -3441,6 +3452,37 @@ function compareNextActionAsc(a = {}, b = {}) {
   const bk = `${getOrderNextActionDate(b)} ${getOrderNextActionTime(b) || '23:59'}`;
   return ak.localeCompare(bk);
 }
+function unloadCompletedOrders() {
+  state.orders = (state.orders || []).filter((order) => getOrderColumn(order.status) !== 'completed');
+  state.completedOrdersLoaded = false;
+  state.completedOrdersLoading = false;
+  state.activeOrderColumn = 'confirmed';
+  if (els.completedList) els.completedList.innerHTML = '<div class="empty-state">Completed orders load only when you open this archive.</div>';
+  if (els.completedTotal) els.completedTotal.textContent = 'Not loaded';
+  renderOrders();
+}
+
+async function ensureCompletedOrdersLoaded() {
+  if (state.completedOrdersLoaded || state.completedOrdersLoading || isEmployeeUser()) return;
+  state.completedOrdersLoading = true;
+  if (els.completedList) els.completedList.innerHTML = '<div class="section-loading-card"><span class="section-loading-spinner" aria-hidden="true"></span><span>Loading completed orders…</span></div>';
+  try {
+    const completed = await loadCompletedOrders();
+    const merged = new Map((state.orders || []).map((order) => [order.id, order]));
+    completed.forEach((order) => merged.set(order.id, { assignedEmployeeId: '', assignedEmployeeName: '', ...order, paymentStatus: order.paymentStatus === 'Deposit' ? 'Deposit Paid' : order.paymentStatus }));
+    state.orders = [...merged.values()];
+    state.completedOrdersLoaded = true;
+    syncAllOrdersToDepositRule({ touchUpdatedAt: false });
+    renderOrders();
+    renderNumbers();
+    renderEmployees();
+    renderEmployeePayments();
+    renderEmployeeEarnedBalance();
+  } finally {
+    state.completedOrdersLoading = false;
+  }
+}
+
 function renderOrders() {
   const experienceUser = getExperienceUser();
   const visibleOrders = isEmployeeUser()
@@ -3448,13 +3490,17 @@ function renderOrders() {
     : state.orders;
   const pending = visibleOrders.filter((o) => getOrderColumn(o.status) === 'pending').sort(compareNextActionAsc);
   const confirmed = visibleOrders.filter((o) => getOrderColumn(o.status) === 'confirmed').sort(compareNextActionAsc);
+  const active = [...pending, ...confirmed].sort((a, b) => {
+    if (Boolean(a.newInquiry) !== Boolean(b.newInquiry)) return a.newInquiry ? -1 : 1;
+    return compareNextActionAsc(a, b);
+  });
   const completed = visibleOrders.filter((o) => getOrderColumn(o.status) === 'completed').sort(compareCompletedDesc);
-  fillList(els.pendingList, renderOrderGroups(pending, 'pending'), 'No pending orders yet.');
-  fillList(els.confirmedList, renderOrderGroups(confirmed, 'confirmed'), 'No confirmed orders yet.');
-  fillList(els.completedList, renderOrderGroups(completed, 'completed'), 'No completed orders yet.');
-  if (els.pendingTotal) els.pendingTotal.textContent = `Total: ${currency(sumOrderTotals(pending))}`;
-  if (els.confirmedTotal) els.confirmedTotal.textContent = `Total: ${currency(sumOrderTotals(confirmed))}`;
-  if (els.completedTotal) els.completedTotal.textContent = `Total: ${currency(sumOrderTotals(completed, { revenueOnly: true }))}`;
+  fillList(els.pendingList, '', '');
+  fillList(els.confirmedList, renderOrderGroups(active, 'active'), 'No active orders yet.');
+  if (state.completedOrdersLoaded) fillList(els.completedList, renderOrderGroups(completed, 'completed'), 'No completed orders yet.');
+  if (els.pendingTotal) els.pendingTotal.textContent = `Pending: ${currency(sumOrderTotals(pending))}`;
+  if (els.confirmedTotal) els.confirmedTotal.textContent = `Confirmed: ${currency(sumOrderTotals(confirmed))}`;
+  if (els.completedTotal) els.completedTotal.textContent = state.completedOrdersLoaded ? `Total: ${currency(sumOrderTotals(completed, { revenueOnly: true }))}` : 'Not loaded';
   applyOrderColumnCollapseState();
   updateNewInquiryBadge();
   bindOrderCardActions();
@@ -3476,13 +3522,13 @@ function renderOrderGroups(orders, mode) {
   if (!orders.length) return '';
   const groups = new Map();
   orders.forEach((order) => {
-    const key = mode === 'completed' ? (order.completedAt || 'Completed') : (getOrderNextActionDate(order) || 'No action date');
+    const key = mode === 'completed' ? (order.completedAt || 'Completed') : (order.newInquiry ? '__new_inquiries__' : (getOrderNextActionDate(order) || 'No action date'));
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(order);
   });
   return [...groups.entries()].map(([date, groupOrders]) => {
     const highlight = Boolean(state.highlightedOrderDates?.[date]);
-    const upcoming = mode !== 'completed' && isDateInUpcomingBusinessWeek(date);
+    const upcoming = mode !== 'completed' && date !== '__new_inquiries__' && isDateInUpcomingBusinessWeek(date);
     return `
     <div class="order-date-group${highlight ? ' day-highlight-green' : ''}${upcoming ? ' week-highlight-purple' : ''}" data-order-date-group="${safeText(date)}">
       <div class="order-date-heading-row">${formatGroupHeadingHtml(date, mode, groupOrders)}<button type="button" class="btn btn-ghost btn-small" data-toggle-day-highlight="${safeText(date)}">${highlight ? 'Unhighlight' : 'Highlight Day'}</button></div>
@@ -3546,6 +3592,7 @@ function getDaysFromToday(dateStr = '') {
 }
 
 function formatGroupHeadingHtml(date, mode, groupOrders = []) {
+  if (date === '__new_inquiries__') return `<div class="order-date-heading new-inquiry-heading">NEW INQUIRIES — REVIEW FIRST</div>`;
   if (mode === 'completed') return `<div class=\"order-date-heading\">${safeText(formatGroupHeading(date, mode, groupOrders))}</div>`;
   const d = new Date(`${date}T12:00:00`);
   const week = getBusinessWeekOfMonth(date);
@@ -3563,6 +3610,7 @@ function getGroupDayCount(orders = []) {
   }));
 }
 function formatGroupHeading(date, mode, groupOrders = []) {
+  if (date === '__new_inquiries__') return 'New inquiries';
   if (mode === 'completed') {
     const stamp = new Date(date);
     if (Number.isNaN(stamp.getTime())) return 'Completed orders';
@@ -3615,16 +3663,16 @@ function renderOrderAccordion(order, mode) {
           <button class="btn btn-ghost btn-small" type="button" data-copy-update="${order.id}">Copy update</button>
           ${order.status === 'Completed' ? `<button class="btn btn-secondary btn-small" type="button" data-copy-review-request="${order.id}">Copy review request</button>` : ''}
           ${order.fulfillmentType === 'Delivery' && order.address ? `<button class="btn btn-ghost btn-small" type="button" data-copy-delivery-address="${order.id}">Copy delivery address</button><a class="btn btn-ghost btn-small" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.address)}">Open in Google Maps</a>` : ''}
-          <a class="btn btn-ghost btn-small" target="_blank" rel="noopener" href="${safeText(getTrackingLinkForOrder(order))}">Open Tracking</a>
+          <a class="btn btn-ghost btn-small" target="_blank" rel="noopener" href="${safeText(getTrackingLinkForOrder(order, { admin: true }))}">Open Tracking</a>
           <button class="btn btn-ghost btn-small" type="button" data-edit-order="${order.id}">Open Full Editor</button>
           <button class="btn btn-ghost btn-small" type="button" data-delete-order="${order.id}">Delete</button>
         </div>`;
   return `
-    <div class="order-card order-accordion ${order.status === 'In-Progress' ? 'in-progress' : ''} ${isOpen ? 'open' : ''} ${isAdminUser() && order.assignedEmployeeId ? 'employee-assigned-order' : ''}" ${isAdminUser() && order.assignedEmployeeId ? `style="--employee-highlight:${safeText(employeeColors.accent)};--employee-background:${safeText(employeeColors.background)};--employee-badge:${safeText(employeeColors.badge)};--employee-badge-text:${safeText(employeeBadgeText)}"` : ''}>
+    <div class="order-card order-accordion ${order.status === 'Pending' ? 'pending-order' : ''} ${order.status === 'In-Progress' ? 'in-progress' : ''} ${isOpen ? 'open' : ''} ${isAdminUser() && order.assignedEmployeeId ? 'employee-assigned-order' : ''}" ${isAdminUser() && order.assignedEmployeeId ? `style="--employee-highlight:${safeText(employeeColors.accent)};--employee-background:${safeText(employeeColors.background)};--employee-badge:${safeText(employeeColors.badge)};--employee-badge-text:${safeText(employeeBadgeText)}"` : ''}>
       <button type="button" class="order-accordion-summary" data-expand-order="${order.id}">
         <div class="order-summary-main">
           <div class="order-summary-title separated-order-title">${headerTitle}</div>
-          <div class="order-summary-sub order-glance-meta">${headerSub}${order.assignedEmployeeName ? `<span class="badge employee-assigned-chip">Assigned to ${safeText(order.assignedEmployeeName)}</span>` : ''}${order.newInquiry && isAdminUser() ? `<button type="button" class="badge badge-blue new-inquiry-clear" data-clear-new-inquiry="${order.id}" title="Mark this inquiry as seen">New Inquiry</button>` : ''}</div>
+          <div class="order-summary-sub order-glance-meta">${headerSub}${order.assignedEmployeeId && order.assignedEmployeeName ? `<span class="badge employee-assigned-chip">Assigned to ${safeText(order.assignedEmployeeName)}</span>` : ''}${order.newInquiry && isAdminUser() ? `<button type="button" class="badge badge-blue new-inquiry-clear" data-clear-new-inquiry="${order.id}" title="Mark this inquiry as seen">New Inquiry</button>` : ''}</div>
         </div>
         <div class="order-expand-cue"><span>${isOpen ? 'Hide' : 'Details'}</span><span class="order-summary-arrow">⌄</span></div>
       </button>
@@ -3748,8 +3796,11 @@ function bindOrderCardActions() {
       }
       const expandBtn = event.target.closest('[data-expand-order]');
       if (expandBtn) {
-        state.expandedOrderId = state.expandedOrderId === expandBtn.dataset.expandOrder ? null : expandBtn.dataset.expandOrder;
+        const orderId = expandBtn.dataset.expandOrder;
+        const opening = state.expandedOrderId !== orderId;
+        state.expandedOrderId = opening ? orderId : null;
         renderOrders();
+        if (opening && state.orders.find((order) => order.id === orderId)?.newInquiry) clearNewInquiryStatus(orderId);
         return;
       }
       const inlineSaveBtn = event.target.closest('[data-save-inline-order]');
@@ -4132,10 +4183,18 @@ function getPickupAddressCopyOptions() {
   const pickupAddress = state.settings?.pickupAddress || 'the pickup address on file';
   const firstSentence = `Here is the pickup address! ${pickupAddress}.`;
   const lastSentence = 'The pick up location is a small parking lot just outside of my neighborhood';
+  const employeeAddresses = approvedEmployees()
+    .filter((user) => String(user.pickupAddress || '').trim())
+    .map((user) => ({
+      id: `employee-address-${user.uid || user.id}`,
+      label: `${employeeDisplayName(user)} pickup address`,
+      text: String(user.pickupAddress || '').trim()
+    }));
   return [
     { id: 'pickup-short', label: 'Pickup intro + address', text: firstSentence },
     { id: 'pickup-full', label: 'Full pickup message', text: `${firstSentence} ${lastSentence}` },
-    { id: 'pickup-address', label: 'Address only', text: pickupAddress }
+    { id: 'pickup-address', label: 'Main address only', text: pickupAddress },
+    ...employeeAddresses
   ];
 }
 function getCustomCopyPasteTemplates() {
@@ -4772,7 +4831,7 @@ function resetOrderForm(order) {
   const defaultDate = now.toISOString().slice(0, 10);
   const values = order || {
     firstName: '', lastName: '', status: 'Pending', paymentStatus: 'Un-Paid', fulfillmentType: 'Pickup', verbalConfirmation: false,
-    exchangeDate: defaultDate, exchangeTime: '10:00', returnDate: addDays(defaultDate, 1), returnTime: '17:00',
+    exchangeDate: defaultDate, exchangeTime: '19:00', returnDate: addDays(defaultDate, 1), returnTime: '17:00',
     total: 0, adjustedTotal: '', eventDate: '', eventTime: '', eventName: '', address: '', deliveryFee: 0, setupFee: 0, tipAmount: 0, notes: '', depositWaived: false, equipmentStillDiscussing: false
   };
   Object.keys(values).forEach((key) => {
@@ -4788,7 +4847,7 @@ function resetOrderForm(order) {
   if (els.orderForm.elements.verbalConfirmation) els.orderForm.elements.verbalConfirmation.checked = Boolean(order?.verbalConfirmation);
   if (els.orderForm.elements.notes) els.orderForm.elements.notes.value = order?.notes || '';
   setTimeControlValue('eventTime', values.eventTime || '');
-  setTimeControlValue('exchangeTime', values.exchangeTime || '10:00 AM');
+  setTimeControlValue('exchangeTime', values.exchangeTime || '7:00 PM');
   setTimeControlValue('returnTime', values.returnTime || '5:00 PM');
   if (els.orderForm.elements.returnDate) els.orderForm.elements.returnDate.dataset.userEdited = order ? 'true' : 'false';
   setReturnDateFromExchange(!order);
@@ -5059,7 +5118,7 @@ async function handleOrderSave(event) {
     fulfillmentType: form.get('fulfillmentType'),
     verbalConfirmation: Boolean(form.get('verbalConfirmation')),
     assignedEmployeeId: isAdminUser() ? String(form.get('assignedEmployeeId') || '') : (existingOrder?.assignedEmployeeId || ''),
-    assignedEmployeeName: isAdminUser() ? employeeDisplayName(approvedEmployees().find((u) => (u.uid || u.id) === String(form.get('assignedEmployeeId') || '')) || {}) : (existingOrder?.assignedEmployeeName || ''),
+    assignedEmployeeName: isAdminUser() ? (String(form.get('assignedEmployeeId') || '') ? employeeDisplayName(approvedEmployees().find((u) => (u.uid || u.id) === String(form.get('assignedEmployeeId') || '')) || {}) : '') : (existingOrder?.assignedEmployeeName || ''),
     assignedEmployeePickupAddress: isAdminUser() ? String(approvedEmployees().find((u) => (u.uid || u.id) === String(form.get('assignedEmployeeId') || ''))?.pickupAddress || '') : (existingOrder?.assignedEmployeePickupAddress || ''),
     address: form.get('address').trim(),
     exchangeDate: form.get('exchangeDate'),
@@ -5101,6 +5160,7 @@ async function handleOrderSave(event) {
     state.orders.unshift(order);
   }
   await saveSingleOrder(order, existingOrder ? JSON.parse(JSON.stringify(existingOrder)) : null, { actor: 'admin-edit' });
+  if (!existingOrder) await copyTextWithFallback(buildReminderMessage(order), 'Copy the reminder below:');
   closeModals();
   renderOrders();
   renderCalendarView();

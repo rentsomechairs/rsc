@@ -1,9 +1,8 @@
-import { createQuickPickerOrder, getCategories, getInventory, getOrders, getSettings } from './store.js?v=targeted-firestore-writes-v27';
+import { createQuickPickerOrder, getCategories, getInventory, getOpenOrders, getSettings } from './store.js?v=rental-ux-v33';
 import { CONTACT_METHODS, addDays, buildContactMap, currency, overlaps, parseDateTime, safeText, uid, formatShortDate, formatDateTime } from './utils.js';
-import { computeDeliveryEstimate, debounce, geocodeAddress, searchAddresses } from './geo.js';
 import { sendInquiryNotification } from './email-notify.js';
 
-console.log('QUICK PICKER VERSION:', 'targeted-firestore-writes-v27');
+console.log('QUICK PICKER VERSION:', 'rental-ux-v33');
 
 const state = {
   inventory: [],
@@ -14,22 +13,14 @@ const state = {
   eventTime: '12:00',
   eventName: '',
   receiveDate: '',
-  receiveTime: '10:00',
+  receiveTime: '19:00',
   returnDate: '',
   returnTime: '17:00',
   selectedItems: {},
   selectedAccessories: {},
   fulfillmentType: '',
   deliveryAddress: '',
-  deliveryCoords: null,
-  estimatedMiles: 0,
-  estimatedMinutes: 0,
-  deliveryEstimateSource: '',
   deliveryLookupStatus: '',
-  deliverySuggestions: [],
-  deliveryLookupToken: 0,
-  deliveryResolveToken: 0,
-  deliverySelectionActive: false,
   selectedContactMethods: [],
   contactValues: {},
   availabilityOffset: 0,
@@ -38,7 +29,6 @@ const state = {
   summaryVisible: false,
   reviewReady: false,
   notificationResult: null,
-  googleDeliveryWidgetReady: false,
   lastSubmittedOrder: null,
   pickupLocationId: 'main'
 };
@@ -59,12 +49,6 @@ function enforceAccordionState() {
   });
 }
 
-function formatDistanceTag(match) {
-  return Number.isFinite(match?.distanceFromOriginMiles)
-    ? `${match.distanceFromOriginMiles.toFixed(1)} mi from pickup`
-    : '';
-}
-
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
@@ -80,69 +64,6 @@ function requiresDeposit(total = 0) {
 
 function getDepositAmount(total = 0) {
   return requiresDeposit(total) ? roundMoney(Number(total || 0) * DEPOSIT_RATE) : 0;
-}
-
-function hideDeliverySuggestions() {
-  if (!els.deliveryAddressSuggestions) return;
-  els.deliveryAddressSuggestions.classList.add('hidden');
-}
-
-function renderDeliverySuggestions(matches = []) {
-  if (!els.deliveryAddressSuggestions) return;
-  state.deliverySuggestions = Array.isArray(matches) ? matches : [];
-  if (!state.deliverySuggestions.length) {
-    els.deliveryAddressSuggestions.innerHTML = '';
-    hideDeliverySuggestions();
-    return;
-  }
-  els.deliveryAddressSuggestions.innerHTML = state.deliverySuggestions.map((match, index) => `
-    <button type="button" class="address-suggestion${index === 0 ? ' active' : ''}" data-delivery-suggestion="${index}">
-      <div class="address-suggestion-primary">${safeText(match.primaryLine || match.label)}</div>
-      <div class="address-suggestion-secondary">${safeText(match.secondaryLine || match.label)}</div>
-      ${formatDistanceTag(match) ? `<div class="address-suggestion-distance">${safeText(formatDistanceTag(match))}</div>` : ''}
-    </button>
-  `).join('');
-  els.deliveryAddressSuggestions.querySelectorAll('[data-delivery-suggestion]').forEach((button, index) => {
-    button.__deliveryAddressMatch = state.deliverySuggestions[index];
-  });
-  els.deliveryAddressSuggestions.classList.remove('hidden');
-}
-
-async function selectDeliverySuggestion(match) {
-  if (!match || state.deliverySelectionActive) return;
-  state.deliverySelectionActive = true;
-  // Invalidate any autocomplete request that was started while the customer was typing.
-  // Otherwise a late response can replace the list between pointer-down and click.
-  state.deliveryLookupToken += 1;
-  state.deliveryAddress = match.label;
-  state.deliveryCoords = Number.isFinite(Number(match.lat)) && Number.isFinite(Number(match.lon))
-    ? { lat: Number(match.lat), lon: Number(match.lon) }
-    : null;
-  els.deliveryAddress.value = match.label;
-  hideDeliverySuggestions();
-  try {
-    await resolveDeliveryAddress(match.label, match);
-  } finally {
-    state.deliverySelectionActive = false;
-  }
-}
-
-function getDeliveryRatePerMinute() {
-  return 1.67;
-}
-
-function setDeliveryMinutes(minutes, source = 'manual') {
-  const safeMinutes = Math.max(0, Math.round(Number(minutes || 0)));
-  state.estimatedMinutes = safeMinutes;
-  if (els.estimatedMinutes) els.estimatedMinutes.value = safeMinutes ? String(safeMinutes) : '';
-  state.deliveryEstimateSource = source;
-  renderFulfillment();
-  renderSummary();
-  renderActionStates();
-}
-
-function deliveryFeeFromMinutes(minutes) {
-  return Math.round(Math.max(0, Number(minutes || 0)) * getDeliveryRatePerMinute() * 100) / 100;
 }
 
 
@@ -192,7 +113,6 @@ async function init() {
   cacheEls();
   renderQuickLoadingPlaceholders();
   await loadData();
-  await initGoogleDeliveryAutocomplete();
   setDefaultDates();
   state.step = 1;
   state.reviewReady = false;
@@ -256,14 +176,13 @@ function cacheEls() {
     pickupAddress: document.getElementById('pickupAddress'),
     quotePickupLocationSelect: document.getElementById('quotePickupLocationSelect'),
     quotePickupLocationHelp: document.getElementById('quotePickupLocationHelp'),
+    pickupLocationWarning: document.getElementById('pickupLocationWarning'),
+    deliveryStreet: document.getElementById('deliveryStreet'),
+    deliveryCity: document.getElementById('deliveryCity'),
+    deliveryState: document.getElementById('deliveryState'),
+    deliveryZip: document.getElementById('deliveryZip'),
     deliveryAddress: document.getElementById('deliveryAddress'),
-    deliveryAddressSuggestions: document.getElementById('deliveryAddressSuggestions'),
     deliveryLookupStatus: document.getElementById('deliveryLookupStatus'),
-    estimatedMiles: document.getElementById('estimatedMiles'),
-    estimatedMinutes: document.getElementById('estimatedMinutes'),
-    deliveryEstimateInline: document.getElementById('deliveryEstimateInline'),
-    deliveryFeeInline: document.getElementById('deliveryFeeInline'),
-    deliveryReviewFlag: document.getElementById('deliveryReviewFlag'),
     firstName: document.getElementById('firstName'),
     lastName: document.getElementById('lastName'),
     reviewInquiry: document.getElementById('reviewInquiry'),
@@ -310,9 +229,9 @@ function populateQuotePickupLocations() {
   if (!els.quotePickupLocationSelect) return;
   const locations = publicPickupLocations();
   if (!locations.some((loc) => loc.id === state.pickupLocationId)) state.pickupLocationId = 'main';
-  els.quotePickupLocationSelect.innerHTML = locations.map((loc) => `<option value="${safeText(loc.id)}" ${loc.id === state.pickupLocationId ? 'selected' : ''}>${safeText(loc.name || loc.employeeName || 'Pickup Location')}</option>`).join('');
+  els.quotePickupLocationSelect.innerHTML = locations.map((loc) => `<option value="${safeText(loc.id)}" ${loc.id === state.pickupLocationId ? 'selected' : ''}>${safeText(loc.address || loc.name || loc.employeeName || 'Pickup Location')}</option>`).join('');
   const active = activePickupLocation();
-  if (els.quotePickupLocationHelp) els.quotePickupLocationHelp.textContent = active?.address ? `Pickup: ${active.address}` : 'Choose where the equipment will be picked up.';
+  if (els.quotePickupLocationHelp) els.quotePickupLocationHelp.textContent = active?.address ? `Pickup address: ${active.address}` : 'Choose where the equipment will be picked up.';
 }
 function activePickupCoords() { return activePickupLocation()?.pickupCoords || state.settings?.pickupCoords || null; }
 function renderQuickLoadingPlaceholders() {
@@ -330,7 +249,7 @@ async function loadData() {
   setFirebaseBusy(true, 'Loading quote information…');
   try {
   state.inventory = await getInventory();
-  state.orders = await getOrders();
+  state.orders = await getOpenOrders();
   state.settings = await getSettings();
   populateQuotePickupLocations();
   } finally {
@@ -347,21 +266,20 @@ function setDefaultDates() {
   state.returnDate = addDays(state.eventDate, 1);
 }
 
-async function initGoogleDeliveryAutocomplete() {
-  // Do not attach google.maps.places.Autocomplete here. Google moved new projects to
-  // PlaceAutocompleteElement and the legacy widget now throws console warnings.
-  // This tool already uses our custom suggestion list through searchAddresses(), so the
-  // typed-address flow stays working without the deprecated widget.
-  if (!els.deliveryAddress) return;
-  state.googleDeliveryWidgetReady = false;
-  if (!state.deliveryLookupStatus) {
-    state.deliveryLookupStatus = 'Start typing the delivery address, then choose a suggestion. The delivery fee will calculate automatically.';
-  }
-}
-
 
 function bindEvents() {
-  els.quotePickupLocationSelect?.addEventListener('change', () => { state.pickupLocationId = els.quotePickupLocationSelect.value || 'main'; state.selectedItems = {}; state.selectedAccessories = {}; populateQuotePickupLocations(); render(); });
+  els.quotePickupLocationSelect?.addEventListener('change', () => {
+    state.pickupLocationId = els.quotePickupLocationSelect.value || 'main';
+    populateQuotePickupLocations();
+    const affected = selectedOrderItems().filter((item) => Number(item.quantity || 0) > selectedRangeAvailability(item.inventoryId).available);
+    if (els.pickupLocationWarning) {
+      els.pickupLocationWarning.classList.toggle('hidden', !affected.length);
+      els.pickupLocationWarning.innerHTML = affected.length
+        ? `<strong>There was not enough equipment at this location for this order.</strong><div style="margin-top:6px;">Please check equipment and make changes or choose another pickup location.</div><div style="margin-top:6px;"><strong>Affected:</strong> ${affected.map((item) => safeText(item.name)).join(', ')}</div>`
+        : '';
+    }
+    render();
+  });
   els.eventDate.value = state.eventDate;
   els.eventTime.value = state.eventTime;
   els.eventName.value = state.eventName;
@@ -382,80 +300,18 @@ function bindEvents() {
   els.returnDate.addEventListener('input', onReturnInput);
   els.returnTime.addEventListener('input', onReturnInput);
 
-  if (!state.googleDeliveryWidgetReady) {
-    // Keep Chrome/Safari saved-address autofill from covering our own address results.
-    // Starting readonly prevents the browser popup; unlocking on the customer's first
-    // pointer/key interaction still allows normal typing and our custom suggestions.
-    const unlockDeliveryAddress = () => {
-      if (!els.deliveryAddress.hasAttribute('readonly')) return;
-      els.deliveryAddress.removeAttribute('readonly');
-    };
-    els.deliveryAddress.addEventListener('pointerdown', unlockDeliveryAddress, { once: true });
-    els.deliveryAddress.addEventListener('touchstart', unlockDeliveryAddress, { once: true, passive: true });
-    els.deliveryAddress.addEventListener('keydown', unlockDeliveryAddress, { once: true });
-    els.deliveryAddress.addEventListener('focus', () => {
-      window.setTimeout(unlockDeliveryAddress, 0);
-    }, { once: true });
+  const syncDeliveryAddressParts = () => {
+    const parts = [els.deliveryStreet?.value, els.deliveryCity?.value, els.deliveryState?.value, els.deliveryZip?.value]
+      .map((v) => String(v || '').trim());
+    state.deliveryAddress = parts.filter(Boolean).join(', ');
+    if (els.deliveryAddress) els.deliveryAddress.value = state.deliveryAddress;
+    state.deliveryLookupStatus = state.deliveryAddress ? 'A delivery fee will be discussed.' : '';
+    renderFulfillment();
+    renderSummary();
+    renderActionStates();
+  };
+  [els.deliveryStreet, els.deliveryCity, els.deliveryState, els.deliveryZip].forEach((input) => input?.addEventListener('input', syncDeliveryAddressParts));
 
-    const debouncedDeliveryLookup = debounce((query) => lookupDeliverySuggestions(query), 280);
-    els.deliveryAddress.addEventListener('input', () => {
-      state.deliveryLookupToken += 1;
-      state.deliveryResolveToken += 1;
-      state.deliveryAddress = els.deliveryAddress.value.trim();
-      state.deliveryCoords = null;
-      if (!state.deliveryAddress) {
-        state.deliveryLookupStatus = '';
-        renderDeliverySuggestions([]);
-      } else {
-        state.deliveryLookupStatus = '';
-        debouncedDeliveryLookup(state.deliveryAddress);
-      }
-      renderFulfillment();
-      renderActionStates();
-      renderFulfillment();
-      renderSummary();
-      renderActionStates();
-    });
-    els.deliveryAddress.addEventListener('focus', () => {
-      if (state.deliverySuggestions.length) renderDeliverySuggestions(state.deliverySuggestions);
-    });
-    els.deliveryAddress.addEventListener('blur', () => {
-      window.setTimeout(() => hideDeliverySuggestions(), 160);
-    });
-    els.deliveryAddress.addEventListener('change', () => {
-      const typed = els.deliveryAddress.value.trim();
-      // Selecting a suggestion already resolves the exact selected place. Browsers fire a
-      // second change event afterward; resolving that text again can choose a different
-      // worldwide geocoding result and overwrite the customer's selection.
-      if (typed === state.deliveryAddress && state.deliveryCoords) return;
-      state.deliveryAddress = typed;
-      resolveDeliveryAddress(typed);
-    });
-    // Select on pointer-down rather than click. This captures the exact suggestion the
-    // customer touched before blur handlers or a late autocomplete response can replace it.
-    els.deliveryAddressSuggestions?.addEventListener('pointerdown', (event) => {
-      const button = event.target.closest('[data-delivery-suggestion]');
-      if (!button) return;
-      event.preventDefault();
-      const match = button.__deliveryAddressMatch;
-      if (match) selectDeliverySuggestion(match);
-    });
-    els.deliveryAddressSuggestions?.addEventListener('click', (event) => {
-      // Keyboard activation still arrives as a click without pointer-down.
-      const button = event.target.closest('[data-delivery-suggestion]');
-      if (!button || state.deliverySelectionActive) return;
-      event.preventDefault();
-      const match = button.__deliveryAddressMatch;
-      if (match) selectDeliverySuggestion(match);
-    });
-    document.addEventListener('click', (event) => {
-      if (event.target === els.deliveryAddress || els.deliveryAddressSuggestions?.contains(event.target)) return;
-      hideDeliverySuggestions();
-    });
-  } else {
-    hideDeliverySuggestions();
-  }
-  if (els.deliveryReviewFlag) els.deliveryReviewFlag.addEventListener('change', renderSummary);
   els.firstName.addEventListener('input', renderActionStates);
   els.lastName.addEventListener('input', renderActionStates);
 
@@ -475,7 +331,6 @@ function bindEvents() {
   els.nextStep5.addEventListener('click', () => advanceTo(6));
   els.reviewInquiry.addEventListener('click', showReviewSection);
   els.backToContact?.addEventListener('click', () => {
-    state.reviewReady = false;
     renderReviewSection();
     advanceTo(6);
   });
@@ -483,7 +338,7 @@ function bindEvents() {
     button.addEventListener('click', () => {
       const targetStep = Number(button.dataset.stepTarget || 1);
       state.step = Math.min(targetStep, getHighestAllowedStep());
-      if (state.step < 6) state.reviewReady = false;
+      // Once reviewed, edits may be made without forcing a second Review click.
       renderSections();
       const target = document.getElementById(`step${state.step}`);
       target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -492,12 +347,10 @@ function bindEvents() {
 
   els.fulfillmentPickup.addEventListener('click', () => {
     state.fulfillmentType = 'Pickup';
-    hideDeliverySuggestions();
     render();
   });
   els.fulfillmentDelivery.addEventListener('click', () => {
     state.fulfillmentType = 'Delivery';
-    if (state.deliverySuggestions.length) renderDeliverySuggestions(state.deliverySuggestions);
     render();
   });
 
@@ -507,95 +360,6 @@ function bindEvents() {
 }
 
 
-async function lookupDeliverySuggestions(query) {
-  if (!els.deliveryAddressSuggestions) return;
-  const text = String(query || '').trim();
-  const token = ++state.deliveryLookupToken;
-  if (text.length < 3) {
-    renderDeliverySuggestions([]);
-    state.deliveryLookupStatus = text ? 'Keep typing for address suggestions.' : '';
-    renderFulfillment();
-    return;
-  }
-  try {
-    const matches = await searchAddresses(text, { limit: 6, origin: activePickupCoords(), context: state.settings || null });
-    if (token !== state.deliveryLookupToken) return;
-    renderDeliverySuggestions(matches);
-    state.deliveryLookupStatus = matches.length
-      ? ''
-      : 'No suggestions found.';
-  } catch (error) {
-    if (token !== state.deliveryLookupToken) return;
-    renderDeliverySuggestions([]);
-    state.deliveryLookupStatus = error?.message || 'Google address autocomplete is unavailable right now.';
-  }
-  renderFulfillment();
-}
-
-async function resolveDeliveryAddress(query, preselectedMatch = null) {
-  const text = String(query || '').trim();
-  if (!text || state.fulfillmentType !== 'Delivery') return;
-  const resolveToken = ++state.deliveryResolveToken;
-  state.deliveryAddress = text;
-  if (!state.settings?.pickupCoords?.lat && !state.settings?.pickupCoords?.lon) {
-    state.deliveryLookupStatus = 'Could not calculate route for that address.';
-    renderFulfillment();
-    return;
-  }
-  try {
-    state.deliveryLookupStatus = 'Calculating delivery distance…';
-    renderFulfillment();
-    const preselectedHasCoords = preselectedMatch
-      && Number.isFinite(Number(preselectedMatch.lat))
-      && Number.isFinite(Number(preselectedMatch.lon));
-    const destination = preselectedHasCoords
-      ? preselectedMatch
-      : await geocodeAddress(text, { origin: activePickupCoords(), context: state.settings || null });
-    if (resolveToken !== state.deliveryResolveToken) return;
-    if (!destination) {
-      state.deliveryLookupStatus = 'Address not matched. Please check the address so we can calculate delivery automatically.';
-      renderFulfillment();
-      return;
-    }
-    state.deliveryAddress = destination.label || text;
-    const lat = Number(destination.lat);
-    const lon = Number(destination.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-      state.deliveryLookupStatus = 'Could not calculate route for that address.';
-      state.deliveryCoords = null;
-      state.estimatedMinutes = 0;
-      if (els.estimatedMinutes) els.estimatedMinutes.value = '';
-      renderFulfillment();
-      renderSummary();
-      renderActionStates();
-      return;
-    }
-    state.deliveryCoords = { lat, lon };
-    els.deliveryAddress.value = state.deliveryAddress;
-    const estimate = await computeDeliveryEstimate(activePickupCoords(), state.deliveryCoords, state.settings || null);
-    if (resolveToken !== state.deliveryResolveToken) return;
-    state.estimatedMiles = Number(estimate.roundTripMiles.toFixed(1));
-    if (els.estimatedMiles) els.estimatedMiles.value = state.estimatedMiles;
-    const minutes = Number.isFinite(estimate.oneWayMinutes) ? estimate.oneWayMinutes : 0;
-    if (minutes) {
-      setDeliveryMinutes(minutes, estimate.source || 'auto-minutes');
-      state.deliveryLookupStatus = '';
-    } else {
-      state.estimatedMinutes = 0;
-      if (els.estimatedMinutes) els.estimatedMinutes.value = '';
-      state.deliveryEstimateSource = estimate.source || 'auto-no-minutes';
-      state.deliveryLookupStatus = 'Could not calculate route for that address.';
-    }
-  } catch (error) {
-    if (resolveToken !== state.deliveryResolveToken) return;
-    state.estimatedMinutes = 0;
-    if (els.estimatedMinutes) els.estimatedMinutes.value = '';
-    state.deliveryLookupStatus = 'Could not calculate route for that address.';
-  }
-  renderFulfillment();
-  renderSummary();
-  renderActionStates();
-}
 
 function onEventInput() {
   state.eventDate = els.eventDate.value;
@@ -633,7 +397,7 @@ function syncRange() {
 
 function advanceTo(nextStep) {
   state.step = Math.min(nextStep, getHighestAllowedStep());
-  if (state.step < 6) state.reviewReady = false;
+  // Preserve review readiness while the customer makes corrections.
   renderSections();
   const target = document.getElementById(`step${state.step}`);
   target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -674,6 +438,7 @@ els.mobileTotalBar.classList.toggle('hidden', state.submitted);
           ? 'There is no need to submit it again. Our team will reach out soon.'
           : 'Your quote request was submitted successfully. Someone from our team will reach out as soon as possible.'}</div>
         <p class="muted" style="margin:14px 0 0;">We appreciate the opportunity to help with your event.</p>
+        <div class="part-time-response-warning">As we are currently part time, response time may be slower than expected. We apologize for any delay.</div>
         <div class="step-actions step-actions-left">
           <button type="button" id="placeAnotherOrder" class="btn btn-primary">Submit a different request</button>
         </div>
@@ -707,6 +472,11 @@ function renderSections() {
 }
 
 function renderActionStates() {
+  const affected = selectedOrderItems().filter((item) => Number(item.quantity || 0) > selectedRangeAvailability(item.inventoryId).available);
+  if (els.pickupLocationWarning) {
+    els.pickupLocationWarning.classList.toggle('hidden', !affected.length);
+    els.pickupLocationWarning.innerHTML = affected.length ? `<strong>There was not enough equipment at this location for this order.</strong><div style="margin-top:6px;">Please check equipment and make changes or choose another pickup location.</div><div style="margin-top:6px;"><strong>Affected:</strong> ${affected.map((item) => safeText(item.name)).join(', ')}</div>` : '';
+  }
   const canStep1 = hasReceiveSelection();
   const canStep2 = hasValidReturnRange();
   const canStep3 = hasSelectedCategories();
@@ -729,7 +499,11 @@ function renderActionStates() {
 
 
 function renderCategories() {
-  const categories = ['All Categories', ...getCategories()];
+  const stockedInventory = state.inventory.filter((item) => locationStock(item.id) > 0 || Number(state.selectedItems[item.id] || 0) > 0);
+  const availableCategories = [...new Set(stockedInventory.filter((item) => locationStock(item.id) > 0).map((item) => item.category).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
+  const validSelected = [...state.selectedCategories].filter((key) => key === '__all__' || availableCategories.includes(key));
+  state.selectedCategories = new Set(validSelected.length ? validSelected : ['__all__']);
+  const categories = ['All Categories', ...availableCategories];
   els.categoryChips.innerHTML = categories.map((category, index) => {
     const key = index === 0 ? '__all__' : category;
     const active = state.selectedCategories.has(key);
@@ -756,8 +530,9 @@ function hasSelectedCategories() {
 }
 
 function getVisibleInventory() {
-  if (state.selectedCategories.has('__all__')) return state.inventory;
-  return state.inventory.filter((item) => state.selectedCategories.has(item.category));
+  const stockedHere = state.inventory.filter((item) => locationStock(item.id) > 0 || Number(state.selectedItems[item.id] || 0) > 0);
+  if (state.selectedCategories.has('__all__')) return stockedHere;
+  return stockedHere.filter((item) => state.selectedCategories.has(item.category));
 }
 
 function hasReceiveSelection() {
@@ -771,6 +546,11 @@ function hasValidReturnRange() {
 }
 
 function renderAvailabilityAndChooser() {
+  const affected = selectedOrderItems().filter((item) => Number(item.quantity || 0) > selectedRangeAvailability(item.inventoryId).available);
+  if (els.pickupLocationWarning) {
+    els.pickupLocationWarning.classList.toggle('hidden', !affected.length);
+    els.pickupLocationWarning.innerHTML = affected.length ? `<strong>There was not enough equipment at this location for this order.</strong><div style="margin-top:6px;">Please check equipment and make changes or choose another pickup location.</div><div style="margin-top:6px;"><strong>Affected:</strong> ${affected.map((item) => safeText(item.name)).join(', ')}</div>` : '';
+  }
   const visible = getVisibleInventory();
   renderAvailabilityBoard(visible);
   renderItemChooser(visible);
@@ -888,10 +668,11 @@ function renderChooserItem(item) {
   const selectedQty = Number(state.selectedItems[item.id] || 0);
   const availabilityNow = selectedRangeAvailability(item.id);
   const isSelected = selectedQty > 0;
+  const locationShortage = isSelected && selectedQty > availabilityNow.available;
   const accessories = normalizeAccessories(item.accessories);
   const selectedAccessoryIds = getSelectedAccessoryIds(item.id);
   return `
-    <div class="picker-card compact-picker-card ${isSelected ? 'selected' : ''}">
+    <div class="picker-card compact-picker-card ${isSelected ? 'selected' : ''} ${locationShortage ? 'location-shortage' : ''}">
       <div class="compact-picker-main">
         <img class="picker-image compact" src="${getDisplayImageForPickerItem(item)}" alt="${safeText(item.name)}" />
         <div class="stack-sm picker-item-content">
@@ -899,6 +680,7 @@ function renderChooserItem(item) {
           <span class="small">${safeText(item.description || '')}</span>
           <div class="small muted">${currency(item.price)} per unit</div>
           <div><span class="badge badge-green">Available: ${availabilityNow.available}</span> <span class="badge badge-blue">Confirmed: ${availabilityNow.confirmed}</span> <span class="badge badge-yellow">Pending: ${availabilityNow.pending}</span></div>
+          ${locationShortage ? '<div class="equipment-check-warning">Please check equipment and make changes or choose another pickup location</div>' : ''}
           ${isSelected && accessories.length ? `
             <div class="accessory-picker-list">
               ${accessories.map((accessory) => `
@@ -999,8 +781,12 @@ function availabilityForSingleDay(inventoryId, date) {
   return range.available;
 }
 
+function hasLocationStockIssues() {
+  return selectedOrderItems().some((item) => Number(item.quantity || 0) > selectedRangeAvailability(item.inventoryId).available);
+}
+
 function hasSelectedEquipment() {
-  return selectedOrderItems().length > 0;
+  return selectedOrderItems().length > 0 && !hasLocationStockIssues();
 }
 
 function isValidPhone(value) {
@@ -1071,7 +857,7 @@ function paintContactInputs() {
 
 function hasFulfillmentSelection() {
   if (state.fulfillmentType === 'Pickup') return true;
-  if (state.fulfillmentType === 'Delivery') return Boolean((els.deliveryAddress.value || '').trim());
+  if (state.fulfillmentType === 'Delivery') return Boolean((els.deliveryStreet?.value || '').trim() && (els.deliveryCity?.value || '').trim() && (els.deliveryState?.value || '').trim() && (els.deliveryZip?.value || '').trim());
   return false;
 }
 
@@ -1098,13 +884,8 @@ function renderFulfillment() {
   els.pickupAddress.textContent = pickupLocation?.address || state.settings.pickupAddress || 'Add pickup address in admin settings.';
   populateQuotePickupLocations();
   if (els.deliveryLookupStatus) els.deliveryLookupStatus.textContent = state.deliveryLookupStatus || '';
-  if (els.deliveryEstimateInline) els.deliveryEstimateInline.textContent = state.deliveryLookupStatus || '';
-  if (els.deliveryFeeInline) {
-    const fee = state.fulfillmentType === 'Delivery' ? deliveryFeeFromMinutes(state.estimatedMinutes) : 0;
-    els.deliveryFeeInline.textContent = state.fulfillmentType === 'Delivery' ? currency(fee) : 'Pickup selected';
-  }
-  if (state.fulfillmentType === 'Delivery' && !state.deliveryLookupStatus) {
-    els.deliveryLookupStatus.textContent = 'Enter the delivery address to calculate the delivery fee automatically.';
+  if (state.fulfillmentType === 'Delivery' && !state.deliveryLookupStatus && els.deliveryLookupStatus) {
+    els.deliveryLookupStatus.textContent = 'A delivery fee will be discussed.';
   }
 }
 
@@ -1135,14 +916,11 @@ function selectedOrderItems() {
 function computeTotals() {
   const items = selectedOrderItems();
   const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
-  const deliveryFee = state.fulfillmentType === 'Delivery'
-    ? deliveryFeeFromMinutes(state.estimatedMinutes)
-    : 0;
   return {
     items,
     subtotal,
-    deliveryFee,
-    total: subtotal + deliveryFee
+    deliveryFee: 0,
+    total: subtotal
   };
 }
 
@@ -1165,17 +943,15 @@ function renderReviewSection() {
       <div class="kv-row"><span>Name</span><strong>${safeText((els.firstName.value || '').trim())} ${safeText((els.lastName.value || '').trim())}</strong></div>
       <div class="kv-row"><span>Event</span><strong>${safeText(state.eventName || 'No event provided')}</strong></div>
       <div class="kv-row"><span>Event date</span><strong>${safeText(formatDateTime(state.eventDate, state.eventTime))}</strong></div>
-      <div class="kv-row"><span>Exchange</span><strong>${safeText(formatDateTime(state.receiveDate, state.receiveTime))}</strong></div>
-      <div class="kv-row"><span>Return</span><strong>${safeText(formatDateTime(state.returnDate, state.returnTime))}</strong></div>
+      <div class="note-block small">Date and time of the equipment exchanges will be discussed before confirmation.</div>
       <div class="kv-row"><span>Fulfillment</span><strong>${safeText(state.fulfillmentType || '--')}</strong></div>
       <div class="kv-row"><span>${state.fulfillmentType === 'Delivery' ? 'Delivery address' : 'Pickup address'}</span><strong>${safeText(state.fulfillmentType === 'Delivery' ? (els.deliveryAddress.value || state.deliveryAddress || '--') : (activePickupLocation()?.address || state.settings.pickupAddress || '--'))}</strong></div>
       ${contactLines}
       <div class="hr"></div>
       ${itemsHtml}
       <div class="hr"></div>
-      <div class="kv-row"><span>Delivery fee</span><strong>${state.fulfillmentType === 'Delivery' ? currency(deliveryFee) : 'Pickup selected'}</strong></div>
+      ${state.fulfillmentType === 'Delivery' ? '<div class="note-block small"><strong>Delivery fee:</strong> A delivery fee will be discussed.</div>' : '<div class="kv-row"><span>Delivery fee</span><strong>Pickup selected</strong></div>'}
       <div class="kv-row"><span>Order total</span><strong>${currency(total)}</strong></div>
-      ${els.deliveryReviewFlag?.checked ? '<div class="note-block small">Delivery estimate was marked for review.</div>' : ''}
       <div class="review-submit-inline"><button type="submit" class="btn btn-primary review-submit-inline-btn" ${canSubmit && state.reviewReady ? '' : 'disabled'}>Submit</button></div>
     </div>`;
   els.reviewSection?.classList.toggle('hidden', !state.reviewReady);
@@ -1208,10 +984,12 @@ function renderSummary() {
   updateFloatingTotalVisibility();
 }
 
+
 function showReviewSection() {
   if (!hasValidContactSection()) return;
   state.reviewReady = true;
   renderReviewSection();
+  renderFulfillment();
   renderSections();
   renderActionStates();
 }
@@ -1294,13 +1072,13 @@ async function handleSubmit(event) {
     exchangeTime: state.receiveTime,
     returnDate: state.returnDate,
     returnTime: state.returnTime,
-    deliveryMiles: Number(form.get('estimatedMiles') || 0),
-    deliveryMinutes: Number(form.get('estimatedMinutes') || state.estimatedMinutes || 0),
+    deliveryMiles: 0,
+    deliveryMinutes: 0,
     deliveryFee,
-    deliveryNeedsReview: Boolean(form.get('deliveryReviewFlag')),
-    deliveryEstimateSource: state.fulfillmentType === 'Delivery' ? (state.deliveryEstimateSource || (Number(state.estimatedMinutes || 0) > 0 ? 'auto-minutes' : '')) : '',
-    deliveryCoords: state.fulfillmentType === 'Delivery' ? state.deliveryCoords : null,
-    pickupCoordsSnapshot: state.fulfillmentType === 'Delivery' ? (activePickupCoords() || null) : null,
+    deliveryNeedsReview: state.fulfillmentType === 'Delivery',
+    deliveryEstimateSource: '',
+    deliveryCoords: null,
+    pickupCoordsSnapshot: null,
     requestedPickupLocationId: activePickupLocation()?.id || 'main',
     requestedPickupLocationName: activePickupLocation()?.name || '',
     requestedPickupAddress: activePickupLocation()?.address || '',
@@ -1366,12 +1144,7 @@ function resetAfterSubmit() {
   state.selectedContactMethods = [];
   state.contactValues = {};
   state.fulfillmentType = '';
-  state.estimatedMiles = 0;
-  state.estimatedMinutes = 0;
   state.deliveryAddress = '';
-  state.deliverySuggestions = [];
-  state.deliveryCoords = null;
-  state.deliveryEstimateSource = '';
   state.deliveryLookupStatus = '';
   state.reviewReady = false;
   state.notificationResult = null;
@@ -1382,7 +1155,8 @@ function resetAfterSubmit() {
   state.lastSubmittedOrder = null;
   state.pickupLocationId = 'main';
   populateQuotePickupLocations();
-  if (els.deliveryReviewFlag) els.deliveryReviewFlag.checked = false;
+  [els.deliveryStreet, els.deliveryCity, els.deliveryZip].forEach((input) => { if (input) input.value = ''; });
+  if (els.deliveryState) els.deliveryState.value = 'NC';
   setDefaultDates();
   els.eventDate.value = state.eventDate;
   els.eventTime.value = state.eventTime;

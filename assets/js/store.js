@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminHttpFunction } from './firebase-service.js?v=ticket-single-read-v28';
+import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminHttpFunction } from './firebase-service.js?v=rental-ux-v33';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -149,7 +149,7 @@ const seedOrders = [
     paymentStatus: 'Un-Paid',
     fulfillmentType: 'Pickup',
     exchangeDate: futureDate(1),
-    exchangeTime: '10:00',
+    exchangeTime: '19:00',
     returnDate: futureDate(2),
     returnTime: '17:00',
     total: 55,
@@ -311,6 +311,32 @@ export async function getOrders() {
   const items = await listCollection(COLLECTIONS.orders);
   cacheOrders = items;
   return clone(cacheOrders);
+}
+
+export async function getOpenOrders() {
+  if (!isFirebaseEnabled()) {
+    hydrateCachesFromLocal();
+    return clone(cacheOrders.filter((order) => String(order.status || '') !== 'Completed'));
+  }
+  const statuses = ['Pending', 'Confirmed', 'In-Progress'];
+  const groups = await Promise.all(statuses.map((status) => listCollectionWhere(COLLECTIONS.orders, 'status', '==', status)));
+  const items = groups.flat();
+  const merged = new Map(cacheOrders.map((item) => [item.id, item]));
+  items.forEach((item) => merged.set(item.id, item));
+  cacheOrders = [...merged.values()];
+  return clone(items);
+}
+
+export async function getCompletedOrders() {
+  if (!isFirebaseEnabled()) {
+    hydrateCachesFromLocal();
+    return clone(cacheOrders.filter((order) => String(order.status || '') === 'Completed'));
+  }
+  const items = await listCollectionWhere(COLLECTIONS.orders, 'status', '==', 'Completed');
+  const merged = new Map(cacheOrders.map((item) => [item.id, item]));
+  items.forEach((item) => merged.set(item.id, item));
+  cacheOrders = [...merged.values()];
+  return clone(items);
 }
 
 function summarizeOrderForLog(order = {}) {
@@ -919,7 +945,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js?v=targeted-firestore-writes-v27');
+  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v33');
   return getDocById(COLLECTIONS.reviews, code);
 }
 
