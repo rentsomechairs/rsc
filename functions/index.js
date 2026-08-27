@@ -1,4 +1,4 @@
-const { onRequest } = require("firebase-functions/v2/https");
+const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
 
@@ -58,6 +58,43 @@ exports.deleteEmployeeAuth = onRequest(
     } catch (error) {
       console.error("deleteEmployeeAuth failed", error);
       return res.status(403).json({ ok: false, error: error?.message || "Employee authentication deletion failed." });
+    }
+  }
+);
+
+
+exports.deleteEmployeeAuthCallable = onCall(
+  { region: "us-central1", timeoutSeconds: 60, memory: "256MiB" },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "You must be signed in.");
+    }
+    if (request.auth.uid !== OWNER_UID) {
+      throw new HttpsError("permission-denied", "Owner authorization is required.");
+    }
+
+    const uid = String(request.data?.uid || "").trim();
+    if (!uid || uid === OWNER_UID) {
+      throw new HttpsError("invalid-argument", "A valid employee UID is required.");
+    }
+
+    try {
+      const profile = await admin.firestore().collection("users").doc(uid).get();
+      if (profile.exists && profile.data()?.role !== "employee") {
+        throw new HttpsError("failed-precondition", "The requested account is not an employee.");
+      }
+
+      try {
+        await admin.auth().deleteUser(uid);
+      } catch (error) {
+        if (error?.code !== "auth/user-not-found") throw error;
+      }
+
+      return { ok: true, uid };
+    } catch (error) {
+      console.error("deleteEmployeeAuthCallable failed", error);
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError("internal", error?.message || "Employee authentication deletion failed.");
     }
   }
 );

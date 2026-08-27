@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminHttpFunction } from './firebase-service.js?v=rental-ux-v33';
+import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v34';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -770,7 +770,7 @@ export async function deleteUserProfile(uid) {
 export async function deleteEmployeeAuthAccount(uid) {
   if (!uid) throw new Error('Employee UID is required.');
   if (!isFirebaseEnabled()) throw new Error('Firebase is required to delete an authentication account.');
-  return callAdminHttpFunction('deleteEmployeeAuth', { uid });
+  return callAdminFunction('deleteEmployeeAuthCallable', { uid });
 }
 
 export async function signupEmployee(data) {
@@ -945,7 +945,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v33');
+  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v34');
   return getDocById(COLLECTIONS.reviews, code);
 }
 
