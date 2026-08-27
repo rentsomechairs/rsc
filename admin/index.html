@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Admin • Rent Some Orders</title>
-  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v34" />
+  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v39" />
 </head>
-<body>
+<body class="admin-app-page">
   <div id="loginView" class="login-shell hidden">
     <div class="login-card">
       <div class="eyebrow">Admin Only</div>
@@ -35,6 +35,7 @@
         <button class="nav-btn active" data-tab-btn="orders"><span class="nav-icon">▦</span><span>Orders</span></button>
         <button class="nav-btn admin-only" data-tab-btn="route"><span class="nav-icon">↗</span><span>Delivery Route</span></button>
         <button class="nav-btn admin-only" data-tab-btn="calendar"><span class="nav-icon">□</span><span>Quick Peek</span></button>
+        <button class="nav-btn" data-tab-btn="schedule"><span class="nav-icon">◷</span><span>Schedule</span></button>
 
         <div class="nav-section-label admin-only">Operations</div>
         <button class="nav-btn admin-only" data-tab-btn="inventory"><span class="nav-icon">◇</span><span>Inventory</span></button>
@@ -88,8 +89,15 @@
             <h2 style="margin:0;">Orders</h2>
             <div class="muted small">Pending stays unreserved. Confirmed and In-Progress reduce stock.</div>
           </div>
-          <button class="btn btn-primary admin-only" id="addOrderBtn">Add Order</button>
+          <div class="orders-header-actions">
+            <div class="segmented-view-toggle" id="ordersViewToggle" aria-label="Orders view">
+              <button type="button" class="active" data-orders-view="list">List</button>
+              <button type="button" data-orders-view="calendar">Calendar</button>
+            </div>
+            <button class="btn btn-primary admin-only" id="addOrderBtn">Add Order</button>
+          </div>
         </div>
+        <div id="ordersListView">
         <div class="collapsed-columns-rail" id="collapsedColumnsRail"></div>
         <div class="columns columns-orders active-orders-layout" id="ordersColumns">
           <div class="column column-main active-orders-column" id="confirmedColumn" data-column="confirmed">
@@ -102,6 +110,18 @@
             <div id="completedList" class="order-list"><div class="empty-state">Completed orders load only when you open this archive.</div></div>
           </div>
           <div id="pendingColumn" class="hidden" data-column="pending"><div id="pendingList"></div></div>
+        </div>
+        </div>
+        <div id="ordersCalendarView" class="hidden orders-calendar-shell">
+          <div class="orders-calendar-toolbar">
+            <div class="button-row">
+              <button type="button" class="btn btn-ghost btn-small" id="ordersCalendarPrevBtn">←</button>
+              <button type="button" class="btn btn-ghost btn-small" id="ordersCalendarTodayBtn">Today</button>
+              <button type="button" class="btn btn-ghost btn-small" id="ordersCalendarNextBtn">→</button>
+            </div>
+            <h3 id="ordersCalendarMonthLabel" style="margin:0;"></h3>
+          </div>
+          <div id="ordersMonthCalendar" class="orders-month-calendar"></div>
         </div>
       </section>
 
@@ -127,15 +147,39 @@
         <div class="card" style="padding:18px;">
           <div class="calendar-toolbar">
             <button type="button" class="btn btn-ghost btn-small" id="calendarPrevBtn">←</button>
-            <label class="quick-peek-date-field"><span>Exchange Date</span><input type="date" id="quickPeekExchangeDateInput" /></label>
+            <label class="quick-peek-date-field quick-peek-secondary hidden" id="quickPeekExchangeField"><span>Exchange Date</span><input type="date" id="quickPeekExchangeDateInput" /></label>
             <label class="quick-peek-date-field"><span>Event Date</span><input type="date" id="calendarDateInput" /></label>
-            <label class="quick-peek-date-field"><span>Return Date</span><input type="date" id="quickPeekReturnDateInput" /></label>
+            <label class="quick-peek-date-field quick-peek-secondary hidden" id="quickPeekReturnField"><span>Return Date</span><input type="date" id="quickPeekReturnDateInput" /></label>
             <button type="button" class="btn btn-ghost btn-small" id="calendarTodayBtn">Today</button>
             <button type="button" class="btn btn-ghost btn-small" id="calendarNextBtn">→</button>
-            <label class="quick-peek-date-field"><span>Location</span><select id="quickPeekLocationSelect"></select></label>
+            <label class="quick-peek-date-field quick-peek-secondary hidden" id="quickPeekLocationField"><span>Location</span><select id="quickPeekLocationSelect"></select></label>
             <div id="calendarDateLabel" class="small muted"></div>
           </div>
           <div id="calendarAvailabilityBoard" class="calendar-availability-board"></div>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-tab-panel="schedule">
+        <div class="section-header">
+          <div><h2 style="margin:0;">Schedule</h2><div class="muted small">Set a typical week, then override individual dates when your availability changes.</div></div>
+          <label class="form-row admin-only schedule-person-select" style="margin:0;"><span>Schedule for</span><select id="schedulePersonSelect"></select></label>
+        </div>
+        <div class="schedule-layout">
+          <div class="card schedule-typical-card">
+            <div class="section-header schedule-typical-summary"><div><strong>Typical week</strong><div class="small muted">This repeats every week unless a date change below overrides it.</div></div><button type="button" class="btn btn-secondary btn-small" id="editWeeklyScheduleBtn" aria-expanded="false">Edit Weekly Schedule</button></div>
+            <div id="weeklyScheduleEditor" class="weekly-schedule-editor hidden">
+              <div id="typicalScheduleGrid" class="typical-schedule-grid"></div>
+              <div class="schedule-weekly-actions"><div id="scheduleSaveStatus" class="small muted"></div><button type="button" class="btn btn-primary btn-small" id="saveTypicalScheduleBtn">Save Weekly Schedule</button></div>
+            </div>
+          </div>
+          <div class="card schedule-changes-card">
+            <div class="schedule-calendar-head">
+              <div class="button-row"><button type="button" class="btn btn-ghost btn-small" id="schedulePrevMonthBtn">←</button><button type="button" class="btn btn-ghost btn-small" id="scheduleTodayBtn">Today</button><button type="button" class="btn btn-ghost btn-small" id="scheduleNextMonthBtn">→</button></div>
+              <h3 id="scheduleMonthLabel" style="margin:0;"></h3>
+              <button type="button" class="btn btn-primary btn-small" id="scheduleAddChangeBtn">Add Change</button>
+            </div>
+            <div id="scheduleMonthCalendar" class="schedule-month-calendar"></div>
+          </div>
         </div>
       </section>
 
@@ -375,6 +419,16 @@
         </form>
       </section>
     </main>
+  </div>
+
+  <div class="modal-backdrop" id="scheduleChangeModalWrap">
+    <div class="modal schedule-change-modal" role="dialog" aria-modal="true" aria-labelledby="scheduleChangeModalTitle">
+      <div class="section-header">
+        <div><h2 id="scheduleChangeModalTitle" style="margin:0;">Schedule Change</h2><div class="small muted">Apply the same availability change to one date, a date range, or several separate dates.</div></div>
+        <button type="button" class="btn btn-ghost" data-close-schedule-change>Close</button>
+      </div>
+      <div id="scheduleChangeEditor"></div>
+    </div>
   </div>
 
   <div class="modal-backdrop" id="orderModalWrap">
@@ -628,6 +682,7 @@
 
   <nav id="employeeMobileNav" class="employee-mobile-nav employee-only hidden" aria-label="Employee navigation">
     <button class="employee-mobile-nav-btn" type="button" data-tab-btn="orders"><span>▦</span><strong>Orders</strong></button>
+    <button class="employee-mobile-nav-btn" type="button" data-tab-btn="schedule"><span>◷</span><strong>Schedule</strong></button>
     <button class="employee-mobile-nav-btn" type="button" data-tab-btn="payments"><span>$</span><strong>Payments</strong></button>
     <button class="employee-mobile-nav-btn" type="button" data-tab-btn="documents"><span>≡</span><strong>Documents</strong></button>
   </nav>
@@ -639,6 +694,6 @@
     </div>
   </div>
 
-  <script type="module" src="../assets/js/app-admin.js?v=rental-ux-v34"></script>
+  <script type="module" src="../assets/js/app-admin.js?v=rental-ux-v39"></script>
 </body>
 </html>

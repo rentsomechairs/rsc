@@ -4,7 +4,7 @@
 - Added `deleteEmployeeAuthCallable` in `functions/index.js`.
 - Callable authentication checks the signed-in Firebase user and restricts deletion to the owner UID.
 - Existing `deleteEmployeeAuth` HTTP function remains in place for compatibility, but the admin UI no longer uses it.
-- Cache-busting version updated to `rental-ux-v34`.
+- Cache-busting version updated to `rental-ux-v35`.
 
 ## Deployment
 

@@ -132,6 +132,14 @@ service cloud.firestore {
       allow delete: if isMe();
     }
 
+
+    match /schedules/{uid} {
+      allow get: if isMe() || (isSignedIn() && request.auth.uid == uid);
+      allow list: if isMe();
+      allow create, update: if isMe() || (isApprovedEmployee() && request.auth.uid == uid);
+      allow delete: if isMe();
+    }
+
     match /settings/{docId} {
       allow read: if true;
       allow write: if isMe();

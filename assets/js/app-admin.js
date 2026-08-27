@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, deleteEmployeeAuthAccount, saveEmployeeOrderProgress, saveOwnContractAcceptance } from './store.js?v=rental-ux-v34';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule } from './store.js?v=rental-ux-v39';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
-import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v34';
+import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v39';
 const state = {
   inventory: [],
   orders: [],
@@ -37,13 +37,22 @@ const state = {
   reminderComposer: null,
   quickPeekLocationId: 'main',
   viewAsEmployee: null,
-  editingContractEmployeeId: null
+  editingContractEmployeeId: null,
+  ordersView: 'list',
+  ordersCalendarDate: new Date().toISOString().slice(0, 10),
+  schedules: [],
+  schedulePersonId: '',
+  scheduleCalendarDate: new Date().toISOString().slice(0, 10),
+  scheduleEditingDate: '',
+  scheduleChangeSelectionMode: 'individual',
+  scheduleChangeSelectedDates: [],
+  quickPeekEventChosen: false
 };
 const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'rental-ux-v34';
+const ADMIN_VERSION = 'rental-ux-v39';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -332,6 +341,14 @@ function cacheEls() {
     employeeEarnedBalance: document.getElementById('employeeEarnedBalance'),
     collapsedColumnsRail: document.getElementById('collapsedColumnsRail'),
     addOrderBtn: document.getElementById('addOrderBtn'),
+    ordersViewToggle: document.getElementById('ordersViewToggle'),
+    ordersListView: document.getElementById('ordersListView'),
+    ordersCalendarView: document.getElementById('ordersCalendarView'),
+    ordersCalendarPrevBtn: document.getElementById('ordersCalendarPrevBtn'),
+    ordersCalendarTodayBtn: document.getElementById('ordersCalendarTodayBtn'),
+    ordersCalendarNextBtn: document.getElementById('ordersCalendarNextBtn'),
+    ordersCalendarMonthLabel: document.getElementById('ordersCalendarMonthLabel'),
+    ordersMonthCalendar: document.getElementById('ordersMonthCalendar'),
     routeDateInput: document.getElementById('routeDateInput'),
     routePrevBtn: document.getElementById('routePrevBtn'),
     routeTodayBtn: document.getElementById('routeTodayBtn'),
@@ -387,6 +404,9 @@ function cacheEls() {
     calendarDateInput: document.getElementById('calendarDateInput'),
     quickPeekExchangeDateInput: document.getElementById('quickPeekExchangeDateInput'),
     quickPeekReturnDateInput: document.getElementById('quickPeekReturnDateInput'),
+    quickPeekExchangeField: document.getElementById('quickPeekExchangeField'),
+    quickPeekReturnField: document.getElementById('quickPeekReturnField'),
+    quickPeekLocationField: document.getElementById('quickPeekLocationField'),
     calendarPrevBtn: document.getElementById('calendarPrevBtn'),
     calendarTodayBtn: document.getElementById('calendarTodayBtn'),
     calendarNextBtn: document.getElementById('calendarNextBtn'),
@@ -435,6 +455,20 @@ function cacheEls() {
     employeeSignupLinkStatus: document.getElementById('employeeSignupLinkStatus'),
     employeePaymentsPanel: document.getElementById('employeePaymentsPanel'),
     employeeDocumentsPanel: document.getElementById('employeeDocumentsPanel'),
+    schedulePersonSelect: document.getElementById('schedulePersonSelect'),
+    typicalScheduleGrid: document.getElementById('typicalScheduleGrid'),
+    weeklyScheduleEditor: document.getElementById('weeklyScheduleEditor'),
+    editWeeklyScheduleBtn: document.getElementById('editWeeklyScheduleBtn'),
+    saveTypicalScheduleBtn: document.getElementById('saveTypicalScheduleBtn'),
+    scheduleSaveStatus: document.getElementById('scheduleSaveStatus'),
+    schedulePrevMonthBtn: document.getElementById('schedulePrevMonthBtn'),
+    scheduleTodayBtn: document.getElementById('scheduleTodayBtn'),
+    scheduleNextMonthBtn: document.getElementById('scheduleNextMonthBtn'),
+    scheduleMonthLabel: document.getElementById('scheduleMonthLabel'),
+    scheduleMonthCalendar: document.getElementById('scheduleMonthCalendar'),
+    scheduleChangeEditor: document.getElementById('scheduleChangeEditor'),
+    scheduleChangeModalWrap: document.getElementById('scheduleChangeModalWrap'),
+    scheduleAddChangeBtn: document.getElementById('scheduleAddChangeBtn'),
     quickPeekLocationSelect: document.getElementById('quickPeekLocationSelect'),
     viewAsBanner: document.getElementById('viewAsBanner'),
     viewAsName: document.getElementById('viewAsName'),
@@ -473,8 +507,8 @@ function applyRoleAccess() {
   // Reset tab visibility first so exiting View As restores the full admin menu.
   document.querySelectorAll('[data-tab-btn]').forEach((btn) => btn.classList.remove('hidden'));
   if (employee) {
-    state.activeTab = ['orders','payments','documents'].includes(state.activeTab) ? state.activeTab : 'orders';
-    const allowed = new Set(['orders', 'payments', 'documents']);
+    state.activeTab = ['orders','schedule','payments','documents'].includes(state.activeTab) ? state.activeTab : 'orders';
+    const allowed = new Set(['orders', 'schedule', 'payments', 'documents']);
     document.querySelectorAll('[data-tab-btn]').forEach((btn) => btn.classList.toggle('hidden', !allowed.has(btn.dataset.tabBtn)));
   } else {
     document.querySelectorAll('.employee-only[data-tab-btn]').forEach((btn) => btn.classList.add('hidden'));
@@ -1600,7 +1634,6 @@ async function handleEmployeeListClick(event) {
         order.updatedAt = new Date().toISOString();
         await saveSingleOrder(order, before, { actor: 'admin-delete-employee' });
       }
-      await deleteEmployeeAuthAccount(id);
       await deleteUserProfile(id);
       state.users = state.users.filter((entry) => (entry.uid || entry.id) !== id);
       await syncPublicPickupLocations();
@@ -1693,6 +1726,22 @@ function bindApp() {
   els.copyPasteOptions?.addEventListener('click', handleCopyPasteOptionClick);
   els.addCopyPasteTemplateBtn?.addEventListener('click', addCustomCopyPasteTemplate);
   els.addOrderBtn.addEventListener('click', () => openOrderModal());
+  els.ordersViewToggle?.addEventListener('click', (event) => { const btn = event.target.closest('[data-orders-view]'); if (!btn) return; state.ordersView = btn.dataset.ordersView === 'calendar' ? 'calendar' : 'list'; renderOrdersViewMode(); if (state.ordersView === 'calendar') renderOrdersCalendar(); });
+  els.ordersCalendarPrevBtn?.addEventListener('click', () => shiftOrdersCalendarMonth(-1));
+  els.ordersCalendarNextBtn?.addEventListener('click', () => shiftOrdersCalendarMonth(1));
+  els.ordersCalendarTodayBtn?.addEventListener('click', () => { state.ordersCalendarDate = new Date().toISOString().slice(0,10); renderOrdersCalendar(); });
+  els.ordersMonthCalendar?.addEventListener('click', handleOrdersCalendarClick);
+  els.schedulePersonSelect?.addEventListener('change', () => { state.schedulePersonId = els.schedulePersonSelect.value; state.scheduleEditingDate = ''; setWeeklyScheduleEditorOpen(false); renderSchedule(); });
+  els.editWeeklyScheduleBtn?.addEventListener('click', () => setWeeklyScheduleEditorOpen(els.weeklyScheduleEditor?.classList.contains('hidden')));
+  els.saveTypicalScheduleBtn?.addEventListener('click', saveTypicalScheduleFromForm);
+  els.schedulePrevMonthBtn?.addEventListener('click', () => shiftScheduleMonth(-1));
+  els.scheduleNextMonthBtn?.addEventListener('click', () => shiftScheduleMonth(1));
+  els.scheduleTodayBtn?.addEventListener('click', () => { state.scheduleCalendarDate = new Date().toISOString().slice(0,10); renderScheduleCalendar(); });
+  els.scheduleMonthCalendar?.addEventListener('click', handleScheduleCalendarClick);
+  els.scheduleAddChangeBtn?.addEventListener('click', () => openScheduleChangeModal());
+  els.scheduleChangeEditor?.addEventListener('click', handleScheduleChangeEditorClick);
+  els.scheduleChangeEditor?.addEventListener('change', handleScheduleChangeEditorChange);
+  els.scheduleChangeModalWrap?.addEventListener('click', (event) => { if (event.target === els.scheduleChangeModalWrap || event.target.closest('[data-close-schedule-change]')) closeScheduleChangeModal(); });
   els.routeStopsList?.addEventListener('click', (event) => {
     const btn = event.target.closest('[data-plan-route-date]');
     if (!btn) return;
@@ -1753,12 +1802,12 @@ function bindApp() {
   });
   els.inventoryForm.addEventListener('submit', handleInventorySave);
   els.settingsForm.addEventListener('submit', handleSettingsSave);
-  els.calendarDateInput?.addEventListener('change', handleQuickPeekEventDateChange);
+  els.calendarDateInput?.addEventListener('change', () => { state.quickPeekEventChosen = Boolean(els.calendarDateInput.value); handleQuickPeekEventDateChange(); });
   els.quickPeekExchangeDateInput?.addEventListener('change', renderCalendarView);
   els.quickPeekReturnDateInput?.addEventListener('change', renderCalendarView);
   els.calendarPrevBtn?.addEventListener('click', () => shiftCalendarDate(-1));
   els.calendarNextBtn?.addEventListener('click', () => shiftCalendarDate(1));
-  els.calendarTodayBtn?.addEventListener('click', () => { if (els.calendarDateInput) { els.calendarDateInput.value = new Date().toISOString().slice(0, 10); syncQuickPeekDatesFromEvent(true); renderCalendarView(); } });
+  els.calendarTodayBtn?.addEventListener('click', () => { if (els.calendarDateInput) { state.quickPeekEventChosen = true; els.calendarDateInput.value = new Date().toISOString().slice(0, 10); syncQuickPeekDatesFromEvent(true); renderCalendarView(); } });
   els.pickupAddressInput?.addEventListener('input', (event) => debouncedPickupLookup(event.target.value));
   els.pickupAddressInput?.addEventListener('focus', () => {
     if (state.pickupSuggestions.length) renderPickupSuggestions(state.pickupSuggestions);
@@ -1960,6 +2009,9 @@ async function loadData() {
   if (state.currentUser?.role === 'admin') state.users = await getUsers().catch(() => []);
   else state.users = [state.currentUser];
   state.settings = await getSettings();
+  if (state.currentUser?.role === 'admin') state.schedules = await getSchedules().catch(() => []);
+  else { const ownSchedule = await getSchedule(state.currentUser.uid).catch(() => null); state.schedules = ownSchedule ? [ownSchedule] : []; }
+  state.schedulePersonId = state.currentUser?.uid || state.currentUser?.id || '';
   const rawOrders = state.currentUser?.role === 'employee' ? await getAssignedOrders(state.currentUser.uid) : await getOpenOrders();
   const normalizedOrders = rawOrders.map((order) => ({
     assignedEmployeeId: '',
@@ -2020,6 +2072,7 @@ async function saveOrderOnly(order, before = null, actor = 'admin-order') {
   await withBusy(async () => {
     await saveSingleOrder(order, before, { actor });
     renderOrders();
+    renderOrdersCalendar();
     renderCalendarView();
     renderDeliveryRoute();
     renderAdminReviews();
@@ -2032,7 +2085,8 @@ const WORKSPACE_TITLES = {
   orders: ['Orders', 'Manage active rentals and quickly review what needs attention.'],
   route: ['Delivery Route', 'Plan upcoming deliveries and customer pickups by date.'],
   inventory: ['Inventory', 'Manage company equipment, quantities, accessories, and availability.'],
-  calendar: ['Quick Peek', 'Check equipment availability for a specific rental window.'],
+  calendar: ['Quick Peek', 'Check equipment and team availability for a specific rental window.'],
+  schedule: ['Schedule', 'Set typical availability and date-specific changes.'],
   reviews: ['Reviews', 'Review customer feedback and follow up where needed.'],
   numbers: ['The Numbers', 'See costs, earnings, and operational performance in one place.'],
   employees: ['Employees', 'Manage employee access, equipment, contracts, and compensation.'],
@@ -2053,6 +2107,8 @@ function updateWorkspaceHeader() {
 function renderAll() {
   renderTabs();
   renderOrders();
+  renderOrdersCalendar();
+  renderSchedule();
   renderDeliveryRoute();
   renderInventory();
   renderCalendarView();
@@ -2947,7 +3003,11 @@ function applyTemplate(template, values = {}) {
     .trim();
 }
 function getCalendarSelectedDate() {
-  return els.calendarDateInput?.value || new Date().toISOString().slice(0, 10);
+  return els.calendarDateInput?.value || '';
+}
+function updateQuickPeekProgressiveFields() {
+  const show = Boolean(state.quickPeekEventChosen && els.calendarDateInput?.value);
+  [els.quickPeekExchangeField, els.quickPeekReturnField, els.quickPeekLocationField].forEach((field) => field?.classList.toggle('hidden', !show));
 }
 function syncQuickPeekDatesFromEvent(force = false) {
   const eventDate = getCalendarSelectedDate();
@@ -2971,7 +3031,9 @@ function getQuickPeekRange() {
 }
 function shiftCalendarDate(days) {
   if (!els.calendarDateInput) return;
-  els.calendarDateInput.value = addDays(getCalendarSelectedDate(), days);
+  state.quickPeekEventChosen = true;
+  const base = getCalendarSelectedDate() || new Date().toISOString().slice(0, 10);
+  els.calendarDateInput.value = addDays(base, days);
   syncQuickPeekDatesFromEvent(true);
   renderCalendarView();
 }
@@ -3009,9 +3071,17 @@ function orderRequiresDeposit(order = {}) {
 function getOrderDepositAmount(order = {}) {
   return orderRequiresDeposit(order) ? roundDepositAmount(getEffectiveOrderTotal(order) * DEPOSIT_RATE) : 0;
 }
+function formatClockTime(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw || /^(tbd|to be determined|time tbd)$/i.test(raw)) return 'To Be Determined';
+  const normalized = normalizeInlineTimeValue(raw);
+  if (!normalized) return raw;
+  const d = new Date(`2000-01-01T${normalized}:00`);
+  return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(d);
+}
 function formatOrderValueForUpdate(key, value) {
   if (key === 'exchangeDate' || key === 'returnDate' || key === 'eventDate') return formatFriendlyDate(value);
-  if (key === 'exchangeTime' || key === 'returnTime' || key === 'eventTime') return normalizeTbdLabel(value);
+  if (key === 'exchangeTime' || key === 'returnTime' || key === 'eventTime') return formatClockTime(value);
   if (key === 'deliveryFee' || key === 'total' || key === 'adjustedTotal') return currency(value || 0);
   if (key === 'items') return summarizeUpdateItems(value || []);
   if (key === 'verbalConfirmation') return value ? 'Yes' : 'No';
@@ -3039,6 +3109,7 @@ function collectOrderChanges(previous = {}, next = {}) {
     ['eventDate', 'Event date'],
     ['eventTime', 'Event time'],
     ['eventName', 'Event'],
+    ['status', 'Status'],
     ['address', 'Address'],
     ['setupFee', 'Setup fee'],
     ['tipAmount', 'Tip'],
@@ -3084,6 +3155,10 @@ function appendOrderUpdate(order, changes = []) {
   });
   order.updateHistory = history;
   return order;
+}
+async function copyLatestOrderUpdate(order, changes = []) {
+  if (!Array.isArray(changes) || !changes.length) return;
+  await copyTextWithFallback(buildOrderUpdateMessage(order, [{ updateIndex: 0 }]), 'Copy the order update below:');
 }
 function buildOrderUpdateMessage(order, selectedIndexes = null) {
   const updates = Array.isArray(order?.updateHistory) ? order.updateHistory : [];
@@ -3325,7 +3400,7 @@ function renderDeliveryRoute() {
       ${group.stops.map((stop, index) => `
         <div class="calendar-stock-row route-stop-row">
           <div>
-            <strong>${index + 1}. ${safeText(stop.type)} · ${safeText(stop.time || 'Time TBD')}</strong>
+            <strong>${index + 1}. ${safeText(stop.type)} · ${safeText(formatClockTime(stop.time || ''))}</strong>
             <div class="small muted">${safeText(stop.name)} · ${safeText(stop.items)}</div>
             <div class="small">${safeText(stop.address)}</div>
           </div>
@@ -3483,7 +3558,382 @@ async function ensureCompletedOrdersLoaded() {
   }
 }
 
+
+function renderOrdersViewMode() {
+  const calendar = state.ordersView === 'calendar';
+  els.ordersListView?.classList.toggle('hidden', calendar);
+  els.ordersCalendarView?.classList.toggle('hidden', !calendar);
+  els.ordersViewToggle?.querySelectorAll('[data-orders-view]').forEach((btn) => btn.classList.toggle('active', btn.dataset.ordersView === state.ordersView));
+}
+function monthStart(dateStr = '') {
+  const d = new Date(`${dateStr || new Date().toISOString().slice(0,10)}T12:00:00`);
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+function isoLocalDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function shiftOrdersCalendarMonth(diff) {
+  const d = monthStart(state.ordersCalendarDate);
+  d.setMonth(d.getMonth() + diff);
+  state.ordersCalendarDate = isoLocalDate(d);
+  renderOrdersCalendar();
+}
+function orderCalendarStartDate(order = {}) { return order.exchangeDate || order.eventDate || order.date || ''; }
+function orderCalendarEndDate(order = {}) { return order.returnDate || order.exchangeDate || order.eventDate || order.date || ''; }
+function localDateFromIso(value = '') {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 0, 0, 0, 0);
+}
+function calendarDaySerial(date) {
+  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000);
+}
+function clampOrderCalendarRange(order = {}) {
+  const start = localDateFromIso(orderCalendarStartDate(order));
+  const end = localDateFromIso(orderCalendarEndDate(order));
+  if (!start && !end) return null;
+  const rangeStart = start || end;
+  const rangeEnd = end || start;
+  if (rangeEnd < rangeStart) return { start: rangeStart, end: rangeStart };
+  return { start: rangeStart, end: rangeEnd };
+}
+function orderCalendarLabel(order = {}) {
+  return `${order.firstName || ''} ${order.lastName || ''}`.trim() || order.eventName || 'Order';
+}
+function assignCalendarLanes(segments = []) {
+  const laneEnds = [];
+  return segments.map((segment) => {
+    let lane = laneEnds.findIndex((endCol) => endCol < segment.startCol);
+    if (lane < 0) { lane = laneEnds.length; laneEnds.push(segment.endCol); }
+    else laneEnds[lane] = segment.endCol;
+    return { ...segment, lane };
+  });
+}
+function renderOrdersCalendar() {
+  if (!els.ordersMonthCalendar) return;
+  renderOrdersViewMode();
+  const base = monthStart(state.ordersCalendarDate);
+  if (els.ordersCalendarMonthLabel) els.ordersCalendarMonthLabel.textContent = new Intl.DateTimeFormat('en-US',{month:'long',year:'numeric'}).format(base);
+  const gridStart = new Date(base); gridStart.setDate(1 - base.getDay());
+  const today = isoLocalDate(new Date());
+  const visibleOrders = (state.orders || []).map((order) => ({ order, range: clampOrderCalendarRange(order) })).filter((row) => row.range);
+  const weeks = [];
+  for (let weekIndex = 0; weekIndex < 6; weekIndex++) {
+    const weekStart = new Date(gridStart); weekStart.setDate(gridStart.getDate() + weekIndex * 7);
+    const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+    const dayCells = [];
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+      const d = new Date(weekStart); d.setDate(weekStart.getDate() + dayIndex);
+      const iso = isoLocalDate(d);
+      const outside = d.getMonth() !== base.getMonth();
+      dayCells.push(`<div class="orders-calendar-day${outside?' outside':''}${iso===today?' today':''}" data-orders-calendar-date="${iso}"><div class="orders-calendar-day-number">${d.getDate()}</div></div>`);
+    }
+    const segments = visibleOrders.flatMap(({order, range}) => {
+      if (range.end < weekStart || range.start > weekEnd) return [];
+      const segStart = range.start < weekStart ? weekStart : range.start;
+      const segEnd = range.end > weekEnd ? weekEnd : range.end;
+      const startCol = calendarDaySerial(segStart) - calendarDaySerial(weekStart) + 1;
+      const endCol = calendarDaySerial(segEnd) - calendarDaySerial(weekStart) + 1;
+      return [{
+        order,
+        startCol,
+        endCol,
+        continuesBefore: range.start < weekStart,
+        continuesAfter: range.end > weekEnd
+      }];
+    }).sort((a,b) => a.startCol - b.startCol || b.endCol - a.endCol || compareExchangeAsc(a.order,b.order));
+    const laidOut = assignCalendarLanes(segments);
+    const maxLane = laidOut.reduce((max, seg) => Math.max(max, seg.lane), -1);
+    const bars = laidOut.map((segment) => {
+      const order = segment.order;
+      const name = orderCalendarLabel(order);
+      const cls = String(order.status || 'Pending').toLowerCase().replace(/[^a-z]+/g,'-');
+      const left = ((segment.startCol - 1) / 7) * 100;
+      const width = ((segment.endCol - segment.startCol + 1) / 7) * 100;
+      const edgeClass = `${segment.continuesBefore ? ' continues-before' : ''}${segment.continuesAfter ? ' continues-after' : ''}`;
+      const employee = assignedEmployeeForOrder(order);
+      const employeeColors = employeeOrderColors(employee || {});
+      const useEmployeeColor = Boolean(order.assignedEmployeeId && employee && order.status !== 'Pending' && order.status !== 'Completed');
+      const colorClass = useEmployeeColor ? ' employee-colored' : '';
+      const colorVars = useEmployeeColor ? `;--calendar-order-bg:${safeText(employeeColors.background)};--calendar-order-accent:${safeText(employeeColors.accent)};--calendar-order-text:${safeText(readableTextColor(employeeColors.background))}` : '';
+      const inquiryClass = order.newInquiry ? ' new-inquiry' : '';
+      return `<button type="button" class="orders-calendar-span status-${cls}${colorClass}${inquiryClass}${edgeClass}" data-calendar-order-id="${safeText(order.id)}" style="--calendar-left:${left}%;--calendar-width:${width}%;--calendar-lane:${segment.lane}${colorVars}" title="${safeText(name)} · ${safeText(formatDateTime(order.exchangeDate, order.exchangeTime || 'To Be Determined'))} → ${safeText(formatDateTime(order.returnDate, order.returnTime || 'To Be Determined'))}"><strong>${safeText(name)}</strong><span>${safeText(order.status || '')}</span></button>`;
+    }).join('');
+    weeks.push(`<div class="orders-calendar-week" style="--calendar-lanes:${Math.max(maxLane + 1, 1)}"><div class="orders-calendar-week-days">${dayCells.join('')}</div><div class="orders-calendar-bars">${bars}</div></div>`);
+  }
+  els.ordersMonthCalendar.innerHTML = `<div class="orders-calendar-weekdays">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d)=>`<div>${d}</div>`).join('')}</div><div class="orders-calendar-weeks">${weeks.join('')}</div>`;
+}
+function calendarOrderPopupMarkup(order = {}) {
+  const contact = order.contactMethods || {};
+  const customer = `${order.firstName || ''} ${order.lastName || ''}`.trim() || 'Unnamed customer';
+  const address = order.fulfillmentType === 'Delivery' ? (order.address || 'No delivery address') : (order.assignedEmployeePickupAddress || state.settings?.pickupAddress || 'Pickup address not set');
+  const items = (order.items || []).map((item) => `<div class="calendar-popup-item"><span>${safeText(item.name || 'Equipment')}</span><strong>${Number(item.quantity || 0)}</strong></div>`).join('') || '<div class="empty-state">No equipment on this order.</div>';
+  return `<div class="calendar-order-popup-card" role="dialog" aria-modal="true" aria-label="Order details">
+    <div class="calendar-order-popup-head"><div><div class="small muted">${safeText(order.status || 'Pending')}</div><h2>${safeText(customer)}</h2></div><button type="button" class="icon-btn" data-close-calendar-order>×</button></div>
+    <div class="calendar-order-popup-grid">
+      <div><span>Event</span><strong>${safeText(order.eventName || 'Rental')}</strong></div>
+      <div><span>Event date</span><strong>${safeText(formatDateTime(order.eventDate, order.eventTime || 'To Be Determined'))}</strong></div>
+      <div><span>Exchange</span><strong>${safeText(formatDateTime(order.exchangeDate, order.exchangeTime || 'To Be Determined'))}</strong></div>
+      <div><span>Return</span><strong>${safeText(formatDateTime(order.returnDate, order.returnTime || 'To Be Determined'))}</strong></div>
+      <div><span>Fulfillment</span><strong>${safeText(order.fulfillmentType || 'Pickup')}</strong></div>
+      <div><span>Address</span><strong>${safeText(address)}</strong></div>
+      <div><span>Total</span><strong>${currency(getEffectiveOrderTotal(order))}</strong></div>
+      <div><span>Payment</span><strong>${safeText(order.paymentStatus || 'Un-Paid')}</strong></div>
+      ${order.assignedEmployeeName ? `<div><span>Assigned to</span><strong>${safeText(order.assignedEmployeeName)}</strong></div>` : ''}
+      ${contact.text ? `<div><span>Phone</span><strong>${safeText(contact.text)}</strong></div>` : ''}
+      ${contact.email ? `<div><span>Email</span><strong>${safeText(contact.email)}</strong></div>` : ''}
+    </div>
+    <div class="calendar-popup-section"><strong>Equipment</strong><div class="calendar-popup-items">${items}</div></div>
+    ${order.notes ? `<div class="calendar-popup-section"><strong>Notes</strong><div class="note-block small">${safeText(order.notes)}</div></div>` : ''}
+    <div class="calendar-order-popup-actions"><button type="button" class="btn btn-ghost" data-close-calendar-order>Close</button>${isAdminUser() ? `<button type="button" class="btn btn-primary" data-edit-calendar-order="${safeText(order.id)}">Edit Order</button>` : ''}</div>
+  </div>`;
+}
+function closeCalendarOrderPopup() { document.getElementById('calendarOrderPopupWrap')?.remove(); }
+function openCalendarOrderPopup(orderId = '') {
+  const order = (state.orders || []).find((item) => String(item.id) === String(orderId));
+  if (!order) return;
+  closeCalendarOrderPopup();
+  const wrap = document.createElement('div');
+  wrap.id = 'calendarOrderPopupWrap';
+  wrap.className = 'calendar-order-popup-backdrop';
+  wrap.innerHTML = calendarOrderPopupMarkup(order);
+  document.body.appendChild(wrap);
+  wrap.addEventListener('click', (event) => {
+    if (event.target === wrap || event.target.closest('[data-close-calendar-order]')) { closeCalendarOrderPopup(); return; }
+    const edit = event.target.closest('[data-edit-calendar-order]');
+    if (edit) { closeCalendarOrderPopup(); openOrderModal(edit.dataset.editCalendarOrder); }
+  });
+}
+function handleOrdersCalendarClick(event) {
+  const btn = event.target.closest('[data-calendar-order-id]');
+  if (!btn) return;
+  openCalendarOrderPopup(btn.dataset.calendarOrderId);
+}
+
+const SCHEDULE_DAYS = [
+  {key:'sun',label:'Sunday'}, {key:'mon',label:'Monday'}, {key:'tue',label:'Tuesday'}, {key:'wed',label:'Wednesday'},
+  {key:'thu',label:'Thursday'}, {key:'fri',label:'Friday'}, {key:'sat',label:'Saturday'}
+];
+function defaultTypicalSchedule() {
+  return Object.fromEntries(SCHEDULE_DAYS.map((day) => [day.key,{mode:'unavailable',start:'19:00',end:'22:00'}]));
+}
+function normalizeScheduleRecord(row = {}, uidValue = '') {
+  const typical = defaultTypicalSchedule();
+  for (const day of SCHEDULE_DAYS) {
+    const source = row?.typical?.[day.key] || {};
+    typical[day.key] = { mode: ['available','allday','unavailable'].includes(source.mode) ? source.mode : 'unavailable', start: normalizeInlineTimeValue(source.start) || '19:00', end: normalizeInlineTimeValue(source.end) || '22:00' };
+  }
+  const changes = Array.isArray(row.changes) ? row.changes.map((change) => ({date:String(change.date||''),mode:['available','allday','blocked','typical'].includes(change.mode)?change.mode:'typical',start:normalizeInlineTimeValue(change.start)||'19:00',end:normalizeInlineTimeValue(change.end)||'22:00',note:String(change.note||'')})).filter((change)=>change.date) : [];
+  return { id: row.id || uidValue, uid: row.uid || row.id || uidValue, typical, changes, updatedAt: row.updatedAt || '' };
+}
+function scheduleForUid(uidValue = '') {
+  return normalizeScheduleRecord((state.schedules || []).find((row)=>String(row.uid||row.id)===String(uidValue)) || {}, uidValue);
+}
+function schedulePersonOptions() {
+  if (!isAdminUser()) return [{uid:getExperienceUser()?.uid || getExperienceUser()?.id || '', label:employeeDisplayName(getExperienceUser() || {})}];
+  const currentUid = state.currentUser?.uid || state.currentUser?.id || '';
+  return [{uid:currentUid,label:'My Schedule'}, ...approvedEmployees().map((u)=>({uid:u.uid||u.id,label:employeeDisplayName(u)}))];
+}
+function currentSchedulePersonId() {
+  const options = schedulePersonOptions();
+  if (!options.some((o)=>o.uid===state.schedulePersonId)) state.schedulePersonId = options[0]?.uid || '';
+  return state.schedulePersonId;
+}
+function timeSelectMarkup(prefix, value='19:00') {
+  const normalized = normalizeInlineTimeValue(value) || '19:00';
+  const [hh,mm]=normalized.split(':').map(Number); const hour12=hh%12||12; const ap=hh>=12?'PM':'AM';
+  const hours=Array.from({length:12},(_,i)=>`<option value="${i+1}"${i+1===hour12?' selected':''}>${i+1}</option>`).join('');
+  const mins=['00','15','30','45'].map((m)=>`<option value="${m}"${Number(m)===mm?' selected':''}>${m}</option>`).join('');
+  return `<div class="schedule-time-select" data-schedule-time="${prefix}"><select data-part="hour">${hours}</select><span>:</span><select data-part="minute">${mins}</select><select data-part="ampm"><option${ap==='AM'?' selected':''}>AM</option><option${ap==='PM'?' selected':''}>PM</option></select></div>`;
+}
+function readScheduleTime(container, prefix) {
+  const wrap = container?.querySelector(`[data-schedule-time="${prefix}"]`); if (!wrap) return '';
+  let h=Number(wrap.querySelector('[data-part="hour"]')?.value||12); const m=wrap.querySelector('[data-part="minute"]')?.value||'00'; const ap=wrap.querySelector('[data-part="ampm"]')?.value||'AM';
+  if (ap==='PM' && h!==12) h+=12; if (ap==='AM' && h===12) h=0; return `${String(h).padStart(2,'0')}:${m}`;
+}
+function setWeeklyScheduleEditorOpen(open) {
+  els.weeklyScheduleEditor?.classList.toggle('hidden', !open);
+  if (els.editWeeklyScheduleBtn) {
+    els.editWeeklyScheduleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    els.editWeeklyScheduleBtn.textContent = open ? 'Cancel' : 'Edit Weekly Schedule';
+  }
+}
+function renderSchedule() {
+  if (!els.typicalScheduleGrid) return;
+  const people = schedulePersonOptions(); const uidValue=currentSchedulePersonId();
+  if (els.schedulePersonSelect) { els.schedulePersonSelect.innerHTML=people.map((p)=>`<option value="${safeText(p.uid)}"${p.uid===uidValue?' selected':''}>${safeText(p.label)}</option>`).join(''); }
+  const schedule=scheduleForUid(uidValue);
+  els.typicalScheduleGrid.innerHTML=SCHEDULE_DAYS.map((day)=>{ const row=schedule.typical[day.key]; return `<div class="typical-schedule-row" data-typical-day="${day.key}"><strong>${day.label}</strong><select data-typical-mode><option value="unavailable"${row.mode==='unavailable'?' selected':''}>Unavailable</option><option value="available"${row.mode==='available'?' selected':''}>Available</option><option value="allday"${row.mode==='allday'?' selected':''}>All day</option></select><div class="typical-hours${row.mode==='available'?'':' muted-disabled'}">${timeSelectMarkup(`${day.key}-start`,row.start)}<span>to</span>${timeSelectMarkup(`${day.key}-end`,row.end)}</div></div>`; }).join('');
+  els.typicalScheduleGrid.querySelectorAll('[data-typical-mode]').forEach((select)=>select.addEventListener('change',()=>select.closest('.typical-schedule-row')?.querySelector('.typical-hours')?.classList.toggle('muted-disabled',select.value!=='available')));
+  renderScheduleCalendar();
+}
+async function saveTypicalScheduleFromForm() {
+  const uidValue=currentSchedulePersonId(); if (!uidValue) return;
+  const current=scheduleForUid(uidValue); const typical={};
+  els.typicalScheduleGrid?.querySelectorAll('[data-typical-day]').forEach((row)=>{ const key=row.dataset.typicalDay; typical[key]={mode:row.querySelector('[data-typical-mode]')?.value||'unavailable',start:readScheduleTime(row,`${key}-start`)||'19:00',end:readScheduleTime(row,`${key}-end`)||'22:00'}; });
+  const saved=await withBusy(()=>saveSchedule({...current,uid:uidValue,typical,changes:current.changes}), 'Saving schedule…');
+  state.schedules=[saved,...(state.schedules||[]).filter((row)=>String(row.uid||row.id)!==uidValue)];
+  if (els.scheduleSaveStatus) { els.scheduleSaveStatus.textContent='Weekly schedule saved.'; setTimeout(()=>{if(els.scheduleSaveStatus) els.scheduleSaveStatus.textContent='';},1800); }
+  setWeeklyScheduleEditorOpen(false);
+  renderSchedule(); renderCalendarView();
+}
+function shiftScheduleMonth(diff) { const d=monthStart(state.scheduleCalendarDate); d.setMonth(d.getMonth()+diff); state.scheduleCalendarDate=isoLocalDate(d); renderScheduleCalendar(); }
+function scheduleAvailabilityOnDate(uidValue, dateStr) {
+  const schedule=scheduleForUid(uidValue); const change=schedule.changes.find((entry)=>entry.date===dateStr && entry.mode!=='typical');
+  if (change) { if (change.mode==='blocked') return {mode:'blocked',label:'Blocked off',source:'change',note:change.note}; if(change.mode==='allday') return {mode:'allday',label:'Available all day',source:'change',note:change.note}; return {mode:'available',label:`${formatClockTime(change.start)} – ${formatClockTime(change.end)}`,source:'change',note:change.note}; }
+  const d=new Date(`${dateStr}T12:00:00`); const day=SCHEDULE_DAYS[d.getDay()]; const row=schedule.typical[day.key];
+  if(row.mode==='unavailable') return {mode:'blocked',label:'Unavailable',source:'typical',note:''}; if(row.mode==='allday') return {mode:'allday',label:'Available all day',source:'typical',note:''}; return {mode:'available',label:`${formatClockTime(row.start)} – ${formatClockTime(row.end)}`,source:'typical',note:''};
+}
+function renderScheduleCalendar() {
+  if(!els.scheduleMonthCalendar) return; const uidValue=currentSchedulePersonId(); const base=monthStart(state.scheduleCalendarDate); if(els.scheduleMonthLabel) els.scheduleMonthLabel.textContent=new Intl.DateTimeFormat('en-US',{month:'long',year:'numeric'}).format(base);
+  const start=new Date(base); start.setDate(1-base.getDay()); const today=new Date().toISOString().slice(0,10); const cells=[];
+  for(let i=0;i<42;i++){const d=new Date(start);d.setDate(start.getDate()+i);const iso=isoLocalDate(d);const avail=scheduleAvailabilityOnDate(uidValue,iso);const outside=d.getMonth()!==base.getMonth();cells.push(`<button type="button" class="schedule-calendar-day ${avail.mode}${outside?' outside':''}${iso===today?' today':''}${avail.source==='change'?' changed':''}" data-schedule-date="${iso}"><span>${d.getDate()}</span><small>${safeText(avail.label)}</small>${avail.source==='change'?'<b>Changed</b>':''}</button>`);}
+  els.scheduleMonthCalendar.innerHTML=`<div class="schedule-weekdays">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d)=>`<div>${d}</div>`).join('')}</div><div class="schedule-calendar-grid">${cells.join('')}</div>`;
+}
+
+function handleScheduleCalendarClick(event) {
+  const btn = event.target.closest('[data-schedule-date]');
+  if (!btn) return;
+  openScheduleChangeModal(btn.dataset.scheduleDate);
+}
+function dateRangeInclusive(startDate, endDate) {
+  if (!startDate || !endDate) return [];
+  const start = new Date(`${startDate}T12:00:00`);
+  const end = new Date(`${endDate}T12:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
+  const out = [];
+  const cursor = new Date(start);
+  while (cursor <= end) { out.push(isoLocalDate(cursor)); cursor.setDate(cursor.getDate() + 1); }
+  return out;
+}
+function uniqueSortedDates(values = []) {
+  return [...new Set(values.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
+}
+function openScheduleChangeModal(initialDate = '') {
+  state.scheduleEditingDate = initialDate || '';
+  state.scheduleChangeSelectionMode = initialDate ? 'individual' : 'range';
+  state.scheduleChangeSelectedDates = initialDate ? [initialDate] : [];
+  renderScheduleChangeEditor();
+  els.scheduleChangeModalWrap?.classList.add('open');
+}
+function closeScheduleChangeModal() {
+  els.scheduleChangeModalWrap?.classList.remove('open');
+  state.scheduleEditingDate = '';
+  state.scheduleChangeSelectedDates = [];
+  if (els.scheduleChangeEditor) els.scheduleChangeEditor.innerHTML = '';
+}
+function scheduleExistingChangeForDates(dates = []) {
+  const schedule = scheduleForUid(currentSchedulePersonId());
+  if (dates.length !== 1) return null;
+  return schedule.changes.find((c) => c.date === dates[0]) || null;
+}
+function scheduleDateChipMarkup(date) {
+  return `<span class="schedule-date-chip" data-selected-schedule-date="${safeText(date)}"><span>${safeText(formatFriendlyDate(date))}</span><button type="button" aria-label="Remove ${safeText(formatFriendlyDate(date))}" data-remove-schedule-date="${safeText(date)}">×</button></span>`;
+}
+function renderScheduleChangeEditor() {
+  if (!els.scheduleChangeEditor) return;
+  const selected = uniqueSortedDates(state.scheduleChangeSelectedDates || []);
+  state.scheduleChangeSelectedDates = selected;
+  const existing = scheduleExistingChangeForDates(selected) || { mode: 'blocked', start: '19:00', end: '22:00', note: '' };
+  const mode = state.scheduleChangeSelectionMode || 'individual';
+  const firstDate = selected[0] || '';
+  const rangeStart = mode === 'range' ? (selected[0] || state.scheduleEditingDate || '') : '';
+  const rangeEnd = mode === 'range' ? (selected[selected.length - 1] || state.scheduleEditingDate || '') : '';
+  const title = selected.length === 1 ? `Change for ${formatFriendlyDate(selected[0])}` : 'Add schedule change';
+  const titleEl = document.getElementById('scheduleChangeModalTitle'); if (titleEl) titleEl.textContent = title;
+  els.scheduleChangeEditor.innerHTML = `
+    <div class="schedule-change-modal-body">
+      <div class="schedule-change-block">
+        <div class="schedule-change-block-head"><div><strong>Dates</strong><div class="small muted">Choose a continuous range or add separate dates.</div></div></div>
+        <div class="segmented-view-toggle schedule-date-mode-toggle">
+          <button type="button" data-schedule-selection-mode="range" class="${mode === 'range' ? 'active' : ''}">Date Range</button>
+          <button type="button" data-schedule-selection-mode="individual" class="${mode === 'individual' ? 'active' : ''}">Individual Dates</button>
+        </div>
+        <div class="schedule-range-fields${mode === 'range' ? '' : ' hidden'}">
+          <label class="form-row"><span>From</span><input type="date" data-schedule-range-start value="${safeText(rangeStart)}" /></label>
+          <label class="form-row"><span>Through</span><input type="date" data-schedule-range-end value="${safeText(rangeEnd)}" /></label>
+          <div class="small muted schedule-range-count">${selected.length ? `${selected.length} day${selected.length === 1 ? '' : 's'} selected` : 'Choose the first and last day.'}</div>
+        </div>
+        <div class="schedule-individual-fields${mode === 'individual' ? '' : ' hidden'}">
+          <div class="schedule-add-date-row"><label class="form-row"><span>Add a date</span><input type="date" data-schedule-add-date value="${safeText(firstDate && !selected.length ? firstDate : '')}" /></label><button type="button" class="btn btn-secondary btn-small" data-add-schedule-date>Add Date</button></div>
+          <div class="schedule-selected-dates">${selected.length ? selected.map(scheduleDateChipMarkup).join('') : '<span class="small muted">No dates selected yet.</span>'}</div>
+        </div>
+      </div>
+      <div class="schedule-change-block">
+        <div class="schedule-change-fields-v39">
+          <label class="form-row"><span>Availability</span><select data-change-mode><option value="blocked"${existing.mode === 'blocked' ? ' selected' : ''}>Block off entire day</option><option value="allday"${existing.mode === 'allday' ? ' selected' : ''}>Available all day</option><option value="available"${existing.mode === 'available' ? ' selected' : ''}>Change available hours</option><option value="typical"${existing.mode === 'typical' ? ' selected' : ''}>Use typical schedule / remove override</option></select></label>
+          <div class="schedule-change-hours${existing.mode === 'available' ? '' : ' hidden'}">${timeSelectMarkup('change-start', existing.start)}<span>to</span>${timeSelectMarkup('change-end', existing.end)}</div>
+          <label class="form-row"><span>Note (optional)</span><input data-change-note value="${safeText(existing.note || '')}" placeholder="Day off, appointment, available early…" /></label>
+        </div>
+      </div>
+      <div class="schedule-change-modal-actions">
+        <button type="button" class="btn btn-ghost" data-close-schedule-change>Cancel</button>
+        ${selected.length === 1 && scheduleExistingChangeForDates(selected) ? '<button type="button" class="btn btn-ghost" data-remove-schedule-change>Remove This Change</button>' : ''}
+        <button type="button" class="btn btn-primary" data-save-schedule-change>Save Change</button>
+      </div>
+    </div>`;
+}
+function syncScheduleRangeSelection() {
+  const start = els.scheduleChangeEditor?.querySelector('[data-schedule-range-start]')?.value || '';
+  const end = els.scheduleChangeEditor?.querySelector('[data-schedule-range-end]')?.value || '';
+  state.scheduleChangeSelectedDates = dateRangeInclusive(start, end || start);
+  const count = els.scheduleChangeEditor?.querySelector('.schedule-range-count');
+  if (count) { const n = state.scheduleChangeSelectedDates.length; count.textContent = n ? `${n} day${n === 1 ? '' : 's'} selected` : 'Choose a valid first and last day.'; }
+}
+function handleScheduleChangeEditorChange(event) {
+  if (event.target.matches('[data-change-mode]')) els.scheduleChangeEditor?.querySelector('.schedule-change-hours')?.classList.toggle('hidden', event.target.value !== 'available');
+  if (event.target.matches('[data-schedule-range-start], [data-schedule-range-end]')) syncScheduleRangeSelection();
+}
+async function handleScheduleChangeEditorClick(event) {
+  const modeBtn = event.target.closest('[data-schedule-selection-mode]');
+  if (modeBtn) {
+    state.scheduleChangeSelectionMode = modeBtn.dataset.scheduleSelectionMode;
+    if (state.scheduleChangeSelectionMode === 'range' && state.scheduleChangeSelectedDates.length > 1) {
+      const sorted = uniqueSortedDates(state.scheduleChangeSelectedDates); state.scheduleChangeSelectedDates = dateRangeInclusive(sorted[0], sorted[sorted.length - 1]);
+    }
+    renderScheduleChangeEditor(); return;
+  }
+  const addBtn = event.target.closest('[data-add-schedule-date]');
+  if (addBtn) {
+    const input = els.scheduleChangeEditor?.querySelector('[data-schedule-add-date]'); const date = input?.value || '';
+    if (date) { state.scheduleChangeSelectedDates = uniqueSortedDates([...(state.scheduleChangeSelectedDates || []), date]); renderScheduleChangeEditor(); }
+    return;
+  }
+  const removeDateBtn = event.target.closest('[data-remove-schedule-date]');
+  if (removeDateBtn) { state.scheduleChangeSelectedDates = (state.scheduleChangeSelectedDates || []).filter((d) => d !== removeDateBtn.dataset.removeScheduleDate); renderScheduleChangeEditor(); return; }
+  const saveBtn = event.target.closest('[data-save-schedule-change]');
+  const removeBtn = event.target.closest('[data-remove-schedule-change]');
+  if (!saveBtn && !removeBtn) return;
+  if (state.scheduleChangeSelectionMode === 'range') syncScheduleRangeSelection();
+  const dates = uniqueSortedDates(state.scheduleChangeSelectedDates || []);
+  if (!dates.length) { alert('Choose at least one date for this schedule change.'); return; }
+  const uidValue = currentSchedulePersonId(); const current = scheduleForUid(uidValue);
+  let changes = (current.changes || []).filter((c) => !dates.includes(c.date));
+  if (saveBtn) {
+    const changeMode = els.scheduleChangeEditor.querySelector('[data-change-mode]')?.value || 'blocked';
+    if (changeMode !== 'typical') {
+      const start = readScheduleTime(els.scheduleChangeEditor, 'change-start') || '19:00';
+      const end = readScheduleTime(els.scheduleChangeEditor, 'change-end') || '22:00';
+      const note = els.scheduleChangeEditor.querySelector('[data-change-note]')?.value || '';
+      changes.push(...dates.map((date) => ({ date, mode: changeMode, start, end, note })));
+    }
+  }
+  const saved = await withBusy(() => saveSchedule({ ...current, uid: uidValue, changes }), dates.length > 1 ? `Saving ${dates.length} schedule changes…` : 'Saving schedule change…');
+  state.schedules = [saved, ...(state.schedules || []).filter((row) => String(row.uid || row.id) !== uidValue)];
+  closeScheduleChangeModal(); renderSchedule(); renderCalendarView();
+}
+function quickPeekSchedulePeople(locationId='company') {
+  const currentUid=state.currentUser?.uid||state.currentUser?.id||'';
+  if(String(locationId).startsWith('employee:')) {const uidValue=String(locationId).slice(9);const u=(state.users||[]).find((x)=>(x.uid||x.id)===uidValue);return u?[{uid:uidValue,label:employeeDisplayName(u)}]:[];}
+  if(locationId==='main') return currentUid?[{uid:currentUid,label:'My Schedule'}]:[];
+  return schedulePersonOptions();
+}
+function buildQuickPeekScheduleHtml(dateStr, locationId='company') {
+  const people=quickPeekSchedulePeople(locationId); if(!people.length) return '';
+  return `<div class="calendar-category-card quick-peek-schedule-card"><div class="section-header" style="margin-bottom:10px;"><div><strong>Schedule availability</strong><div class="small muted">Typical hours plus any changes saved for this event date.</div></div></div><div class="quick-peek-schedule-list">${people.map((p)=>{const a=scheduleAvailabilityOnDate(p.uid,dateStr);return `<div class="quick-peek-schedule-row ${a.mode}"><div><strong>${safeText(p.label)}</strong>${a.note?`<div class="small muted">${safeText(a.note)}</div>`:''}</div><div><span>${safeText(a.label)}</span>${a.source==='change'?'<b>Schedule change</b>':''}</div></div>`;}).join('')}</div></div>`;
+}
 function renderOrders() {
+  renderOrdersViewMode();
   const experienceUser = getExperienceUser();
   const visibleOrders = isEmployeeUser()
     ? state.orders.filter((o) => o.assignedEmployeeId === (experienceUser?.uid || experienceUser?.id))
@@ -3633,7 +4083,7 @@ function renderOrderAccordion(order, mode) {
   const effectiveTotal = getEffectiveOrderTotal(order);
   const displayTimeRaw = getOrderNextActionTime(order);
   const displayTime = /^\d{2}:\d{2}$/.test(String(displayTimeRaw || '').trim())
-    ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(`2000-01-01T${displayTimeRaw}:00`)).toLowerCase()
+    ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(`2000-01-01T${displayTimeRaw}:00`))
     : '??:??';
   const iconParts = [];
   if (order.fulfillmentType === 'Delivery') iconParts.push('🚚');
@@ -3764,11 +4214,13 @@ async function saveInlineOrder(orderId) {
   next.updatedAt = new Date().toISOString();
   next.completedAt = next.status === 'Completed' ? (next.completedAt || new Date().toISOString()) : '';
   syncOrderPaymentAmounts(next);
-  appendOrderUpdate(next, collectOrderChanges(order, next));
+  const savedChanges = collectOrderChanges(order, next);
+  appendOrderUpdate(next, savedChanges);
   await withBusy(async () => {
     state.orders = state.orders.map((entry) => entry.id === orderId ? next : entry);
     await saveSingleOrder(next, order, { actor: 'admin-inline-edit' });
-    renderOrders(); renderCalendarView(); renderDeliveryRoute(); renderNumbers();
+    renderOrders(); renderOrdersCalendar(); renderCalendarView(); renderDeliveryRoute(); renderNumbers();
+    await copyLatestOrderUpdate(next, savedChanges);
   }, 'Saving inline changes…');
 }
 function summarizeOrderItems(items = []) {
@@ -4342,8 +4794,10 @@ async function updateOrderStatus(id, status) {
     order.amountPaid = roundMoney(getEffectiveOrderTotal(order));
     order.depositPaidAmount = roundMoney(getEffectiveOrderTotal(order));
   }
-  appendOrderUpdate(order, collectOrderChanges(before, order));
+  const savedChanges = collectOrderChanges(before, order);
+  appendOrderUpdate(order, savedChanges);
   await saveOrderOnly(order, before, 'admin-status');
+  await copyLatestOrderUpdate(order, savedChanges);
   await syncCompletedOrderIncome(order).catch((error) => console.error('Financial income sync failed:', error));
 }
 async function updateOrderPayment(id, paymentStatus) {
@@ -4362,8 +4816,10 @@ async function updateOrderPayment(id, paymentStatus) {
   order.paymentStatus = paymentStatus;
   syncOrderPaymentAmounts(order);
   order.updatedAt = new Date().toISOString();
-  appendOrderUpdate(order, collectOrderChanges(before, order));
+  const savedChanges = collectOrderChanges(before, order);
+  appendOrderUpdate(order, savedChanges);
   await saveOrderOnly(order, before, 'admin-payment');
+  await copyLatestOrderUpdate(order, savedChanges);
 }
 function confirmDepositPaidAmount(order = {}, suggested = 0, currentDeposit = 0) {
   return new Promise((resolve) => {
@@ -4390,8 +4846,10 @@ async function updateOrderVerbalConfirmation(id, verbalConfirmation) {
   const before = JSON.parse(JSON.stringify(order));
   order.verbalConfirmation = Boolean(verbalConfirmation);
   order.updatedAt = new Date().toISOString();
-  appendOrderUpdate(order, collectOrderChanges(before, order));
+  const savedChanges = collectOrderChanges(before, order);
+  appendOrderUpdate(order, savedChanges);
   await saveOrderOnly(order, before, 'admin-verbal-confirmation');
+  await copyLatestOrderUpdate(order, savedChanges);
 }
 async function deleteOrder(id) {
   const order = state.orders.find((item) => item.id === id);
@@ -4659,8 +5117,7 @@ function renderSettings() {
   if (els.paymentOptionsBox && !document.getElementById('paymentOptionsHelp')) {
     els.paymentOptionsBox.insertAdjacentHTML('beforebegin', '<div id="paymentOptionsHelp" class="note-block small">Venmo, Cash App, and PayPal work best with your handle or direct link. Zelle, Google Pay, Invoice, and Crypto can use a link if you have one, or the button will copy the email, phone, wallet, or instructions you enter.</div>');
   }
-  if (els.calendarDateInput && !els.calendarDateInput.value) els.calendarDateInput.value = new Date().toISOString().slice(0, 10);
-  syncQuickPeekDatesFromEvent(false);
+  updateQuickPeekProgressiveFields();
   ["Hero", "Quote", "Browse", "Track"].forEach((kind) => {
     const key = "home" + kind + "ImageData";
     setHomeImageData(kind, settings[key] || "");
@@ -4671,8 +5128,13 @@ async function handleReminderSettingsSave(event) { if (event) event.preventDefau
 function insertTemplateToken(token) {}
 function renderCalendarView() {
   if (!els.calendarAvailabilityBoard) return;
+  updateQuickPeekProgressiveFields();
   const date = getCalendarSelectedDate();
-  if (els.calendarDateInput && !els.calendarDateInput.value) els.calendarDateInput.value = date;
+  if (!state.quickPeekEventChosen || !date) {
+    if (els.calendarDateLabel) els.calendarDateLabel.textContent = '';
+    els.calendarAvailabilityBoard.innerHTML = '<div class="empty-state">Choose the event date first. Exchange date, return date, location, orders, equipment, and schedule availability will appear next.</div>';
+    return;
+  }
   syncQuickPeekDatesFromEvent(false);
   const { eventDate, exchangeDate, returnDate } = getQuickPeekRange();
   const rangeEndExclusive = addDays(returnDate, 1);
@@ -4704,7 +5166,7 @@ function renderCalendarView() {
             const statusClass = order.status === 'Pending' ? 'yellow' : order.status === 'Confirmed' ? 'blue' : 'green';
             const timeRaw = order.status === 'In-Progress' ? order.returnTime : order.exchangeTime;
             const time = /^\d{2}:\d{2}$/.test(String(timeRaw || '').trim())
-              ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(`2000-01-01T${timeRaw}:00`)).toLowerCase()
+              ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(`2000-01-01T${timeRaw}:00`))
               : '??:??';
             return `<div class="calendar-stock-row quick-peek-order-row">
               <div><strong>${safeText(time)} ${safeText(name)}</strong><div class="small muted">${safeText(items)}</div></div>
@@ -4715,8 +5177,9 @@ function renderCalendarView() {
       </div>`
     : `<div class="calendar-category-card quick-peek-orders-card"><div class="empty-state">No pending, confirmed, or in-progress orders in this window.</div></div>`;
 
+  const scheduleHtml = buildQuickPeekScheduleHtml(eventDate, selectedLocationId);
   if (!state.inventory.length) {
-    els.calendarAvailabilityBoard.innerHTML = `<div class="quick-peek-split"><div>${ordersHtml}</div><div><div class="empty-state">No inventory yet.</div></div></div>`;
+    els.calendarAvailabilityBoard.innerHTML = `${scheduleHtml}<div class="quick-peek-split"><div>${ordersHtml}</div><div><div class="empty-state">No inventory yet.</div></div></div>`;
     return;
   }
   const rankedInventory = (state.inventory || [])
@@ -4748,7 +5211,7 @@ function renderCalendarView() {
       }).join('') || '<div class="empty-state">No inventory yet.</div>'}
     </div>
   </div>`;
-  els.calendarAvailabilityBoard.innerHTML = `<div class="quick-peek-split"><div>${ordersHtml}</div><div>${inventoryHtml}</div></div>`;
+  els.calendarAvailabilityBoard.innerHTML = `${scheduleHtml}<div class="quick-peek-split"><div>${ordersHtml}</div><div>${inventoryHtml}</div></div>`;
 }
 async function handleSettingsSave(event) {
   event.preventDefault();
@@ -5153,14 +5616,17 @@ async function handleOrderSave(event) {
     trackingAccessCode: existingOrder?.trackingAccessCode || generateTrackingAccessCode(new Set(state.orders.map((entry) => entry.trackingAccessCode).filter(Boolean)))
   };
   syncOrderPaymentAmounts(order);
+  let savedChanges = [];
   if (existingOrder) {
-    appendOrderUpdate(order, collectOrderChanges(existingOrder, order));
+    savedChanges = collectOrderChanges(existingOrder, order);
+    appendOrderUpdate(order, savedChanges);
     state.orders = state.orders.map((entry) => entry.id === state.editingOrderId ? order : entry);
   } else {
     state.orders.unshift(order);
   }
   await saveSingleOrder(order, existingOrder ? JSON.parse(JSON.stringify(existingOrder)) : null, { actor: 'admin-edit' });
   if (!existingOrder) await copyTextWithFallback(buildReminderMessage(order), 'Copy the reminder below:');
+  else await copyLatestOrderUpdate(order, savedChanges);
   closeModals();
   renderOrders();
   renderCalendarView();

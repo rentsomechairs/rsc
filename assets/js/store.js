@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v34';
+import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v39';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -11,7 +11,8 @@ const STORAGE_KEYS = {
   snapshots: 'rso_order_snapshots_v2',
   tracking: 'rso_order_tracking_v1',
   reviews: 'rso_order_reviews_v1',
-  costs: 'rso_order_costs_v1'
+  costs: 'rso_order_costs_v1',
+  schedules: 'rso_schedules_v1'
 };
 
 const COLLECTIONS = {
@@ -23,7 +24,8 @@ const COLLECTIONS = {
   tracking: 'orderTracking',
   reviews: 'reviews',
   costs: 'costs',
-  users: 'users'
+  users: 'users',
+  schedules: 'schedules'
 };
 
 
@@ -742,6 +744,33 @@ export async function getUsers() {
   return clone(cacheUsers);
 }
 
+
+export async function getSchedules() {
+  if (!isFirebaseEnabled()) return clone(read(STORAGE_KEYS.schedules, []));
+  return clone(await listCollection(COLLECTIONS.schedules));
+}
+
+export async function getSchedule(uidValue) {
+  if (!uidValue) return null;
+  if (!isFirebaseEnabled()) return clone((read(STORAGE_KEYS.schedules, []) || []).find((row) => String(row.uid || row.id) === String(uidValue)) || null);
+  return clone(await getDocById(COLLECTIONS.schedules, uidValue));
+}
+
+export async function saveSchedule(schedule = {}) {
+  const uidValue = String(schedule.uid || schedule.id || '').trim();
+  if (!uidValue) throw new Error('Schedule UID is required.');
+  const next = { ...clone(schedule), uid: uidValue, updatedAt: new Date().toISOString() };
+  delete next.id;
+  if (!isFirebaseEnabled()) {
+    const rows = read(STORAGE_KEYS.schedules, []) || [];
+    const saved = [{ id: uidValue, ...next }, ...rows.filter((row) => String(row.uid || row.id) !== uidValue)];
+    write(STORAGE_KEYS.schedules, saved);
+    return clone({ id: uidValue, ...next });
+  }
+  await upsertDoc(COLLECTIONS.schedules, uidValue, next);
+  return clone({ id: uidValue, ...next });
+}
+
 export async function saveUserProfile(profile) {
   const next = { ...clone(profile), uid: profile.uid || profile.id, updatedAt: new Date().toISOString() };
   await upsertDoc(COLLECTIONS.users, next.uid, next);
@@ -765,12 +794,6 @@ export async function deleteUserProfile(uid) {
   if (!uid) return;
   if (isFirebaseEnabled()) await deleteDocById(COLLECTIONS.users, uid);
   cacheUsers = cacheUsers.filter((u) => (u.uid || u.id) !== uid);
-}
-
-export async function deleteEmployeeAuthAccount(uid) {
-  if (!uid) throw new Error('Employee UID is required.');
-  if (!isFirebaseEnabled()) throw new Error('Firebase is required to delete an authentication account.');
-  return callAdminFunction('deleteEmployeeAuthCallable', { uid });
 }
 
 export async function signupEmployee(data) {
@@ -945,7 +968,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v34');
+  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v39');
   return getDocById(COLLECTIONS.reviews, code);
 }
 
