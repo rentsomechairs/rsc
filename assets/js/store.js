@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v39';
+import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v43';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -12,7 +12,8 @@ const STORAGE_KEYS = {
   tracking: 'rso_order_tracking_v1',
   reviews: 'rso_order_reviews_v1',
   costs: 'rso_order_costs_v1',
-  schedules: 'rso_schedules_v1'
+  schedules: 'rso_schedules_v1',
+  payoutRequests: 'rso_payout_requests_v1'
 };
 
 const COLLECTIONS = {
@@ -25,7 +26,8 @@ const COLLECTIONS = {
   reviews: 'reviews',
   costs: 'costs',
   users: 'users',
-  schedules: 'schedules'
+  schedules: 'schedules',
+  payoutRequests: 'payoutRequests'
 };
 
 
@@ -796,6 +798,100 @@ export async function deleteUserProfile(uid) {
   cacheUsers = cacheUsers.filter((u) => (u.uid || u.id) !== uid);
 }
 
+
+export async function getUserProfile(uidValue) {
+  if (!uidValue) return null;
+  if (!isFirebaseEnabled()) return clone((cacheUsers || []).find((u) => String(u.uid || u.id) === String(uidValue)) || null);
+  return clone(await getDocById(COLLECTIONS.users, uidValue));
+}
+
+export async function getSecondaryUsers(primaryUid) {
+  if (!primaryUid) return [];
+  if (!isFirebaseEnabled()) return clone((cacheUsers || []).filter((u) => u.role === 'secondary' && String(u.primaryEmployeeId || '') === String(primaryUid)));
+  return clone(await listCollectionWhere(COLLECTIONS.users, 'primaryEmployeeId', '==', primaryUid));
+}
+
+export async function signupSecondaryEmployee(data) {
+  if (!isFirebaseEnabled()) throw new Error('Secondary signup requires Firebase.');
+  const primaryEmployeeId = String(data.primaryEmployeeId || '').trim();
+  if (!primaryEmployeeId) throw new Error('This invite link is missing the primary employee.');
+  const credential = await firebaseSignup(String(data.email || '').trim(), String(data.password || ''));
+  const now = new Date().toISOString();
+  const profile = {
+    uid: credential.user.uid,
+    email: credential.user.email || String(data.email || '').trim(),
+    firstName: String(data.firstName || '').trim(),
+    lastName: String(data.lastName || '').trim(),
+    phone: String(data.phone || '').trim(),
+    role: 'secondary',
+    status: 'pending_primary',
+    primaryEmployeeId,
+    primaryEmployeeName: String(data.primaryEmployeeName || '').trim(),
+    createdAt: now,
+    updatedAt: now
+  };
+  await upsertDoc(COLLECTIONS.users, profile.uid, profile);
+  return clone(profile);
+}
+
+export async function updateSecondaryApproval(secondaryUid, primaryUid, approved) {
+  if (!secondaryUid || !primaryUid) throw new Error('Secondary login information is incomplete.');
+  const patch = { status: approved ? 'approved' : 'pending_primary', approvedByPrimaryAt: approved ? new Date().toISOString() : '', updatedAt: new Date().toISOString() };
+  await updateDocFields(COLLECTIONS.users, secondaryUid, patch);
+  return clone({ uid: secondaryUid, primaryEmployeeId: primaryUid, ...patch });
+}
+
+
+export async function getPayoutRequests(employeeUid = '') {
+  if (!isFirebaseEnabled()) {
+    const rows = read(STORAGE_KEYS.payoutRequests, []) || [];
+    return clone(employeeUid ? rows.filter((r) => String(r.employeeUid || '') === String(employeeUid)) : rows);
+  }
+  return clone(employeeUid
+    ? await listCollectionWhere(COLLECTIONS.payoutRequests, 'employeeUid', '==', employeeUid)
+    : await listCollection(COLLECTIONS.payoutRequests));
+}
+
+export async function createPayoutRequest(request = {}) {
+  const id = request.id || uid('payout');
+  const now = new Date().toISOString();
+  const next = { ...clone(request), id, status: 'pending', createdAt: request.createdAt || now, updatedAt: now };
+  if (!isFirebaseEnabled()) {
+    const rows = read(STORAGE_KEYS.payoutRequests, []) || [];
+    write(STORAGE_KEYS.payoutRequests, [next, ...rows.filter((r) => r.id !== id)]);
+    return clone(next);
+  }
+  const payload = { ...next };
+  delete payload.id;
+  await upsertDoc(COLLECTIONS.payoutRequests, id, payload);
+  return clone(next);
+}
+
+export async function updatePayoutRequestStatus(id, status) {
+  const allowed = ['pending','paid','declined'];
+  if (!id || !allowed.includes(status)) throw new Error('Invalid payout request update.');
+  const patch = { status, updatedAt: new Date().toISOString() };
+  if (status === 'paid') patch.processedAt = patch.updatedAt;
+  if (!isFirebaseEnabled()) {
+    const rows = read(STORAGE_KEYS.payoutRequests, []) || [];
+    write(STORAGE_KEYS.payoutRequests, rows.map((r) => r.id === id ? { ...r, ...patch } : r));
+    return clone({ id, ...patch });
+  }
+  await updateDocFields(COLLECTIONS.payoutRequests, id, patch);
+  return clone({ id, ...patch });
+}
+
+export async function saveOwnPayoutAccounts(profile, payoutAccounts = []) {
+  const uidValue = profile?.uid || profile?.id;
+  if (!uidValue) throw new Error('Employee profile UID is required.');
+  const next = { ...clone(profile), uid: uidValue, payoutAccounts: clone(payoutAccounts), updatedAt: new Date().toISOString() };
+  delete next.id;
+  await upsertDoc(COLLECTIONS.users, uidValue, next);
+  const cached = { id: uidValue, ...next };
+  cacheUsers = cacheUsers.filter((u) => (u.uid || u.id) !== uidValue).concat(cached);
+  return clone(cached);
+}
+
 export async function signupEmployee(data) {
   if (!isFirebaseEnabled()) throw new Error('Employee signup requires Firebase.');
   const credential = await firebaseSignup(String(data.email || '').trim(), String(data.password || ''));
@@ -968,7 +1064,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v39');
+  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v43');
   return getDocById(COLLECTIONS.reviews, code);
 }
 

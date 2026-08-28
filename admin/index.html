@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Admin • Rent Some Orders</title>
-  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v39" />
+  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v43" />
 </head>
 <body class="admin-app-page">
   <div id="loginView" class="login-shell hidden">
@@ -47,6 +47,7 @@
         <a class="nav-btn admin-only" href="../finance/index.html"><span class="nav-icon">$</span><span>Financial Records</span></a>
 
         <div class="nav-section-label employee-only hidden">My Account</div>
+        <button class="nav-btn employee-only hidden" data-tab-btn="account"><span class="nav-icon">⚙</span><span>Account Management</span></button>
         <button class="nav-btn employee-only hidden" data-tab-btn="payments"><span class="nav-icon">$</span><span>Payments</span></button>
         <button class="nav-btn employee-only hidden" data-tab-btn="documents"><span class="nav-icon">≡</span><span>Documents</span></button>
 
@@ -79,7 +80,7 @@
         </div>
       </div>
       <div id="viewAsBanner" class="view-as-banner hidden">
-        <div><strong id="viewAsName">Employee preview</strong><div class="small">You are previewing exactly the employee-facing navigation and read-only content. Your admin account remains signed in.</div></div>
+        <div><strong id="viewAsName">Employee preview</strong><div class="small">You are using the employee experience with the same controls and actions available to this employee. Your admin account remains signed in.</div></div>
         <button type="button" class="btn btn-secondary btn-small" id="exitViewAsBtn">Exit View As</button>
       </div>
 
@@ -90,6 +91,7 @@
             <div class="muted small">Pending stays unreserved. Confirmed and In-Progress reduce stock.</div>
           </div>
           <div class="orders-header-actions">
+            <label class="orders-location-filter admin-only"><span>Location</span><select id="ordersLocationFilter"></select></label>
             <div class="segmented-view-toggle" id="ordersViewToggle" aria-label="Orders view">
               <button type="button" class="active" data-orders-view="list">List</button>
               <button type="button" data-orders-view="calendar">Calendar</button>
@@ -272,6 +274,29 @@
 
 
 
+      <section class="tab-panel employee-only hidden" data-tab-panel="account">
+        <div class="section-header">
+          <div><h2 style="margin:0;">Account Management</h2><div class="muted small">Manage secondary access and payout accounts.</div></div>
+        </div>
+        <div class="account-management-grid">
+          <div class="card employee-only hidden secondary-access-card" id="secondaryAccessCard">
+          <div class="section-header"><div><strong>Secondary Login</strong><div class="small muted">Share a private link with someone who helps manage your orders or schedule. You must approve them after they sign up.</div></div><button type="button" class="btn btn-secondary btn-small" id="copySecondaryLoginLinkBtn">Copy Invite Link</button></div>
+          <div id="secondaryAccessStatus" class="small muted"></div>
+          <div id="secondaryAccessList" class="stack-sm" style="margin-top:10px;"></div>
+        </div>
+          <div class="card" id="accountPayoutAccountsCard">
+            <div class="section-header"><div><strong>Payout Accounts</strong><div class="small muted">Save the accounts you want management to use when sending payouts.</div></div><button type="button" class="btn btn-secondary btn-small" id="accountAddPayoutAccountBtn">Add Payout Account</button></div>
+            <div id="accountPayoutAccountsList" class="stack-sm"></div>
+            <form id="accountPayoutAccountForm" class="payout-account-form hidden">
+              <label class="form-row"><span>Nickname</span><input name="nickname" maxlength="40" placeholder="My Venmo" required></label>
+              <label class="form-row"><span>Payout method</span><select name="method" required><option value="">Choose…</option><option>Venmo</option><option>Cash App</option><option>PayPal</option><option>Zelle</option><option>Check</option><option>Cash</option></select></label>
+              <label class="form-row"><span>Account link / information</span><input name="detail" maxlength="250" placeholder="Venmo/Cash App link, email, phone, etc." required></label>
+              <div class="button-row"><button type="button" class="btn btn-ghost btn-small" id="accountCancelPayoutAccountBtn">Cancel</button><button type="submit" class="btn btn-primary btn-small">Save Account</button></div>
+            </form>
+          </div>
+        </div>
+      </section>
+
       <section class="tab-panel employee-only hidden" data-tab-panel="payments">
         <div class="section-header">
           <div><h2 style="margin:0;">Payments</h2><div class="muted small">Your equipment payoff, earnings split, and paid-order breakdown.</div></div>
@@ -292,6 +317,7 @@
           <button class="btn btn-primary" id="copyEmployeeSignupLinkBtn" type="button">Copy Signup Link</button>
         </div>
         <div id="employeeSignupLinkStatus" class="small muted" style="margin-bottom:12px;"></div>
+        <div id="adminPayoutRequests" class="stack-sm" style="margin-bottom:12px;"></div>
         <div id="employeesList" class="stack-sm"></div>
       </section>
 
@@ -432,7 +458,7 @@
   </div>
 
   <div class="modal-backdrop" id="orderModalWrap">
-    <div class="modal">
+    <div class="modal order-modal">
       <div class="section-header">
         <h2 id="orderModalTitle" style="margin:0;">Add Order</h2>
         <button type="button" class="btn btn-ghost" data-close-modal>Close</button>
@@ -678,6 +704,50 @@
     </div>
   </div>
 
+
+  <div class="modal-backdrop" id="payoutRequestModalWrap">
+    <div class="modal payout-request-modal" role="dialog" aria-modal="true" aria-labelledby="payoutRequestModalTitle">
+      <div class="section-header">
+        <div><h2 id="payoutRequestModalTitle" style="margin:0;">Request a Payout</h2><div class="small muted">Choose where the payout should be sent and how much you want to request.</div></div>
+        <button type="button" class="btn btn-ghost" data-close-payout-modal>Close</button>
+      </div>
+      <div class="payout-modal-grid">
+        <section class="payout-account-pane">
+          <div class="payout-pane-head"><div><strong>Payout accounts</strong><div class="small muted">Save the accounts you want management to use.</div></div><button type="button" class="btn btn-secondary btn-small" id="addPayoutAccountBtn">+ Add</button></div>
+          <div id="payoutAccountsList" class="stack-sm"></div>
+          <form id="payoutAccountForm" class="payout-account-form hidden">
+            <label class="form-row"><span>Nickname</span><input name="nickname" maxlength="40" placeholder="My Venmo" required></label>
+            <label class="form-row"><span>Payout method</span><select name="method" required><option value="">Choose…</option><option>Venmo</option><option>Cash App</option><option>PayPal</option><option>Zelle</option><option>Check</option><option>Cash</option></select></label>
+            <label class="form-row"><span id="payoutAccountDetailLabel">Account link / information</span><input name="detail" maxlength="250" placeholder="Venmo/Cash App link, email, phone, etc." required></label>
+            <div class="button-row"><button type="button" class="btn btn-ghost btn-small" id="cancelPayoutAccountBtn">Cancel</button><button type="submit" class="btn btn-primary btn-small">Save Account</button></div>
+          </form>
+        </section>
+        <section class="payout-request-pane">
+          <div class="payout-balance-card"><span>Available to request</span><strong id="payoutAvailableBalance">$0.00</strong><small id="payoutHeldBalance"></small></div>
+          <label class="form-row"><span>Send payout to</span><select id="payoutAccountSelect"></select></label>
+          <div class="form-row"><span>Amount</span><div class="payout-amount-options">
+            <button type="button" class="payout-amount-option active" data-payout-amount-mode="all">$0.00</button>
+            <button type="button" class="payout-amount-option" data-payout-amount-mode="dollar">$0</button>
+            <button type="button" class="payout-amount-option" data-payout-amount-mode="ten">$0</button>
+            <button type="button" class="payout-amount-option" data-payout-amount-mode="custom">$—</button>
+          </div></div>
+          <label class="form-row hidden" id="payoutCustomAmountRow"><span>Custom amount</span><input id="payoutCustomAmount" type="number" min="0.01" step="0.01" inputmode="decimal"></label>
+          <div class="payout-request-preview"><span>Request amount</span><strong id="payoutRequestAmountPreview">$0.00</strong></div>
+          <div id="payoutRequestError" class="small" style="color:#b91c1c;"></div>
+          <button type="button" class="btn btn-primary" id="submitPayoutRequestBtn">Submit Payout Request</button>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="payoutConfirmationModalWrap">
+    <div class="modal" style="max-width:560px;">
+      <div class="section-header"><div><h2 style="margin:0;">Payout Request Submitted</h2></div><button type="button" class="btn btn-ghost" data-close-payout-confirmation>Close</button></div>
+      <div class="payout-confirmation-copy">Your payout request has been submitted. This will be processed as soon as possible. If you have not received your payout within 24 hours, please contact management.</div>
+      <div style="display:flex;justify-content:flex-end;margin-top:16px;"><button type="button" class="btn btn-primary" data-close-payout-confirmation>Done</button></div>
+    </div>
+  </div>
+
   <div id="sidebarOverlay" class="sidebar-overlay" aria-hidden="true"></div>
 
   <nav id="employeeMobileNav" class="employee-mobile-nav employee-only hidden" aria-label="Employee navigation">
@@ -694,6 +764,6 @@
     </div>
   </div>
 
-  <script type="module" src="../assets/js/app-admin.js?v=rental-ux-v39"></script>
+  <script type="module" src="../assets/js/app-admin.js?v=rental-ux-v43"></script>
 </body>
 </html>

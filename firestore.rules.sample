@@ -1,7 +1,9 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    /* Primary owner/admin account. */
     function isMe() {
       return request.auth != null &&
              request.auth.uid == "2OjzWe94F5RJrFdgx3fSF8gceuF2";
@@ -11,69 +13,89 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    /* Employee / secondary-account helpers. */
     function employeeProfileExists() {
       return isSignedIn() &&
              exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
+    function currentProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
     function isApprovedEmployee() {
       return employeeProfileExists() &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "employee" &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == "approved";
+             currentProfile().role == "employee" &&
+             currentProfile().status == "approved";
+    }
+
+    function isApprovedSecondary() {
+      return employeeProfileExists() &&
+             currentProfile().role == "secondary" &&
+             currentProfile().status == "approved" &&
+             currentProfile().primaryEmployeeId is string;
+    }
+
+    function isApprovedWorker() {
+      return isApprovedEmployee() || isApprovedSecondary();
+    }
+
+    /* For a secondary login, permissions follow the primary employee. */
+    function effectiveEmployeeUid() {
+      return isApprovedSecondary()
+        ? currentProfile().primaryEmployeeId
+        : request.auth.uid;
     }
 
     function isAssignedEmployee() {
-      return isApprovedEmployee() &&
-             resource.data.assignedEmployeeId == request.auth.uid;
+      return isApprovedWorker() &&
+             resource.data.assignedEmployeeId == effectiveEmployeeUid();
     }
 
-    function isOwnContractAcceptanceUpdate(uid) {
-      return isSignedIn() &&
-             request.auth.uid == uid &&
-             resource.data.role == "employee" &&
-             request.resource.data.role == resource.data.role &&
-             request.resource.data.status == resource.data.status &&
-             request.resource.data.uid == resource.data.uid &&
-             request.resource.data.email == resource.data.email &&
-             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-               "contractAcceptance",
-               "updatedAt"
-             ]) &&
-             request.resource.data.contractAcceptance.legalName is string &&
-             request.resource.data.contractAcceptance.legalName.size() > 0 &&
-             request.resource.data.contractAcceptance.legalNameConfirmed == true &&
-             request.resource.data.contractAcceptance.payoutMethod in [
-               "Every completed transaction",
-               "$500 threshold",
-               "$1,000 threshold",
-               "Every 2 weeks",
-               "Every month"
-             ];
-    }
-
+    /*
+     * Employee/approved secondary may make ONLY the limited order-progress
+     * changes available in the employee UI.
+     */
     function isEmployeeOrderProgressUpdate() {
-      return isApprovedEmployee() &&
-             resource.data.assignedEmployeeId == request.auth.uid &&
-             request.resource.data.assignedEmployeeId == request.auth.uid &&
-             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-               "exchangeTime",
-               "returnTime",
-               "status",
-               "completedAt",
-               "paymentStatus",
-               "amountPaid",
-               "depositPaidAmount",
-               "amountRemaining",
-               "updatedAt"
-             ]) &&
+      return isApprovedWorker() &&
+             resource.data.assignedEmployeeId == effectiveEmployeeUid() &&
+             request.resource.data.assignedEmployeeId == effectiveEmployeeUid() &&
+
+             request.resource.data
+               .diff(resource.data)
+               .affectedKeys()
+               .hasOnly([
+                 "exchangeTime",
+                 "returnTime",
+                 "status",
+                 "completedAt",
+                 "paymentStatus",
+                 "amountPaid",
+                 "depositPaidAmount",
+                 "amountRemaining",
+                 "updatedAt"
+               ]) &&
+
              (
                request.resource.data.status == resource.data.status ||
-               (resource.data.status != "Completed" &&
-                 request.resource.data.status in ["In-Progress", "Completed"])
+               (
+                 resource.data.status == "Confirmed" &&
+                 request.resource.data.status == "In-Progress"
+               ) ||
+               (
+                 resource.data.status == "Confirmed" &&
+                 request.resource.data.status == "Completed"
+               ) ||
+               (
+                 resource.data.status == "In-Progress" &&
+                 request.resource.data.status == "Completed"
+               )
              ) &&
+
              (
                request.resource.data.status != "Completed" ||
                resource.data.paymentStatus == "Free" ||
+               request.resource.data.paymentStatus == "Free" ||
                (
                  request.resource.data.paymentStatus == "Paid" &&
                  request.resource.data.amountRemaining == 0
@@ -81,21 +103,27 @@ service cloud.firestore {
              );
     }
 
+    /* Employee/secondary may synchronize the same limited tracking fields. */
     function isEmployeeTrackingProgressUpdate(orderId) {
-      return isApprovedEmployee() &&
-             get(/databases/$(database)/documents/orders/$(orderId)).data.assignedEmployeeId == request.auth.uid &&
-             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-               "exchangeTime",
-               "returnTime",
-               "status",
-               "paymentStatus",
-               "amountPaid",
-               "depositPaidAmount",
-               "amountRemaining",
-               "updatedAt"
-             ]);
+      return isApprovedWorker() &&
+             exists(/databases/$(database)/documents/orders/$(orderId)) &&
+             get(/databases/$(database)/documents/orders/$(orderId)).data.assignedEmployeeId == effectiveEmployeeUid() &&
+             request.resource.data
+               .diff(resource.data)
+               .affectedKeys()
+               .hasOnly([
+                 "exchangeTime",
+                 "returnTime",
+                 "status",
+                 "paymentStatus",
+                 "amountPaid",
+                 "depositPaidAmount",
+                 "amountRemaining",
+                 "updatedAt"
+               ]);
     }
 
+    /* Quick Picker order helpers. */
     function isQuickPickerOrder() {
       return request.resource.data.source == "quick-picker" &&
              request.resource.data.status == "Pending";
@@ -107,6 +135,7 @@ service cloud.firestore {
              request.resource.data.status == "Pending";
     }
 
+    /* Primary employee signup. */
     function isValidEmployeeSignup(uid) {
       return isSignedIn() &&
              request.auth.uid == uid &&
@@ -120,24 +149,93 @@ service cloud.firestore {
              request.resource.data.pickupAddress is string;
     }
 
-    match /users/{uid} {
-      allow get: if isMe() || (isSignedIn() && request.auth.uid == uid);
-      allow list: if isMe();
-      allow create: if isValidEmployeeSignup(uid);
+    /* Secondary login created from an employee's personal invite link. */
+    function isValidSecondarySignup(uid) {
+      return isSignedIn() &&
+             request.auth.uid == uid &&
+             request.resource.data.uid == uid &&
+             request.resource.data.role == "secondary" &&
+             request.resource.data.status == "pending_primary" &&
+             request.resource.data.email == request.auth.token.email &&
+             request.resource.data.primaryEmployeeId is string &&
+             request.resource.data.primaryEmployeeId.size() > 0 &&
+             request.resource.data.firstName is string &&
+             request.resource.data.lastName is string &&
+             request.resource.data.phone is string;
+    }
 
-      // Employees may only confirm their own contract legal name and payout
-      // preference. All admin, equipment, percentage, approval, and profile fields
-      // remain owner-controlled.
-      allow update: if isMe() || isOwnContractAcceptanceUpdate(uid);
+    /* Preserve your existing employee self-edit behavior without allowing
+       employees to approve themselves, change role, UID, or email. */
+    function employeeKeepsProtectedFields() {
+      return request.resource.data.uid == resource.data.uid &&
+             request.resource.data.role == resource.data.role &&
+             request.resource.data.status == resource.data.status &&
+             request.resource.data.email == resource.data.email;
+    }
+
+    /* Primary employee may approve/revoke only secondary accounts attached
+       to that primary employee. */
+    function isPrimarySecondaryApproval() {
+      return isApprovedEmployee() &&
+             resource.data.role == "secondary" &&
+             resource.data.primaryEmployeeId == request.auth.uid &&
+             request.resource.data.uid == resource.data.uid &&
+             request.resource.data.email == resource.data.email &&
+             request.resource.data.role == resource.data.role &&
+             request.resource.data.primaryEmployeeId == resource.data.primaryEmployeeId &&
+             request.resource.data
+               .diff(resource.data)
+               .affectedKeys()
+               .hasOnly(["status", "approvedByPrimaryAt", "updatedAt"]) &&
+             request.resource.data.status in ["approved", "pending_primary"];
+    }
+
+    /* Employee and secondary profiles. */
+    match /users/{uid} {
+      allow get: if isMe() ||
+                   (isSignedIn() && request.auth.uid == uid) ||
+                   (isApprovedEmployee() && resource.data.role == "secondary" && resource.data.primaryEmployeeId == request.auth.uid) ||
+                   (isApprovedSecondary() && uid == effectiveEmployeeUid());
+
+      /* Primary employees may query only their linked secondary accounts. */
+      allow list: if isMe() ||
+                    (isApprovedEmployee() &&
+                     resource.data.role == "secondary" &&
+                     resource.data.primaryEmployeeId == request.auth.uid);
+
+      allow create: if isValidEmployeeSignup(uid) || isValidSecondarySignup(uid);
+
+      allow update: if isMe() ||
+                       (
+                         isSignedIn() &&
+                         request.auth.uid == uid &&
+                         resource.data.role == "employee" &&
+                         employeeKeepsProtectedFields()
+                       ) ||
+                       isPrimarySecondaryApproval();
+
       allow delete: if isMe();
     }
 
-
+    /* Weekly schedule + date-specific changes.
+       Secondary logins read/write the PRIMARY employee's schedule. */
     match /schedules/{uid} {
-      allow get: if isMe() || (isSignedIn() && request.auth.uid == uid);
+      allow get: if isMe() ||
+                   (isApprovedEmployee() && request.auth.uid == uid) ||
+                   (isApprovedSecondary() && effectiveEmployeeUid() == uid);
+
       allow list: if isMe();
-      allow create, update: if isMe() || (isApprovedEmployee() && request.auth.uid == uid);
+
+      allow create, update: if isMe() ||
+                               (isApprovedEmployee() && request.auth.uid == uid) ||
+                               (isApprovedSecondary() && effectiveEmployeeUid() == uid);
+
       allow delete: if isMe();
+    }
+
+    /* Optional admin bootstrap/security document. */
+    match /appSecurity/{docId} {
+      allow read, write: if isMe();
     }
 
     match /settings/{docId} {
@@ -160,28 +258,57 @@ service cloud.firestore {
       allow write: if isMe();
     }
 
+    /* Orders */
     match /orders/{orderId} {
-      // Public Quick Picker currently reads orders to calculate availability.
-      // Approved employees may only query orders assigned to their own UID.
       allow get, list: if request.auth == null || isMe() || isAssignedEmployee();
-      allow create: if isMe() || (request.auth == null && isQuickPickerOrder());
+
+      allow create: if isMe() ||
+                       (request.auth == null && isQuickPickerOrder());
+
       allow update: if isMe() ||
-                    isEmployeeOrderProgressUpdate() ||
-                    (request.auth == null && isExistingQuickPickerOrder());
+                       isEmployeeOrderProgressUpdate() ||
+                       (request.auth == null && isExistingQuickPickerOrder());
+
       allow delete: if isMe();
     }
 
+    /* Public/customer tracking. */
     match /orderTracking/{trackingCode} {
       allow read: if true;
-      allow create: if isMe() || (request.auth == null && request.resource.data.status == "Pending");
+
+      allow create: if isMe() ||
+                       (request.auth == null && request.resource.data.status == "Pending");
+
       allow update: if isMe() ||
-                    isEmployeeTrackingProgressUpdate(trackingCode) ||
-                    (
-                      request.auth == null &&
-                      resource.data.status == "Pending" &&
-                      request.resource.data.status == "Pending"
-                    );
+                       isEmployeeTrackingProgressUpdate(trackingCode) ||
+                       (
+                         request.auth == null &&
+                         resource.data.status == "Pending" &&
+                         request.resource.data.status == "Pending"
+                       );
+
       allow delete: if isMe();
+    }
+
+
+    /* Employee payout requests. */
+    match /payoutRequests/{requestId} {
+      allow read: if isMe() ||
+                  (
+                    isApprovedEmployee() &&
+                    resource.data.employeeUid == request.auth.uid
+                  );
+
+      allow create: if isApprovedEmployee() &&
+                    request.resource.data.employeeUid == request.auth.uid &&
+                    request.resource.data.status == "pending" &&
+                    request.resource.data.amount is number &&
+                    request.resource.data.amount > 0 &&
+                    request.resource.data.payoutAccountId is string &&
+                    request.resource.data.payoutMethod is string &&
+                    request.resource.data.payoutDetail is string;
+
+      allow update, delete: if isMe();
     }
 
     match /reviews/{reviewId} {
@@ -204,10 +331,14 @@ service cloud.firestore {
     }
 
     match /orderAuditLog/{docId} {
-      allow create: if isMe() || (
-        request.auth == null &&
-        request.resource.data.actor in ["quick-picker", "quick-picker-notify"]
-      );
+      allow create: if isMe() ||
+                      (
+                        request.auth == null &&
+                        request.resource.data.actor in [
+                          "quick-picker",
+                          "quick-picker-notify"
+                        ]
+                      );
       allow read, update, delete: if isMe();
     }
 
@@ -215,21 +346,53 @@ service cloud.firestore {
       allow read, write: if isMe();
     }
 
-    match /financeExpenses/{docId} { allow read, write: if isMe(); }
-    match /financeIncome/{docId} { allow read, write: if isMe(); }
-    match /financeMileage/{docId} { allow read, write: if isMe(); }
-    match /financeVehicles/{docId} { allow read, write: if isMe(); }
-    match /financeAssets/{docId} { allow read, write: if isMe(); }
-    match /financeIncidents/{docId} { allow read, write: if isMe(); }
-    match /financeHomeOffice/{docId} { allow read, write: if isMe(); }
-    match /financeCategories/{docId} { allow read, write: if isMe(); }
-    match /financeMileageRates/{docId} { allow read, write: if isMe(); }
-    match /financeAttachments/{docId} { allow read, write: if isMe(); }
+    /* Finance records remain owner-only. */
+    match /financeExpenses/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /financeIncome/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /financeMileage/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /financeVehicles/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /financeAssets/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /financeIncidents/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /financeHomeOffice/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /financeCategories/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /financeMileageRates/{docId} {
+      allow read, write: if isMe();
+    }
+
+    match /financeAttachments/{docId} {
+      allow read, write: if isMe();
+    }
+
     match /financeAudit/{docId} {
       allow read, create: if isMe();
       allow update, delete: if false;
     }
 
+    /* Everything else remains owner-only. */
     match /{document=**} {
       allow read, write: if isMe();
     }

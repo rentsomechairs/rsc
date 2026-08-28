@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule } from './store.js?v=rental-ux-v39';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v43';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
-import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v39';
+import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v43';
 const state = {
   inventory: [],
   orders: [],
@@ -46,13 +46,19 @@ const state = {
   scheduleEditingDate: '',
   scheduleChangeSelectionMode: 'individual',
   scheduleChangeSelectedDates: [],
-  quickPeekEventChosen: false
+  quickPeekEventChosen: false,
+  orderLocationFilter: 'company',
+  primaryEmployee: null,
+  secondaryUsers: [],
+  payoutRequests: [],
+  payoutAmountMode: 'all',
+  selectedPayoutAccountId: ''
 };
 const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'rental-ux-v39';
+const ADMIN_VERSION = 'rental-ux-v43';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -310,6 +316,7 @@ async function init() {
   await withBusy(async () => {
     await loadImageLibrary();
     await loadData();
+    applyRoleAccess();
     renderAll();
   }, 'Loading from Firebase…');
 }
@@ -339,9 +346,29 @@ function cacheEls() {
     newInquiryBell: document.getElementById('newInquiryBell'),
     newInquiryBadge: document.getElementById('newInquiryBadge'),
     employeeEarnedBalance: document.getElementById('employeeEarnedBalance'),
+    payoutRequestModalWrap: document.getElementById('payoutRequestModalWrap'),
+    payoutAccountsList: document.getElementById('payoutAccountsList'),
+    payoutAccountSelect: document.getElementById('payoutAccountSelect'),
+    payoutAccountForm: document.getElementById('payoutAccountForm'),
+    addPayoutAccountBtn: document.getElementById('addPayoutAccountBtn'),
+    cancelPayoutAccountBtn: document.getElementById('cancelPayoutAccountBtn'),
+    accountPayoutAccountsList: document.getElementById('accountPayoutAccountsList'),
+    accountPayoutAccountForm: document.getElementById('accountPayoutAccountForm'),
+    accountAddPayoutAccountBtn: document.getElementById('accountAddPayoutAccountBtn'),
+    accountCancelPayoutAccountBtn: document.getElementById('accountCancelPayoutAccountBtn'),
+    payoutAvailableBalance: document.getElementById('payoutAvailableBalance'),
+    payoutHeldBalance: document.getElementById('payoutHeldBalance'),
+    payoutCustomAmountRow: document.getElementById('payoutCustomAmountRow'),
+    payoutCustomAmount: document.getElementById('payoutCustomAmount'),
+    payoutRequestAmountPreview: document.getElementById('payoutRequestAmountPreview'),
+    payoutRequestError: document.getElementById('payoutRequestError'),
+    submitPayoutRequestBtn: document.getElementById('submitPayoutRequestBtn'),
+    payoutConfirmationModalWrap: document.getElementById('payoutConfirmationModalWrap'),
+    adminPayoutRequests: document.getElementById('adminPayoutRequests'),
     collapsedColumnsRail: document.getElementById('collapsedColumnsRail'),
     addOrderBtn: document.getElementById('addOrderBtn'),
     ordersViewToggle: document.getElementById('ordersViewToggle'),
+    ordersLocationFilter: document.getElementById('ordersLocationFilter'),
     ordersListView: document.getElementById('ordersListView'),
     ordersCalendarView: document.getElementById('ordersCalendarView'),
     ordersCalendarPrevBtn: document.getElementById('ordersCalendarPrevBtn'),
@@ -488,13 +515,18 @@ function cacheEls() {
     employeeContractSetupModal: document.getElementById('employeeContractSetupModal'),
     employeeContractSetupForm: document.getElementById('employeeContractSetupForm'),
     signupEmployeeName: document.getElementById('signupEmployeeName'),
+    secondaryAccessCard: document.getElementById('secondaryAccessCard'),
+    copySecondaryLoginLinkBtn: document.getElementById('copySecondaryLoginLinkBtn'),
+    secondaryAccessStatus: document.getElementById('secondaryAccessStatus'),
+    secondaryAccessList: document.getElementById('secondaryAccessList'),
     employeeContractSetupError: document.getElementById('employeeContractSetupError')
   });
 }
 function isRealAdminUser() { return state.currentUser?.role === 'admin' && state.currentUser?.status === 'approved'; }
-function getExperienceUser() { return state.viewAsEmployee || state.currentUser; }
+function isSecondaryLogin() { return state.currentUser?.role === 'secondary'; }
+function getExperienceUser() { return state.viewAsEmployee || (isSecondaryLogin() ? state.primaryEmployee : state.currentUser); }
 function isAdminUser() { return isRealAdminUser() && !state.viewAsEmployee; }
-function isEmployeeUser() { return getExperienceUser()?.role === 'employee'; }
+function isEmployeeUser() { return getExperienceUser()?.role === 'employee' || isSecondaryLogin(); }
 function applyRoleAccess() {
   const admin = isAdminUser();
   const employee = isEmployeeUser();
@@ -507,8 +539,8 @@ function applyRoleAccess() {
   // Reset tab visibility first so exiting View As restores the full admin menu.
   document.querySelectorAll('[data-tab-btn]').forEach((btn) => btn.classList.remove('hidden'));
   if (employee) {
-    state.activeTab = ['orders','schedule','payments','documents'].includes(state.activeTab) ? state.activeTab : 'orders';
-    const allowed = new Set(['orders', 'schedule', 'payments', 'documents']);
+    state.activeTab = ['orders','schedule','account','payments','documents'].includes(state.activeTab) ? state.activeTab : 'orders';
+    const allowed = new Set(isSecondaryLogin() ? ['orders','schedule'] : ['orders', 'schedule', 'account', 'payments', 'documents']);
     document.querySelectorAll('[data-tab-btn]').forEach((btn) => btn.classList.toggle('hidden', !allowed.has(btn.dataset.tabBtn)));
   } else {
     document.querySelectorAll('.employee-only[data-tab-btn]').forEach((btn) => btn.classList.add('hidden'));
@@ -518,8 +550,8 @@ function applyRoleAccess() {
   if (els.viewAsName && state.viewAsEmployee) els.viewAsName.textContent = `Viewing as ${employeeDisplayName(state.viewAsEmployee)}`;
 
   document.querySelectorAll('[data-pending-account-notice]').forEach((el) => el.remove());
-  if (employee && experienceUser?.status !== 'approved') {
-    document.querySelector('[data-tab-panel="orders"]')?.insertAdjacentHTML('afterbegin', '<div class="card" data-pending-account-notice style="padding:18px;margin-bottom:16px;"><strong>Account pending approval</strong><div class="small muted">Your signup was received. Assigned orders become available after an administrator approves the account.</div></div>');
+  if (employee && (experienceUser?.status !== 'approved' || (isSecondaryLogin() && state.currentUser?.status !== 'approved'))) {
+    document.querySelector('[data-tab-panel="orders"]')?.insertAdjacentHTML('afterbegin', '<div class="card" data-pending-account-notice style="padding:18px;margin-bottom:16px;"><strong>Account pending approval</strong><div class="small muted">Your signup was received. Access becomes available after the required approval.</div></div>');
   }
   renderTabs();
   renderEmployeeEarnedBalance();
@@ -563,6 +595,28 @@ function quickPeekLocationOptions() {
     ...(state.users || []).filter((u) => u.role === 'employee' && u.status === 'approved' && employeeAssignments(u).length).map((u) => ({ id: locationIdForEmployee(u.uid || u.id), label: `${employeeDisplayName(u)} — ${u.pickupAddress || 'Employee location'}` }))
   ];
 }
+function orderLocationOptions() {
+  return [
+    { id: 'company', label: 'All Locations' },
+    { id: 'main', label: state.settings?.pickupName || 'Main Location' },
+    ...(state.users || []).filter((u) => u.role === 'employee' && u.status === 'approved').map((u) => ({ id: locationIdForEmployee(u.uid || u.id), label: employeeDisplayName(u) }))
+  ];
+}
+function populateOrdersLocationFilter() {
+  if (!els.ordersLocationFilter) return;
+  const options = orderLocationOptions();
+  if (!options.some((o) => o.id === state.orderLocationFilter)) state.orderLocationFilter = 'company';
+  els.ordersLocationFilter.innerHTML = options.map((o) => `<option value="${safeText(o.id)}"${o.id === state.orderLocationFilter ? ' selected' : ''}>${safeText(o.label)}</option>`).join('');
+}
+function filterOrdersByLocation(orders = []) {
+  if (!isAdminUser() || state.orderLocationFilter === 'company') return orders;
+  return orders.filter((order) => orderLocationId(order) === state.orderLocationFilter);
+}
+function locationLabelForOrder(order = {}) {
+  const id = orderLocationId(order);
+  return orderLocationOptions().find((o) => o.id === id)?.label || (id === 'main' ? 'Main Location' : 'Location');
+}
+
 function populateQuickPeekLocationSelect() {
   if (!els.quickPeekLocationSelect) return;
   const options = quickPeekLocationOptions();
@@ -930,10 +984,7 @@ function renderEmployeeDocuments() {
 }
 function openEmployeeContractConfirmation() {
   const employee = getExperienceUser();
-  if (!employee || !els.employeeContractSetupModal || state.viewAsEmployee) {
-    if (state.viewAsEmployee) alert('View As is read-only. The employee will complete this confirmation from their own login.');
-    return;
-  }
+  if (!employee || !els.employeeContractSetupModal) return;
   const contract = employeeContractAgreement(employee);
   const signupName = employeeDisplayName(employee);
   if (els.signupEmployeeName) els.signupEmployeeName.textContent = signupName;
@@ -950,9 +1001,8 @@ function closeEmployeeContractConfirmation() {
 }
 async function saveEmployeeContractConfirmation(event) {
   event.preventDefault();
-  if (state.viewAsEmployee) return;
-  const employee = state.currentUser;
-  if (!employee || employee.role !== 'employee') return;
+  const employee = getExperienceUser();
+  if (!employee || employee.role !== 'employee' || (isSecondaryLogin() && state.currentUser?.status !== 'approved')) return;
   const form = new FormData(event.currentTarget);
   const legalName = String(form.get('legalName') || '').trim();
   const payoutMethod = String(form.get('payoutMethod') || '').trim();
@@ -968,8 +1018,13 @@ async function saveEmployeeContractConfirmation(event) {
   };
   try {
     const savedProfile = await saveOwnContractAcceptance(employee, employee.contractAcceptance);
-    state.currentUser = { ...savedProfile };
-    state.users = [state.currentUser];
+    if (state.viewAsEmployee) {
+      state.viewAsEmployee = { ...state.viewAsEmployee, ...savedProfile };
+      state.users = state.users.map((u) => (u.uid || u.id) === (savedProfile.uid || savedProfile.id) ? { ...u, ...savedProfile } : u);
+    } else {
+      state.currentUser = { ...savedProfile };
+      state.users = [state.currentUser];
+    }
     closeEmployeeContractConfirmation();
     renderEmployeeDocuments();
   } catch (error) {
@@ -1047,6 +1102,7 @@ function loadBlankContractIntoEditor() {
 function enterViewAsEmployee(user = {}) {
   if (!isRealAdminUser()) return;
   state.viewAsEmployee = user;
+  state.schedulePersonId = user.uid || user.id || '';
   state.activeTab = 'orders';
   state.expandedOrderId = null;
   applyRoleAccess();
@@ -1173,6 +1229,176 @@ function employeeHourlyEstimateHtml(employee, order, earnings, plain = false) {
   const label = `${currency(estimate.hourlyRate)}/hr · ${estimate.totalMinutes.toFixed(0)} min`;
   return plain ? safeText(label) : `<span class="badge employee-hourly-badge" title="${safeText(`${pieces} = ${estimate.totalMinutes.toFixed(1)} estimated minutes`)}">${label}</span>`;
 }
+function payoutAccountsForEmployee(employee = {}) {
+  return Array.isArray(employee.payoutAccounts) ? employee.payoutAccounts.filter((a) => a && a.id) : [];
+}
+function employeePayoutRequestTotals(employeeUid = '') {
+  return (state.payoutRequests || []).filter((r) => String(r.employeeUid || '') === String(employeeUid)).reduce((acc, r) => {
+    const amount = Math.max(0, Number(r.amount || 0));
+    if (r.status === 'pending') acc.pending += amount;
+    if (r.status === 'paid') acc.paid += amount;
+    return acc;
+  }, { pending: 0, paid: 0 });
+}
+function employeeAvailablePayout(employee = getExperienceUser()) {
+  if (!employee) return 0;
+  const ledger = calculateEmployeePaymentLedger(employee, state.orders);
+  const employeeUid = employee.uid || employee.id || '';
+  const totals = employeePayoutRequestTotals(employeeUid);
+  return Math.max(0, ledger.employeeEarnings - totals.pending - totals.paid);
+}
+function payoutAmountForMode() {
+  const available = employeeAvailablePayout();
+  if (state.payoutAmountMode === 'custom') return Math.max(0, Number(els.payoutCustomAmount?.value || 0));
+  if (state.payoutAmountMode === 'dollar') return Math.floor(available + 1e-9);
+  if (state.payoutAmountMode === 'ten') return Math.floor((available + 1e-9) / 10) * 10;
+  return available;
+}
+function renderPayoutModal() {
+  const employee = getExperienceUser();
+  if (!els.payoutRequestModalWrap || isSecondaryLogin() || !employee || employee.role !== 'employee') return;
+  const accounts = payoutAccountsForEmployee(employee);
+  if (!state.selectedPayoutAccountId || !accounts.some((a) => a.id === state.selectedPayoutAccountId)) state.selectedPayoutAccountId = accounts[0]?.id || '';
+  const available = employeeAvailablePayout(employee);
+  const totals = employeePayoutRequestTotals(employee.uid || employee.id);
+  if (els.payoutAvailableBalance) els.payoutAvailableBalance.textContent = currency(available);
+  if (els.payoutHeldBalance) els.payoutHeldBalance.textContent = totals.pending > 0 ? `${currency(totals.pending)} currently pending` : 'No pending payout requests';
+  if (els.payoutAccountsList) els.payoutAccountsList.innerHTML = accounts.length ? accounts.map((a) => `<div class="payout-account-card ${a.id === state.selectedPayoutAccountId ? 'selected' : ''}"><button type="button" data-select-payout-account="${safeText(a.id)}"><strong>${safeText(a.nickname || a.method)}</strong><span>${safeText(a.method)} · ${safeText(a.detail)}</span></button><button class="btn btn-ghost btn-small" type="button" data-delete-payout-account="${safeText(a.id)}">Remove</button></div>`).join('') : '<div class="empty-state">No payout accounts saved yet. Add one to request a payout.</div>';
+  if (els.payoutAccountSelect) els.payoutAccountSelect.innerHTML = accounts.length ? accounts.map((a) => `<option value="${safeText(a.id)}" ${a.id === state.selectedPayoutAccountId ? 'selected' : ''}>${safeText(a.nickname || a.method)} — ${safeText(a.method)}</option>`).join('') : '<option value="">Add a payout account first</option>';
+  const customValue = Math.max(0, Number(els.payoutCustomAmount?.value || 0));
+  const payoutModeAmounts = {
+    all: available,
+    dollar: Math.floor(available + 1e-9),
+    ten: Math.floor((available + 1e-9) / 10) * 10,
+    custom: customValue
+  };
+  document.querySelectorAll('[data-payout-amount-mode]').forEach((btn) => {
+    const mode = btn.dataset.payoutAmountMode || 'all';
+    btn.classList.toggle('active', mode === state.payoutAmountMode);
+    btn.textContent = mode === 'custom' && !(customValue > 0) ? '$—' : currency(payoutModeAmounts[mode] || 0);
+    btn.title = mode === 'all' ? 'All available' : mode === 'dollar' ? 'Rounded down to the nearest dollar' : mode === 'ten' ? 'Rounded down to the nearest $10' : 'Custom amount';
+  });
+  els.payoutCustomAmountRow?.classList.toggle('hidden', state.payoutAmountMode !== 'custom');
+  const amount = payoutAmountForMode();
+  if (els.payoutRequestAmountPreview) els.payoutRequestAmountPreview.textContent = currency(amount);
+  if (els.submitPayoutRequestBtn) els.submitPayoutRequestBtn.disabled = !accounts.length || available <= 0 || amount <= 0 || amount > available + 0.001;
+}
+
+function renderAccountManagement() {
+  const employee = getExperienceUser();
+  if (!employee || employee.role !== 'employee' || isSecondaryLogin()) return;
+  const accounts = payoutAccountsForEmployee(employee);
+  if (els.accountPayoutAccountsList) {
+    els.accountPayoutAccountsList.innerHTML = accounts.length ? accounts.map((a) => `<div class="payout-account-card"><div><strong>${safeText(a.nickname || a.method)}</strong><span>${safeText(a.method)} · ${safeText(a.detail)}</span></div><button class="btn btn-ghost btn-small" type="button" data-account-delete-payout-account="${safeText(a.id)}">Remove</button></div>`).join('') : '<div class="empty-state">No payout accounts saved yet.</div>';
+  }
+}
+async function handleAccountPayoutSubmit(event) {
+  event.preventDefault();
+  const employee = getExperienceUser();
+  if (!employee || employee.role !== 'employee' || isSecondaryLogin()) return;
+  const data = new FormData(event.currentTarget);
+  const nickname = String(data.get('nickname') || '').trim();
+  const method = String(data.get('method') || '').trim();
+  const detail = String(data.get('detail') || '').trim();
+  if (!nickname || !method || !detail) return;
+  const accounts = payoutAccountsForEmployee(employee);
+  await withBusy(() => savePayoutAccounts([...accounts, { id: uid('payacct'), nickname, method, detail, createdAt: new Date().toISOString() }]), 'Saving payout account…');
+  event.currentTarget.reset();
+  event.currentTarget.classList.add('hidden');
+  renderAccountManagement();
+}
+async function handleAccountPayoutClick(event) {
+  const remove = event.target.closest('[data-account-delete-payout-account]');
+  if (!remove) return;
+  if (!confirm('Remove this payout account?')) return;
+  const id = remove.dataset.accountDeletePayoutAccount;
+  await withBusy(() => savePayoutAccounts(payoutAccountsForEmployee(getExperienceUser()).filter((a) => a.id !== id)), 'Removing payout account…');
+  renderAccountManagement();
+}
+
+function openPayoutRequestModal() {
+  const employee = getExperienceUser();
+  if (isSecondaryLogin() || !employee || employee.role !== 'employee') return;
+  state.payoutAmountMode = 'all';
+  if (els.payoutRequestError) els.payoutRequestError.textContent = '';
+  els.payoutAccountForm?.classList.add('hidden');
+  renderPayoutModal();
+  els.payoutRequestModalWrap?.classList.add('open');
+}
+function closePayoutRequestModal() { els.payoutRequestModalWrap?.classList.remove('open'); }
+async function savePayoutAccounts(accounts) {
+  const employee = getExperienceUser();
+  if (!employee || employee.role !== 'employee') return;
+  const saved = await saveOwnPayoutAccounts(employee, accounts);
+  if (state.viewAsEmployee) state.viewAsEmployee = { ...state.viewAsEmployee, ...saved };
+  else state.currentUser = { ...state.currentUser, ...saved };
+  state.users = state.users.map((u) => (u.uid || u.id) === (saved.uid || saved.id) ? { ...u, ...saved } : u);
+  renderPayoutModal();
+  renderAccountManagement();
+  renderEmployeeEarnedBalance();
+}
+async function handlePayoutAccountSubmit(event) {
+  event.preventDefault();
+  const employee = getExperienceUser();
+  if (isSecondaryLogin() || !employee || employee.role !== 'employee') return;
+  const data = new FormData(event.currentTarget);
+  const nickname = String(data.get('nickname') || '').trim();
+  const method = String(data.get('method') || '').trim();
+  const detail = String(data.get('detail') || '').trim();
+  if (!nickname || !method || !detail) return;
+  const accounts = payoutAccountsForEmployee(employee);
+  const account = { id: uid('payacct'), nickname, method, detail, createdAt: new Date().toISOString() };
+  await withBusy(() => savePayoutAccounts([...accounts, account]), 'Saving payout account…');
+  state.selectedPayoutAccountId = account.id;
+  event.currentTarget.reset();
+  event.currentTarget.classList.add('hidden');
+  renderPayoutModal();
+}
+async function handlePayoutAccountsClick(event) {
+  const select = event.target.closest('[data-select-payout-account]');
+  const remove = event.target.closest('[data-delete-payout-account]');
+  if (select) { state.selectedPayoutAccountId = select.dataset.selectPayoutAccount; renderPayoutModal(); return; }
+  if (remove) {
+    const id = remove.dataset.deletePayoutAccount;
+    if (!confirm('Remove this payout account?')) return;
+    await withBusy(() => savePayoutAccounts(payoutAccountsForEmployee(getExperienceUser()).filter((a) => a.id !== id)), 'Removing payout account…');
+  }
+}
+async function submitPayoutRequest() {
+  const employee = getExperienceUser();
+  if (isSecondaryLogin() || !employee || employee.role !== 'employee') return;
+  const available = employeeAvailablePayout(employee);
+  const amount = payoutAmountForMode();
+  const account = payoutAccountsForEmployee(employee).find((a) => a.id === (els.payoutAccountSelect?.value || state.selectedPayoutAccountId));
+  if (!account) { if (els.payoutRequestError) els.payoutRequestError.textContent = 'Choose or add a payout account.'; return; }
+  if (!(amount > 0) || amount > available + 0.001) { if (els.payoutRequestError) els.payoutRequestError.textContent = 'Choose an amount that is within your available balance.'; return; }
+  const request = await withBusy(() => createPayoutRequest({ employeeUid: employee.uid || employee.id, employeeName: employeeDisplayName(employee), amount: Math.round(amount * 100) / 100, amountMode: state.payoutAmountMode, payoutAccountId: account.id, payoutAccountNickname: account.nickname, payoutMethod: account.method, payoutDetail: account.detail }), 'Submitting payout request…');
+  state.payoutRequests = [request, ...state.payoutRequests];
+  closePayoutRequestModal();
+  renderEmployeeEarnedBalance();
+  renderEmployeePayments();
+  els.payoutConfirmationModalWrap?.classList.add('open');
+}
+function renderAdminPayoutRequests() {
+  if (!els.adminPayoutRequests || !isAdminUser()) return;
+  const rows = (state.payoutRequests || []).slice().sort((a,b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const pending = rows.filter((r) => r.status === 'pending');
+  const recent = rows.filter((r) => r.status !== 'pending').slice(0, 10);
+  const renderRow = (r) => `<div class="admin-payout-request-card payout-status-${safeText(r.status || 'pending')}" data-payout-request-id="${safeText(r.id)}"><div><strong>${safeText(r.employeeName || 'Employee')} · ${currency(Number(r.amount || 0))}</strong><div class="admin-payout-request-meta"><span>${safeText(r.payoutAccountNickname || '')}</span><span>${safeText(r.payoutMethod || '')}</span><span>${safeText(r.payoutDetail || '')}</span><span>${safeText(r.createdAt ? new Date(r.createdAt).toLocaleString() : '')}</span><span>${safeText((r.status || 'pending').toUpperCase())}</span></div></div><div class="admin-payout-request-actions">${r.status === 'pending' ? `<button type="button" class="btn btn-primary btn-small" data-payout-mark-paid="${safeText(r.id)}">Mark Paid</button><button type="button" class="btn btn-ghost btn-small" data-payout-decline="${safeText(r.id)}">Decline</button>` : ''}</div></div>`;
+  els.adminPayoutRequests.innerHTML = `<div class="admin-payout-requests-wrap"><div class="admin-payout-requests-head"><div><strong>Payout Requests</strong><div class="small muted">${pending.length} pending</div></div></div>${pending.length ? pending.map(renderRow).join('') : '<div class="small muted">No pending payout requests.</div>'}${recent.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-weight:700;">Recent processed requests</summary><div class="stack-sm" style="margin-top:8px;">${recent.map(renderRow).join('')}</div></details>` : ''}</div>`;
+}
+async function handleAdminPayoutRequestClick(event) {
+  const paid = event.target.closest('[data-payout-mark-paid]');
+  const declined = event.target.closest('[data-payout-decline]');
+  const id = paid?.dataset.payoutMarkPaid || declined?.dataset.payoutDecline;
+  if (!id) return;
+  const status = paid ? 'paid' : 'declined';
+  await withBusy(() => updatePayoutRequestStatus(id, status), status === 'paid' ? 'Marking payout paid…' : 'Declining payout request…');
+  state.payoutRequests = state.payoutRequests.map((r) => r.id === id ? { ...r, status, updatedAt: new Date().toISOString() } : r);
+  renderAdminPayoutRequests();
+  renderEmployees();
+}
+
 function renderEmployeeEarnedBalance() {
   if (!els.employeeEarnedBalance) return;
   if (!isEmployeeUser()) {
@@ -1180,10 +1406,12 @@ function renderEmployeeEarnedBalance() {
     return;
   }
   const employee = getExperienceUser();
-  const ledger = calculateEmployeePaymentLedger(employee, state.orders);
   els.employeeEarnedBalance.classList.remove('hidden');
   const strong = els.employeeEarnedBalance.querySelector('strong');
-  if (strong) strong.textContent = currency(ledger.employeeEarnings);
+  if (strong) strong.textContent = currency(employeeAvailablePayout(employee));
+  const canRequest = !isSecondaryLogin() && employee?.role === 'employee';
+  els.employeeEarnedBalance.classList.toggle('no-payout-access', !canRequest);
+  els.employeeEarnedBalance.title = canRequest ? 'Click to request a payout' : 'Available employee balance';
 }
 function formatEmployeeActionTime(value = '') {
   const raw = String(value || '').trim();
@@ -1370,11 +1598,11 @@ function renderEmployeeOrderDetails(order = {}) {
   const contact = order.contactMethods || {};
   const pickupAddress = order.fulfillmentType === 'Delivery' ? (order.address || 'No delivery address') : (order.assignedEmployeePickupAddress || getExperienceUser()?.pickupAddress || state.settings?.pickupAddress || 'Pickup address not set');
   const items = (order.items || []).map((item) => `<div class="calendar-stock-row"><div><strong>${safeText(item.name || 'Equipment')}</strong></div><div><strong>${Number(item.quantity || 0)}</strong></div></div>`).join('') || '<div class="empty-state">No equipment on this order.</div>';
-  const previewDisabled = state.viewAsEmployee ? 'disabled' : '';
+  const previewDisabled = '';
   const canStart = ['Confirmed','Pending'].includes(order.status);
   const canComplete = ['Confirmed','In-Progress'].includes(order.status);
   const controls = `<div class="employee-order-controls">
-    <div class="section-header"><div><strong>Order progress</strong><div class="small muted">${state.viewAsEmployee ? 'Preview only — controls are disabled while using View As.' : 'You can adjust exchange/return times and advance the order status.'}</div></div></div>
+    <div class="section-header"><div><strong>Order progress</strong><div class="small muted">You can adjust exchange/return times and advance the order status.</div></div></div>
     <div class="employee-order-control-grid">
       <label class="form-row"><span>Exchange time</span><input type="time" data-employee-exchange-time="${safeText(order.id)}" value="${safeText(normalizeInlineTimeValue(order.exchangeTime || ''))}" ${previewDisabled}></label>
       <label class="form-row"><span>Return time</span><input type="time" data-employee-return-time="${safeText(order.id)}" value="${safeText(normalizeInlineTimeValue(order.returnTime || ''))}" ${previewDisabled}></label>
@@ -1388,9 +1616,8 @@ function renderEmployeeOrderDetails(order = {}) {
   return `<div class="employee-order-details"><div class="employee-order-kv"><div><span>Customer</span><strong>${safeText(`${order.firstName || ''} ${order.lastName || ''}`.trim() || 'Unnamed')}</strong></div><div><span>Event</span><strong>${safeText(order.eventName || 'Rental')}</strong></div><div><span>Event date</span><strong>${safeText(formatDateTime(order.eventDate, order.eventTime || 'To Be Determined'))}</strong></div><div><span>Exchange</span><strong>${safeText(formatDateTime(order.exchangeDate, order.exchangeTime || 'To Be Determined'))}</strong></div><div><span>Return</span><strong>${safeText(formatDateTime(order.returnDate, order.returnTime || 'To Be Determined'))}</strong></div><div><span>${order.fulfillmentType === 'Delivery' ? 'Delivery address' : 'Pickup address'}</span><strong>${safeText(pickupAddress)}</strong></div>${contact.text ? `<div><span>Phone</span><strong>${safeText(contact.text)}</strong></div>` : ''}${contact.email ? `<div><span>Email</span><strong>${safeText(contact.email)}</strong></div>` : ''}<div><span>Order total</span><strong>${currency(getEffectiveOrderTotal(order))}</strong></div><div><span>Payment</span><strong>${safeText(order.paymentStatus || 'Un-Paid')}</strong></div></div><div><strong>Equipment</strong><div class="calendar-stock-list" style="margin-top:6px;">${items}</div></div>${order.notes ? `<div class="note-block small"><strong>Notes:</strong> ${safeText(order.notes)}</div>` : ''}${controls}</div>`;
 }
 async function handleEmployeeOrderProgress(orderId, changes = {}) {
-  if (state.viewAsEmployee) return;
-  const employee = state.currentUser;
-  if (!employee || employee.role !== 'employee') return;
+  const employee = getExperienceUser();
+  if (!employee || employee.role !== 'employee' || (isSecondaryLogin() && state.currentUser?.status !== 'approved')) return;
   const current = state.orders.find((o) => o.id === orderId);
   if (!current) return;
   if (changes.status === 'Completed' && !window.confirm('Mark this order Completed? This will also mark a non-free order as paid.')) return;
@@ -1453,7 +1680,7 @@ function renderEmployees() {
       return `<div class="employee-allocation-row" data-employee-allocation-row="${safeText(a.inventoryId)}"><div><strong>${safeText(item.name || 'Equipment')}</strong><div class="small muted">${safeText(item.category || 'Other')} · Company total ${Number(item.stock || 0)}</div></div><div class="form-row"><label>Qty</label><input type="number" min="0" max="${max}" step="1" data-employee-equipment-qty="${safeText(a.inventoryId)}" value="${Number(a.quantity || 0)}" /></div><div class="form-row"><label>Cost each</label><input type="number" min="0" step="0.01" data-employee-equipment-cost="${safeText(a.inventoryId)}" value="${a.unitCost || ''}" placeholder="0.00" /></div><div><span class="small muted">Assigned value</span><strong data-allocation-line-total>${currency(Number(a.quantity || 0) * Number(a.unitCost || 0))}</strong></div><button type="button" class="btn btn-ghost btn-small" data-remove-employee-equipment="${safeText(a.inventoryId)}">Remove</button></div>`;
     }).join('') || '<div class="empty-state">No equipment assigned yet. Use Add Equipment to allocate inventory.</div>';
     const ledger = calculateEmployeePaymentLedger(u, state.orders);
-    return `<div class="card" style="padding:16px;" data-employee-card="${safeText(uid)}"><div class="section-header"><div><strong>${safeText(employeeDisplayName(u))}</strong><div class="small muted">${safeText(u.email || '')} · ${safeText(u.phone || 'No phone')}</div></div><span class="badge ${u.status === 'approved' ? 'badge-green' : 'badge-yellow'}">${safeText(u.status || 'pending')}</span></div><div class="employee-location-row"><div class="small"><strong>Pickup location:</strong> ${safeText(u.pickupAddress || 'Not provided')}</div><label class="employee-exchange-time-field"><span>Average exchange time</span><div><input type="number" min="0" step="0.5" data-employee-average-exchange value="${Number(u.averageExchangeMinutes || 0)}" /><span>min each × 2</span></div></label><button class="btn btn-secondary btn-small" type="button" data-save-employee-exchange-time="${safeText(uid)}">Save</button></div>${u.emergencyContactName ? `<div class="small muted">Emergency contact: ${safeText(u.emergencyContactName)} · ${safeText(u.emergencyContactPhone || '')}</div>` : ''}<div class="employee-allocation-summary"><span class="badge badge-blue">Equipment value: ${currency(totalValue)}</span><span class="badge badge-yellow">Payoff applied: ${currency(ledger.payoffTotal)}</span><span class="badge badge-green">Remaining: ${currency(Math.max(0,totalValue-ledger.payoffTotal))}</span></div><details style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Equipment Allocation</summary><div class="employee-equipment-toolbar"><button class="btn btn-primary btn-small" data-open-employee-equipment-picker="${safeText(uid)}" type="button">+ Add Equipment</button><span class="small muted">${assignments.length} equipment type${assignments.length === 1 ? '' : 's'} assigned</span></div><div class="employee-equipment-picker hidden" data-employee-equipment-picker="${safeText(uid)}"></div><div class="employee-allocation-grid">${rows}</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-equipment="${safeText(uid)}" type="button">Save Equipment Allocation</button></div></details><details style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Payment Settings</summary><div class="employee-payment-settings" style="margin-top:10px;"><div class="small muted" style="grid-column:1/-1;"><strong>While equipment is unpaid</strong> — these three percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidEmployee" value="${employeePaymentSettings(u).unpaidEmployee}" /></label><label class="form-row"><span>Equipment payoff %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="equipmentPayoff" value="${employeePaymentSettings(u).equipmentPayoff}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidCompany" value="${employeePaymentSettings(u).unpaidCompany}" /></label><div class="small muted" style="grid-column:1/-1;margin-top:4px;"><strong>After an individual unit is paid off</strong> — these two percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidEmployee" value="${employeePaymentSettings(u).paidEmployee}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidCompany" value="${employeePaymentSettings(u).paidCompany}" /></label></div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-payment="${safeText(uid)}" type="button">Save Payment Settings</button></div></details><details class="employee-visual-settings" style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Order Colors</summary><div class="employee-color-editor" data-employee-color-editor>
+    return `<div class="card" style="padding:16px;" data-employee-card="${safeText(uid)}"><div class="section-header"><div><strong>${safeText(employeeDisplayName(u))}</strong><div class="small muted">${safeText(u.email || '')} · ${safeText(u.phone || 'No phone')}</div></div><span class="badge ${u.status === 'approved' ? 'badge-green' : 'badge-yellow'}">${safeText(u.status || 'pending')}</span></div><div class="employee-location-row"><div class="small"><strong>Pickup location:</strong> ${safeText(u.pickupAddress || 'Not provided')}</div><label class="employee-exchange-time-field"><span>Average exchange time</span><div><input type="number" min="0" step="0.5" data-employee-average-exchange value="${Number(u.averageExchangeMinutes || 0)}" /><span>min each × 2</span></div></label><button class="btn btn-secondary btn-small" type="button" data-save-employee-exchange-time="${safeText(uid)}">Save</button></div>${u.emergencyContactName ? `<div class="small muted">Emergency contact: ${safeText(u.emergencyContactName)} · ${safeText(u.emergencyContactPhone || '')}</div>` : ''}<div class="employee-allocation-summary"><span class="badge badge-blue">Equipment value: ${currency(totalValue)}</span><span class="badge badge-yellow">Payoff applied: ${currency(ledger.payoffTotal)}</span><span class="badge badge-green">Remaining: ${currency(Math.max(0,totalValue-ledger.payoffTotal))}</span><span class="badge badge-blue">Payout available: ${currency(employeeAvailablePayout(u))}</span></div><details style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Equipment Allocation</summary><div class="employee-equipment-toolbar"><button class="btn btn-primary btn-small" data-open-employee-equipment-picker="${safeText(uid)}" type="button">+ Add Equipment</button><span class="small muted">${assignments.length} equipment type${assignments.length === 1 ? '' : 's'} assigned</span></div><div class="employee-equipment-picker hidden" data-employee-equipment-picker="${safeText(uid)}"></div><div class="employee-allocation-grid">${rows}</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-equipment="${safeText(uid)}" type="button">Save Equipment Allocation</button></div></details><details style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Payment Settings</summary><div class="employee-payment-settings" style="margin-top:10px;"><div class="small muted" style="grid-column:1/-1;"><strong>While equipment is unpaid</strong> — these three percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidEmployee" value="${employeePaymentSettings(u).unpaidEmployee}" /></label><label class="form-row"><span>Equipment payoff %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="equipmentPayoff" value="${employeePaymentSettings(u).equipmentPayoff}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidCompany" value="${employeePaymentSettings(u).unpaidCompany}" /></label><div class="small muted" style="grid-column:1/-1;margin-top:4px;"><strong>After an individual unit is paid off</strong> — these two percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidEmployee" value="${employeePaymentSettings(u).paidEmployee}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidCompany" value="${employeePaymentSettings(u).paidCompany}" /></label></div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-payment="${safeText(uid)}" type="button">Save Payment Settings</button></div></details><details class="employee-visual-settings" style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Order Colors</summary><div class="employee-color-editor" data-employee-color-editor>
   <div class="employee-color-inputs">
     <label class="employee-color-field"><span>Accent / edge</span><input type="color" data-employee-color="accent" value="${safeText(employeeOrderColors(u).accent)}" /></label>
     <label class="employee-color-field"><span>Card background</span><input type="color" data-employee-color="background" value="${safeText(employeeOrderColors(u).background)}" /></label>
@@ -1647,12 +1874,53 @@ async function handleEmployeeListClick(event) {
   user.status = approve ? 'approved' : 'pending';
   await withBusy(async () => { await saveUserProfile(user); await syncPublicPickupLocations(); }, 'Updating employee…');
   renderEmployees();
+  renderAdminPayoutRequests();
   populateQuickPeekLocationSelect();
 }
 async function copyEmployeeSignupLink() {
   const url = new URL('../employee-signup/index.html', window.location.href).href;
   await navigator.clipboard.writeText(url);
   if (els.employeeSignupLinkStatus) els.employeeSignupLinkStatus.textContent = 'Private employee signup link copied.';
+}
+
+async function copySecondaryLoginLink() {
+  if (isSecondaryLogin()) return;
+  const employee = getExperienceUser();
+  if (!employee || employee.role !== 'employee') return;
+  const url = new URL('../employee-signup/index.html', window.location.href);
+  url.searchParams.set('secondaryFor', employee.uid || employee.id || '');
+  url.searchParams.set('secondaryName', employeeDisplayName(employee));
+  await navigator.clipboard.writeText(url.href);
+  if (els.secondaryAccessStatus) els.secondaryAccessStatus.textContent = 'Private secondary-login link copied.';
+}
+function renderSecondaryAccess() {
+  if (!els.secondaryAccessCard) return;
+  const employee = getExperienceUser();
+  const show = employee?.role === 'employee' && !isSecondaryLogin();
+  els.secondaryAccessCard.classList.toggle('hidden', !show);
+  if (!show || !els.secondaryAccessList) return;
+  const employeeUid = employee.uid || employee.id || '';
+  const rows = state.viewAsEmployee
+    ? (state.users || []).filter((u) => u.role === 'secondary' && String(u.primaryEmployeeId || '') === String(employeeUid))
+    : (state.secondaryUsers || []);
+  els.secondaryAccessList.innerHTML = rows.length ? rows.map((u) => {
+    const pending = u.status !== 'approved';
+    return `<div class="secondary-access-row"><div><strong>${safeText(employeeDisplayName(u))}</strong><div class="small muted">${safeText(u.email || '')}${u.phone ? ` · ${safeText(u.phone)}` : ''}</div></div><span class="badge ${pending ? 'badge-yellow' : 'badge-green'}">${pending ? 'Needs your approval' : 'Approved'}</span><div class="button-row">${pending ? `<button type="button" class="btn btn-primary btn-small" data-approve-secondary="${safeText(u.uid || u.id)}">Approve</button>` : `<button type="button" class="btn btn-ghost btn-small" data-pend-secondary="${safeText(u.uid || u.id)}">Revoke Access</button>`}</div></div>`;
+  }).join('') : '<div class="empty-state">No secondary logins have signed up from your link yet.</div>';
+}
+async function handleSecondaryAccessClick(event) {
+  const approve = event.target.closest('[data-approve-secondary]');
+  const pend = event.target.closest('[data-pend-secondary]');
+  const secondaryUid = approve?.dataset.approveSecondary || pend?.dataset.pendSecondary;
+  const employee = getExperienceUser();
+  const primaryUid = employee?.uid || employee?.id || '';
+  if (!secondaryUid || !employee || employee.role !== 'employee' || !primaryUid || isSecondaryLogin()) return;
+  await withBusy(async () => {
+    await updateSecondaryApproval(secondaryUid, primaryUid, Boolean(approve));
+    state.users = state.users.map((u) => (u.uid || u.id) === secondaryUid ? { ...u, status: approve ? 'approved' : 'pending_primary', approvedByPrimaryAt: approve ? new Date().toISOString() : '', updatedAt: new Date().toISOString() } : u);
+    if (!state.viewAsEmployee) state.secondaryUsers = await getSecondaryUsers(primaryUid).catch(() => state.secondaryUsers || []);
+    renderSecondaryAccess();
+  }, approve ? 'Approving secondary login…' : 'Revoking secondary login…');
 }
 
 function bindLogin() {
@@ -1709,6 +1977,22 @@ function bindApp() {
   });
   window.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeMobileSidebar(); });
   els.employeesList?.addEventListener('click', handleEmployeeListClick);
+  els.adminPayoutRequests?.addEventListener('click', handleAdminPayoutRequestClick);
+  els.employeeEarnedBalance?.addEventListener('click', openPayoutRequestModal);
+  els.payoutRequestModalWrap?.addEventListener('click', (event) => { if (event.target === els.payoutRequestModalWrap || event.target.closest('[data-close-payout-modal]')) closePayoutRequestModal(); });
+  els.payoutAccountsList?.addEventListener('click', handlePayoutAccountsClick);
+  els.addPayoutAccountBtn?.addEventListener('click', () => els.payoutAccountForm?.classList.remove('hidden'));
+  els.cancelPayoutAccountBtn?.addEventListener('click', () => { els.payoutAccountForm?.reset(); els.payoutAccountForm?.classList.add('hidden'); });
+  els.payoutAccountForm?.addEventListener('submit', handlePayoutAccountSubmit);
+  els.accountAddPayoutAccountBtn?.addEventListener('click', () => els.accountPayoutAccountForm?.classList.remove('hidden'));
+  els.accountCancelPayoutAccountBtn?.addEventListener('click', () => { els.accountPayoutAccountForm?.reset(); els.accountPayoutAccountForm?.classList.add('hidden'); });
+  els.accountPayoutAccountForm?.addEventListener('submit', handleAccountPayoutSubmit);
+  els.accountPayoutAccountsList?.addEventListener('click', handleAccountPayoutClick);
+  els.payoutAccountSelect?.addEventListener('change', () => { state.selectedPayoutAccountId = els.payoutAccountSelect.value; renderPayoutModal(); });
+  document.querySelectorAll('[data-payout-amount-mode]').forEach((btn) => btn.addEventListener('click', () => { state.payoutAmountMode = btn.dataset.payoutAmountMode || 'all'; renderPayoutModal(); }));
+  els.payoutCustomAmount?.addEventListener('input', renderPayoutModal);
+  els.submitPayoutRequestBtn?.addEventListener('click', submitPayoutRequest);
+  els.payoutConfirmationModalWrap?.addEventListener('click', (event) => { if (event.target === els.payoutConfirmationModalWrap || event.target.closest('[data-close-payout-confirmation]')) els.payoutConfirmationModalWrap.classList.remove('open'); });
   els.employeesList?.addEventListener('input', (event) => {
     const colorInput = event.target.closest('[data-employee-color]');
     if (!colorInput) return;
@@ -1721,6 +2005,9 @@ function bindApp() {
   document.querySelectorAll('[data-close-contract-modal]').forEach((btn) => btn.addEventListener('click', closeEmployeeContractEditor));
   els.contractModalWrap?.addEventListener('click', (event) => { if (event.target === els.contractModalWrap) closeEmployeeContractEditor(); });
   els.quickPeekLocationSelect?.addEventListener('change', () => { state.quickPeekLocationId = els.quickPeekLocationSelect.value || 'company'; renderCalendarView(); });
+  els.ordersLocationFilter?.addEventListener('change', () => { state.orderLocationFilter = els.ordersLocationFilter.value || 'company'; renderOrders(); renderOrdersCalendar(); });
+  els.copySecondaryLoginLinkBtn?.addEventListener('click', copySecondaryLoginLink);
+  els.secondaryAccessList?.addEventListener('click', handleSecondaryAccessClick);
   els.copyPasteModalWrap?.addEventListener('click', (event) => { if (event.target === els.copyPasteModalWrap) closeCopyPasteMenu(); });
   document.querySelectorAll('[data-close-copy-paste-modal]').forEach((btn) => btn.addEventListener('click', closeCopyPasteMenu));
   els.copyPasteOptions?.addEventListener('click', handleCopyPasteOptionClick);
@@ -1729,7 +2016,7 @@ function bindApp() {
   els.ordersViewToggle?.addEventListener('click', (event) => { const btn = event.target.closest('[data-orders-view]'); if (!btn) return; state.ordersView = btn.dataset.ordersView === 'calendar' ? 'calendar' : 'list'; renderOrdersViewMode(); if (state.ordersView === 'calendar') renderOrdersCalendar(); });
   els.ordersCalendarPrevBtn?.addEventListener('click', () => shiftOrdersCalendarMonth(-1));
   els.ordersCalendarNextBtn?.addEventListener('click', () => shiftOrdersCalendarMonth(1));
-  els.ordersCalendarTodayBtn?.addEventListener('click', () => { state.ordersCalendarDate = new Date().toISOString().slice(0,10); renderOrdersCalendar(); });
+  els.ordersCalendarTodayBtn?.addEventListener('click', () => { state.ordersCalendarDate = isoLocalDate(new Date()); renderOrdersCalendar(); });
   els.ordersMonthCalendar?.addEventListener('click', handleOrdersCalendarClick);
   els.schedulePersonSelect?.addEventListener('change', () => { state.schedulePersonId = els.schedulePersonSelect.value; state.scheduleEditingDate = ''; setWeeklyScheduleEditorOpen(false); renderSchedule(); });
   els.editWeeklyScheduleBtn?.addEventListener('click', () => setWeeklyScheduleEditorOpen(els.weeklyScheduleEditor?.classList.contains('hidden')));
@@ -2006,13 +2293,19 @@ function handleInventoryImagePreview() {
 }
 async function loadData() {
   state.inventory = await getInventory();
+  state.primaryEmployee = (isSecondaryLogin() && state.currentUser?.status === 'approved') ? await getUserProfile(state.currentUser.primaryEmployeeId).catch(() => null) : null;
+  const employeeUid = isSecondaryLogin() ? (state.primaryEmployee?.uid || state.currentUser.primaryEmployeeId) : (state.currentUser?.uid || state.currentUser?.id || '');
   if (state.currentUser?.role === 'admin') state.users = await getUsers().catch(() => []);
+  else if (isSecondaryLogin()) state.users = [state.primaryEmployee, state.currentUser].filter(Boolean);
   else state.users = [state.currentUser];
+  state.secondaryUsers = (!isSecondaryLogin() && state.currentUser?.role === 'employee') ? await getSecondaryUsers(employeeUid).catch(() => []) : [];
+  state.payoutRequests = isAdminUser() ? await getPayoutRequests().catch(() => []) : (!isSecondaryLogin() && state.currentUser?.role === 'employee' ? await getPayoutRequests(employeeUid).catch(() => []) : []);
   state.settings = await getSettings();
+  const secondaryApproved = !isSecondaryLogin() || state.currentUser?.status === 'approved';
   if (state.currentUser?.role === 'admin') state.schedules = await getSchedules().catch(() => []);
-  else { const ownSchedule = await getSchedule(state.currentUser.uid).catch(() => null); state.schedules = ownSchedule ? [ownSchedule] : []; }
-  state.schedulePersonId = state.currentUser?.uid || state.currentUser?.id || '';
-  const rawOrders = state.currentUser?.role === 'employee' ? await getAssignedOrders(state.currentUser.uid) : await getOpenOrders();
+  else { const ownSchedule = secondaryApproved ? await getSchedule(employeeUid).catch(() => null) : null; state.schedules = ownSchedule ? [ownSchedule] : []; }
+  state.schedulePersonId = employeeUid;
+  const rawOrders = (state.currentUser?.role === 'employee' || isSecondaryLogin()) ? (secondaryApproved ? await getAssignedOrders(employeeUid) : []) : await getOpenOrders();
   const normalizedOrders = rawOrders.map((order) => ({
     assignedEmployeeId: '',
     assignedEmployeeName: '',
@@ -2021,7 +2314,7 @@ async function loadData() {
   }));
   const tracked = ensureOrdersHaveTrackingCodes(normalizedOrders);
   state.orders = tracked.orders;
-  if (state.currentUser?.role === 'employee') state.orders = state.orders.filter((order) => order.assignedEmployeeId === state.currentUser.uid);
+  if (state.currentUser?.role === 'employee' || isSecondaryLogin()) state.orders = state.orders.filter((order) => order.assignedEmployeeId === employeeUid);
 
   // IMPORTANT: load-time normalization is runtime-only. Loading the admin must be read-only.
   // Deposit/payment derived values, legacy status labels, missing optional assignment fields,
@@ -2087,6 +2380,7 @@ const WORKSPACE_TITLES = {
   inventory: ['Inventory', 'Manage company equipment, quantities, accessories, and availability.'],
   calendar: ['Quick Peek', 'Check equipment and team availability for a specific rental window.'],
   schedule: ['Schedule', 'Set typical availability and date-specific changes.'],
+  account: ['Account Management', 'Manage secondary access and payout accounts.'],
   reviews: ['Reviews', 'Review customer feedback and follow up where needed.'],
   numbers: ['The Numbers', 'See costs, earnings, and operational performance in one place.'],
   employees: ['Employees', 'Manage employee access, equipment, contracts, and compensation.'],
@@ -2118,6 +2412,9 @@ function renderAll() {
   renderNumbers();
   renderEmployees();
   populateQuickPeekLocationSelect();
+  populateOrdersLocationFilter();
+  renderSecondaryAccess();
+  renderAccountManagement();
   renderEmployeePayments();
   renderEmployeeEarnedBalance();
   renderEmployeeDocuments();
@@ -3575,6 +3872,8 @@ function isoLocalDate(d) {
 function shiftOrdersCalendarMonth(diff) {
   const d = monthStart(state.ordersCalendarDate);
   d.setMonth(d.getMonth() + diff);
+  const current = monthStart(isoLocalDate(new Date()));
+  if (d < current) d.setTime(current.getTime());
   state.ordersCalendarDate = isoLocalDate(d);
   renderOrdersCalendar();
 }
@@ -3615,12 +3914,17 @@ function renderOrdersCalendar() {
   const base = monthStart(state.ordersCalendarDate);
   if (els.ordersCalendarMonthLabel) els.ordersCalendarMonthLabel.textContent = new Intl.DateTimeFormat('en-US',{month:'long',year:'numeric'}).format(base);
   const gridStart = new Date(base); gridStart.setDate(1 - base.getDay());
-  const today = isoLocalDate(new Date());
-  const visibleOrders = (state.orders || []).map((order) => ({ order, range: clampOrderCalendarRange(order) })).filter((row) => row.range);
+  const todayDate = localDateFromIso(isoLocalDate(new Date()));
+  const today = isoLocalDate(todayDate);
+  const currentWeekStart = new Date(todayDate); currentWeekStart.setDate(todayDate.getDate() - todayDate.getDay());
+  const experienceUser = getExperienceUser();
+  const calendarSourceOrders = isEmployeeUser() ? (state.orders || []).filter((o) => o.assignedEmployeeId === (experienceUser?.uid || experienceUser?.id)) : (state.orders || []);
+  const visibleOrders = filterOrdersByLocation(calendarSourceOrders).map((order) => ({ order, range: clampOrderCalendarRange(order) })).filter((row) => row.range);
   const weeks = [];
   for (let weekIndex = 0; weekIndex < 6; weekIndex++) {
     const weekStart = new Date(gridStart); weekStart.setDate(gridStart.getDate() + weekIndex * 7);
     const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+    if (weekEnd < currentWeekStart) continue;
     const dayCells = [];
     for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
       const d = new Date(weekStart); d.setDate(weekStart.getDate() + dayIndex);
@@ -3657,7 +3961,10 @@ function renderOrdersCalendar() {
       const colorClass = useEmployeeColor ? ' employee-colored' : '';
       const colorVars = useEmployeeColor ? `;--calendar-order-bg:${safeText(employeeColors.background)};--calendar-order-accent:${safeText(employeeColors.accent)};--calendar-order-text:${safeText(readableTextColor(employeeColors.background))}` : '';
       const inquiryClass = order.newInquiry ? ' new-inquiry' : '';
-      return `<button type="button" class="orders-calendar-span status-${cls}${colorClass}${inquiryClass}${edgeClass}" data-calendar-order-id="${safeText(order.id)}" style="--calendar-left:${left}%;--calendar-width:${width}%;--calendar-lane:${segment.lane}${colorVars}" title="${safeText(name)} · ${safeText(formatDateTime(order.exchangeDate, order.exchangeTime || 'To Be Determined'))} → ${safeText(formatDateTime(order.returnDate, order.returnTime || 'To Be Determined'))}"><strong>${safeText(name)}</strong><span>${safeText(order.status || '')}</span></button>`;
+      const compactCalendarTime = (value) => { const formatted = formatClockTime(value || ''); return formatted === 'To Be Determined' ? 'TBD' : formatted; };
+      const startTimeLabel = !segment.continuesBefore ? compactCalendarTime(order.exchangeTime) : '';
+      const endTimeLabel = !segment.continuesAfter ? compactCalendarTime(order.returnTime) : '';
+      return `<button type="button" class="orders-calendar-span status-${cls}${colorClass}${inquiryClass}${edgeClass}" data-calendar-order-id="${safeText(order.id)}" style="--calendar-left:${left}%;--calendar-width:${width}%;--calendar-lane:${segment.lane}${colorVars}" title="${safeText(name)} · ${safeText(formatDateTime(order.exchangeDate, order.exchangeTime || 'To Be Determined'))} → ${safeText(formatDateTime(order.returnDate, order.returnTime || 'To Be Determined'))}">${startTimeLabel ? `<span class="calendar-edge-time start">${safeText(startTimeLabel)}</span>` : ''}<strong>${safeText(name)}</strong>${endTimeLabel ? `<span class="calendar-edge-time end">${safeText(endTimeLabel)}</span>` : ''}<span class="calendar-status-label">${safeText(order.status || '')}</span></button>`;
     }).join('');
     weeks.push(`<div class="orders-calendar-week" style="--calendar-lanes:${Math.max(maxLane + 1, 1)}"><div class="orders-calendar-week-days">${dayCells.join('')}</div><div class="orders-calendar-bars">${bars}</div></div>`);
   }
@@ -3923,7 +4230,7 @@ async function handleScheduleChangeEditorClick(event) {
   closeScheduleChangeModal(); renderSchedule(); renderCalendarView();
 }
 function quickPeekSchedulePeople(locationId='company') {
-  const currentUid=state.currentUser?.uid||state.currentUser?.id||'';
+  const currentUid=getExperienceUser()?.uid||getExperienceUser()?.id||'';
   if(String(locationId).startsWith('employee:')) {const uidValue=String(locationId).slice(9);const u=(state.users||[]).find((x)=>(x.uid||x.id)===uidValue);return u?[{uid:uidValue,label:employeeDisplayName(u)}]:[];}
   if(locationId==='main') return currentUid?[{uid:currentUid,label:'My Schedule'}]:[];
   return schedulePersonOptions();
@@ -3935,9 +4242,9 @@ function buildQuickPeekScheduleHtml(dateStr, locationId='company') {
 function renderOrders() {
   renderOrdersViewMode();
   const experienceUser = getExperienceUser();
-  const visibleOrders = isEmployeeUser()
+  const visibleOrders = filterOrdersByLocation(isEmployeeUser()
     ? state.orders.filter((o) => o.assignedEmployeeId === (experienceUser?.uid || experienceUser?.id))
-    : state.orders;
+    : state.orders);
   const pending = visibleOrders.filter((o) => getOrderColumn(o.status) === 'pending').sort(compareNextActionAsc);
   const confirmed = visibleOrders.filter((o) => getOrderColumn(o.status) === 'confirmed').sort(compareNextActionAsc);
   const active = [...pending, ...confirmed].sort((a, b) => {
@@ -3998,6 +4305,16 @@ function summarizeGroupEquipment(orders = []) {
     });
   });
   return [...totals.entries()].map(([name, qty]) => `${qty} ${name}`).join(', ');
+}
+function summarizeGroupEquipmentByLocation(orders = []) {
+  const byLocation = new Map();
+  (orders || []).forEach((order) => {
+    const label = locationLabelForOrder(order);
+    if (!byLocation.has(label)) byLocation.set(label, []);
+    byLocation.get(label).push(order);
+  });
+  if (byLocation.size <= 1) return summarizeGroupEquipment(orders);
+  return [...byLocation.entries()].map(([label, rows]) => `${label}: ${summarizeGroupEquipment(rows) || 'No equipment'}`).join('  |  ');
 }
 function getBusinessWeekRangeForDate(date = new Date()) {
   const d = date instanceof Date ? new Date(date) : new Date(`${date}T12:00:00`);
