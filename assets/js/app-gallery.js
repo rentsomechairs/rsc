@@ -1,5 +1,5 @@
-import { getInventory, getSettings } from './store.js?v=rental-ux-v47';
-import { currency, safeText } from './utils.js?v=rental-ux-v47';
+import { getInventory, getOrders, getSettings } from './store.js?v=rental-ux-v49';
+import { currency, safeText } from './utils.js?v=rental-ux-v49';
 
 const els = {
   filters: document.getElementById('galleryFilters'),
@@ -8,18 +8,72 @@ const els = {
 
 const state = {
   inventory: [],
+  orders: [],
   settings: {},
-  activeCategory: '__all__'
+  activeCategory: '__all__',
+  categoryUsage: new Map(),
+  selectedAccessoryByItem: new Map()
 };
+
+function normalizeCategory(value = '') {
+  return String(value || 'Other').trim() || 'Other';
+}
+
+function normalizeAccessories(accessories = []) {
+  return Array.isArray(accessories) ? accessories.map((entry, index) => ({
+    id: String(entry?.id || `acc-${index}`),
+    name: String(entry?.name || '').trim(),
+    imageData: String(entry?.imageData || '').trim()
+  })).filter((entry) => entry.name) : [];
+}
+
+function buildCategoryUsage() {
+  const usage = new Map();
+  const inventoryById = new Map(state.inventory.map((item) => [String(item.id || ''), item]));
+
+  for (const order of state.orders || []) {
+    const weight = order.status === 'Completed' ? 1 : ['Confirmed', 'In-Progress'].includes(order.status) ? 0.65 : 0.2;
+    const categoriesInOrder = new Map();
+
+    for (const line of order.items || []) {
+      const inventoryItem = inventoryById.get(String(line.inventoryId || ''));
+      const category = normalizeCategory(inventoryItem?.category || line.category || 'Other');
+      categoriesInOrder.set(category, (categoriesInOrder.get(category) || 0) + Number(line.quantity || 0));
+    }
+
+    for (const [category, units] of categoriesInOrder.entries()) {
+      const current = usage.get(category) || { units: 0, orders: 0, score: 0 };
+      current.units += units * weight;
+      current.orders += weight;
+      current.score = current.units + (current.orders * 2);
+      usage.set(category, current);
+    }
+  }
+
+  state.categoryUsage = usage;
+}
+
+function categoryScore(category) {
+  return Number(state.categoryUsage.get(normalizeCategory(category))?.score || 0);
+}
 
 function byCategory(items = []) {
   const groups = new Map();
   items.forEach((item) => {
-    const category = String(item.category || 'Other').trim() || 'Other';
+    const category = normalizeCategory(item.category);
     if (!groups.has(category)) groups.set(category, []);
     groups.get(category).push(item);
   });
-  return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+
+  for (const [, groupItems] of groups) {
+    groupItems.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  }
+
+  return [...groups.entries()].sort((a, b) => {
+    const scoreDifference = categoryScore(b[0]) - categoryScore(a[0]);
+    if (scoreDifference !== 0) return scoreDifference;
+    return a[0].localeCompare(b[0]);
+  });
 }
 
 function getCategories() {
@@ -28,7 +82,7 @@ function getCategories() {
 
 function filterItems() {
   if (state.activeCategory === '__all__') return state.inventory;
-  return state.inventory.filter((item) => String(item.category || 'Other') === state.activeCategory);
+  return state.inventory.filter((item) => normalizeCategory(item.category) === state.activeCategory);
 }
 
 function resolveGalleryImage(src = '') {
@@ -82,14 +136,27 @@ function renderFilters() {
   });
 }
 
+function renderAccessoryNames(item) {
+  const accessories = normalizeAccessories(item.accessories);
+  if (!accessories.length) return '';
+  return `<div class="gallery-accessories" aria-label="Accessories for ${safeText(item.name)}">
+    <span class="gallery-accessories-label">Accessories:</span>
+    ${accessories.map((accessory) => `<button type="button" class="gallery-accessory-name${accessory.imageData ? '' : ' no-image'}" data-gallery-item-id="${safeText(item.id)}" data-gallery-accessory-id="${safeText(accessory.id)}" ${accessory.imageData ? '' : 'disabled title="No accessory image uploaded"'}>${safeText(accessory.name)}</button>`).join('')}
+  </div>`;
+}
+
 function renderCard(item) {
   const stock = Number(item.stock || 0);
   const stockLabel = stock === 1 ? '1 available unit' : `${stock} available units`;
+  const selectedAccessoryId = state.selectedAccessoryByItem.get(String(item.id || '')) || '';
+  const selectedAccessory = normalizeAccessories(item.accessories).find((accessory) => accessory.id === selectedAccessoryId && accessory.imageData);
+  const displayImage = selectedAccessory?.imageData || itemImage(item);
   return `
-    <article class="gallery-card">
+    <article class="gallery-card" data-gallery-card="${safeText(item.id)}">
       <div class="gallery-image-wrap" style="${inventoryBackgroundCss()}">
-        <img class="gallery-image inventory-transparent-image" style="${inventoryImageCss()}" src="${safeText(itemImage(item))}" alt="${safeText(item.name)}" loading="lazy" />
+        <img class="gallery-image inventory-transparent-image" style="${inventoryImageCss()}" src="${safeText(displayImage)}" alt="${safeText(item.name)}" loading="lazy" data-gallery-card-image />
       </div>
+      ${renderAccessoryNames(item)}
       <div class="gallery-card-body">
         <div class="gallery-card-top">
           <span class="gallery-price">${currency(item.price)}</span>
@@ -97,10 +164,77 @@ function renderCard(item) {
         <h3>${safeText(item.name)}</h3>
         <div class="gallery-card-footer">
           <span class="gallery-stock">${safeText(stockLabel)}</span>
-          <a class="btn btn-primary btn-small" href="../quick-picker/index.html">Request</a>
         </div>
       </div>
     </article>`;
+}
+
+function findInventoryItem(itemId) {
+  return state.inventory.find((item) => String(item.id || '') === String(itemId || '')) || null;
+}
+
+function persistentImageForItem(item) {
+  if (!item) return '';
+  const selectedAccessoryId = state.selectedAccessoryByItem.get(String(item.id || '')) || '';
+  const selectedAccessory = normalizeAccessories(item.accessories).find((accessory) => accessory.id === selectedAccessoryId && accessory.imageData);
+  return selectedAccessory?.imageData || itemImage(item);
+}
+
+function updateAccessorySelectedState(card, itemId) {
+  const selectedId = state.selectedAccessoryByItem.get(String(itemId || '')) || '';
+  card.querySelectorAll('[data-gallery-accessory-id]').forEach((button) => {
+    const selected = button.dataset.galleryAccessoryId === selectedId;
+    button.classList.toggle('selected', selected);
+    let remove = button.querySelector('.gallery-accessory-remove');
+    if (selected && !remove) {
+      remove = document.createElement('span');
+      remove.className = 'gallery-accessory-remove';
+      remove.setAttribute('aria-hidden', 'true');
+      remove.textContent = '×';
+      button.appendChild(remove);
+    } else if (!selected && remove) {
+      remove.remove();
+    }
+    button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    if (selected) button.title = 'Click again or click the red × to show the main image';
+    else button.removeAttribute('title');
+  });
+}
+
+function wireAccessoryPreviews() {
+  els.content.querySelectorAll('[data-gallery-card]').forEach((card) => {
+    const itemId = card.dataset.galleryCard;
+    const item = findInventoryItem(itemId);
+    const image = card.querySelector('[data-gallery-card-image]');
+    if (!item || !image) return;
+
+    const restorePersistentImage = () => {
+      image.src = persistentImageForItem(item);
+    };
+
+    card.querySelectorAll('[data-gallery-accessory-id]').forEach((button) => {
+      const accessory = normalizeAccessories(item.accessories).find((entry) => entry.id === button.dataset.galleryAccessoryId);
+      if (!accessory?.imageData) return;
+
+      button.addEventListener('mouseenter', () => { image.src = accessory.imageData; });
+      button.addEventListener('mouseleave', restorePersistentImage);
+      button.addEventListener('focus', () => { image.src = accessory.imageData; });
+      button.addEventListener('blur', restorePersistentImage);
+      button.addEventListener('click', () => {
+        const key = String(itemId || '');
+        if (state.selectedAccessoryByItem.get(key) === accessory.id) {
+          state.selectedAccessoryByItem.delete(key);
+          image.src = itemImage(item);
+        } else {
+          state.selectedAccessoryByItem.set(key, accessory.id);
+          image.src = accessory.imageData;
+        }
+        updateAccessorySelectedState(card, itemId);
+      });
+    });
+
+    updateAccessorySelectedState(card, itemId);
+  });
 }
 
 function renderContent() {
@@ -119,19 +253,19 @@ function renderContent() {
       </div>
     </section>
   `).join('');
+
+  wireAccessoryPreviews();
 }
 
 async function init() {
   try {
     if (els.content) els.content.innerHTML = '<div class="section-loading-card"><span class="section-loading-spinner" aria-hidden="true"></span><span>Loading from Firebase…</span></div>';
     if (els.filters) els.filters.innerHTML = '<span class="badge badge-blue">Loading…</span>';
-    const [inventory, settings] = await Promise.all([getInventory(), getSettings()]);
-    state.inventory = inventory.sort((a, b) => {
-      const categoryCompare = String(a.category || '').localeCompare(String(b.category || ''));
-      if (categoryCompare !== 0) return categoryCompare;
-      return String(a.name || '').localeCompare(String(b.name || ''));
-    });
+    const [inventory, orders, settings] = await Promise.all([getInventory(), getOrders(), getSettings()]);
+    state.inventory = inventory;
+    state.orders = orders || [];
     state.settings = settings || {};
+    buildCategoryUsage();
     renderFilters();
     renderContent();
   } catch (error) {

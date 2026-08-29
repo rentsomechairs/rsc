@@ -4587,3 +4587,66 @@ textarea{line-height:1.45}
 @media(max-width:720px){.inventory-background-modal{max-height:calc(100vh - 24px);overflow:auto}.inventory-background-controls .form-row.two{grid-template-columns:1fr}}
 
 .inventory-background-preview-image{width:88%;height:88%;object-fit:contain;display:block;}
+
+/* V48 gallery accessory preview controls */
+.gallery-accessories {
+  padding: 7px 9px 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+.gallery-accessories-label {
+  color: var(--muted);
+  font-weight: 700;
+}
+.gallery-accessory-name {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: var(--primary);
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.gallery-accessory-name:hover,
+.gallery-accessory-name:focus-visible,
+.gallery-accessory-name.selected {
+  color: var(--text);
+}
+.gallery-accessory-name.selected {
+  text-decoration-thickness: 2px;
+}
+.gallery-accessory-name.no-image,
+.gallery-accessory-name:disabled {
+  color: var(--muted);
+  cursor: default;
+  text-decoration-style: dotted;
+  opacity: .8;
+}
+
+
+/* V49 selected accessory remove control */
+.gallery-accessory-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  color: #dc2626;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: .75;
+  text-decoration: none;
+  vertical-align: -1px;
+}
+.gallery-accessory-name.selected:hover .gallery-accessory-remove,
+.gallery-accessory-name.selected:focus-visible .gallery-accessory-remove {
+  color: #b91c1c;
+}
