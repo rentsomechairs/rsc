@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v43';
+import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v46';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -85,6 +85,7 @@ const defaultSettings = {
   homeQuoteImageData: '',
   homeBrowseImageData: '',
   homeTrackImageData: '',
+  inventoryImageBackground: { mode: 'linear', color1: '#f8fafc', color2: '#dbeafe', angle: 135, texture: 'none', textureOpacity: 0.18 },
   pickupCoords: null,
   pickupGeocodedAddress: '',
   pickupGeocodeUpdatedAt: '',
@@ -286,7 +287,21 @@ export async function saveSingleInventoryItem(item) {
     return clone(cleanItem);
   }
   await upsertDoc(COLLECTIONS.inventory, cleanItem.id, cleanItem);
-  return clone(cleanItem);
+
+  // Do not report success based on local state alone. Read the exact inventory
+  // document back from Firestore and verify the replacement image persisted.
+  // This prevents the old behavior where a new image looked correct until refresh.
+  const persisted = await getDocById(COLLECTIONS.inventory, cleanItem.id);
+  if (!persisted) throw new Error('Inventory save could not be verified in Firebase.');
+  const expectedImageData = String(cleanItem.imageData || '');
+  const savedImageData = String(persisted.imageData || '');
+  const expectedImageUrl = String(cleanItem.imageUrl || '');
+  const savedImageUrl = String(persisted.imageUrl || '');
+  if (savedImageData !== expectedImageData || savedImageUrl !== expectedImageUrl) {
+    throw new Error('Firebase did not retain the replacement inventory image. The old image was not replaced.');
+  }
+  cacheInventory = cacheInventory.map((entry) => entry.id === cleanItem.id ? persisted : entry);
+  return clone(persisted);
 }
 
 export async function deleteSingleInventoryItem(itemOrId) {
@@ -1064,7 +1079,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v43');
+  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v46');
   return getDocById(COLLECTIONS.reviews, code);
 }
 

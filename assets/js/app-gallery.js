@@ -43,6 +43,24 @@ function itemImage(item) {
   return item?.imageData || resolveGalleryImage(item?.imageUrl || '');
 }
 
+function inventoryBackgroundConfig() {
+  const raw = state.settings?.inventoryImageBackground || {};
+  const mode = ['solid','linear','radial'].includes(raw.mode) ? raw.mode : 'linear';
+  const texture = ['none','noise','dots','grid','linen','diagonal'].includes(raw.texture) ? raw.texture : 'none';
+  const color = (value, fallback) => /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value) : fallback;
+  return { mode, color1: color(raw.color1,'#f8fafc'), color2: color(raw.color2,'#dbeafe'), angle: Math.max(0,Math.min(360,Number(raw.angle ?? 135)||0)), texture, textureOpacity: Math.max(0,Math.min(.45,Number(raw.textureOpacity ?? .18)||0)) };
+}
+function inventoryBackgroundCss() {
+  const c=inventoryBackgroundConfig(), a=c.textureOpacity;
+  const base=c.mode==='solid'?`linear-gradient(${c.color1},${c.color1})`:c.mode==='radial'?`radial-gradient(circle at 35% 25%,${c.color1} 0%,${c.color2} 100%)`:`linear-gradient(${c.angle}deg,${c.color1} 0%,${c.color2} 100%)`;
+  let t='',size='auto';
+  if(c.texture==='dots'){t=`radial-gradient(circle,rgba(15,23,42,${a}) 1px,transparent 1.5px)`;size='12px 12px, auto';}
+  else if(c.texture==='grid'){t=`linear-gradient(rgba(15,23,42,${a}) 1px,transparent 1px),linear-gradient(90deg,rgba(15,23,42,${a}) 1px,transparent 1px)`;size='18px 18px,18px 18px,auto';}
+  else if(c.texture==='diagonal')t=`repeating-linear-gradient(135deg,rgba(255,255,255,${a}) 0 2px,transparent 2px 9px)`;
+  else if(c.texture==='linen')t=`repeating-linear-gradient(0deg,rgba(255,255,255,${a}) 0 1px,transparent 1px 4px),repeating-linear-gradient(90deg,rgba(15,23,42,${a*.45}) 0 1px,transparent 1px 5px)`;
+  else if(c.texture==='noise'){t=`repeating-radial-gradient(circle at 20% 30%,rgba(15,23,42,${a*.55}) 0 0.7px,transparent .8px 3px)`;size='7px 7px,auto';}
+  return `background-color:${c.color1};background-image:${t?`${t},${base}`:base};background-size:${size};background-position:center;`;
+}
 
 function renderFilters() {
   const categories = getCategories();
@@ -66,8 +84,8 @@ function renderCard(item) {
   const stockLabel = stock === 1 ? '1 available unit' : `${stock} available units`;
   return `
     <article class="gallery-card">
-      <div class="gallery-image-wrap">
-        <img class="gallery-image" src="${safeText(itemImage(item))}" alt="${safeText(item.name)}" loading="lazy" />
+      <div class="gallery-image-wrap" style="${inventoryBackgroundCss()}">
+        <img class="gallery-image inventory-transparent-image" src="${safeText(itemImage(item))}" alt="${safeText(item.name)}" loading="lazy" />
       </div>
       <div class="gallery-card-body">
         <div class="gallery-card-top">

@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v43';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v46';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
-import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v43';
+import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v46';
 const state = {
   inventory: [],
   orders: [],
@@ -58,7 +58,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'rental-ux-v43';
+const ADMIN_VERSION = 'rental-ux-v46';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -199,6 +199,72 @@ async function compressImageFile(file, maxSize = 900, quality = 0.82) {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0, width, height);
   return canvas.toDataURL('image/jpeg', quality);
+}
+function inventoryBackgroundConfig(settings = state.settings) {
+  const raw = settings?.inventoryImageBackground || {};
+  const mode = ['solid','linear','radial'].includes(raw.mode) ? raw.mode : 'linear';
+  const texture = ['none','noise','dots','grid','linen','diagonal'].includes(raw.texture) ? raw.texture : 'none';
+  const color = (value, fallback) => /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value) : fallback;
+  return {
+    mode,
+    color1: color(raw.color1, '#f8fafc'),
+    color2: color(raw.color2, '#dbeafe'),
+    angle: Math.max(0, Math.min(360, Number(raw.angle ?? 135) || 0)),
+    texture,
+    textureOpacity: Math.max(0, Math.min(.45, Number(raw.textureOpacity ?? .18) || 0))
+  };
+}
+function inventoryBackgroundCss(settings = state.settings) {
+  const cfg = inventoryBackgroundConfig(settings);
+  const base = cfg.mode === 'solid'
+    ? `linear-gradient(${cfg.color1},${cfg.color1})`
+    : cfg.mode === 'radial'
+      ? `radial-gradient(circle at 35% 25%,${cfg.color1} 0%,${cfg.color2} 100%)`
+      : `linear-gradient(${cfg.angle}deg,${cfg.color1} 0%,${cfg.color2} 100%)`;
+  const a = cfg.textureOpacity;
+  let texture = '';
+  let size = 'auto';
+  if (cfg.texture === 'dots') { texture = `radial-gradient(circle,rgba(15,23,42,${a}) 1px,transparent 1.5px)`; size = '12px 12px, auto'; }
+  else if (cfg.texture === 'grid') { texture = `linear-gradient(rgba(15,23,42,${a}) 1px,transparent 1px),linear-gradient(90deg,rgba(15,23,42,${a}) 1px,transparent 1px)`; size = '18px 18px,18px 18px,auto'; }
+  else if (cfg.texture === 'diagonal') { texture = `repeating-linear-gradient(135deg,rgba(255,255,255,${a}) 0 2px,transparent 2px 9px)`; size = 'auto'; }
+  else if (cfg.texture === 'linen') { texture = `repeating-linear-gradient(0deg,rgba(255,255,255,${a}) 0 1px,transparent 1px 4px),repeating-linear-gradient(90deg,rgba(15,23,42,${a * .45}) 0 1px,transparent 1px 5px)`; size = 'auto'; }
+  else if (cfg.texture === 'noise') { texture = `repeating-radial-gradient(circle at 20% 30%,rgba(15,23,42,${a * .55}) 0 0.7px,transparent .8px 3px)`; size = '7px 7px,auto'; }
+  return `background-color:${cfg.color1};background-image:${texture ? `${texture},${base}` : base};background-size:${size};background-position:center;`;
+}
+async function compressTransparentInventoryImage(file, maxSize = 900) {
+  if (!file) return '';
+  const dataUrl = await fileToDataUrl(file);
+  const img = await loadImageElement(dataUrl);
+  const originalWidth = Math.max(1, Number(img.width || 1));
+  const originalHeight = Math.max(1, Number(img.height || 1));
+  const TARGET_LENGTH = 700000; // comfortably below Firestore's 1 MiB document limit
+
+  // WebP preserves alpha transparency but is dramatically smaller than a base64 PNG.
+  // Re-render smaller until the encoded image is safely persistable in Firestore.
+  let longest = Math.min(maxSize, Math.max(originalWidth, originalHeight));
+  let quality = 0.9;
+  let result = '';
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const scale = Math.min(1, longest / Math.max(originalWidth, originalHeight));
+    const width = Math.max(1, Math.round(originalWidth * scale));
+    const height = Math.max(1, Math.round(originalHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+    result = canvas.toDataURL('image/webp', quality);
+    // Some browsers can theoretically reject WebP; PNG fallback still preserves alpha.
+    if (!result.startsWith('data:image/webp')) result = canvas.toDataURL('image/png');
+    if (result.length <= TARGET_LENGTH) return result;
+    if (quality > 0.68) quality -= 0.08;
+    else longest = Math.max(360, Math.round(longest * 0.82));
+  }
+  if (result.length > TARGET_LENGTH) {
+    throw new Error('The transparent image is still too large to save safely. Please use a smaller source image.');
+  }
+  return result;
 }
 function getInventoryImageSrc(item) {
   return item?.imageData || item?.imageUrl || '';
@@ -384,6 +450,14 @@ function cacheEls() {
     routeDateLabel: document.getElementById('routeDateLabel'),
     routeStopsList: document.getElementById('routeStopsList'),
     addInventoryBtn: document.getElementById('addInventoryBtn'),
+    inventoryBackgroundBtn: document.getElementById('inventoryBackgroundBtn'),
+    inventoryBackgroundModalWrap: document.getElementById('inventoryBackgroundModalWrap'),
+    inventoryBackgroundForm: document.getElementById('inventoryBackgroundForm'),
+    inventoryBackgroundPreview: document.getElementById('inventoryBackgroundPreview'),
+    inventoryBackgroundAngleLabel: document.getElementById('inventoryBackgroundAngleLabel'),
+    inventoryTextureStrengthLabel: document.getElementById('inventoryTextureStrengthLabel'),
+    resetInventoryBackgroundBtn: document.getElementById('resetInventoryBackgroundBtn'),
+    inventoryPreviewSurface: document.getElementById('inventoryPreviewSurface'),
     inventoryList: document.getElementById('inventoryList'),
     settingsForm: document.getElementById('settingsForm'),
     settingsSaved: document.getElementById('settingsSaved'),
@@ -2035,6 +2109,12 @@ function bindApp() {
     planDeliveryRoute(btn.dataset.planRouteDate);
   });
   els.addInventoryBtn.addEventListener('click', () => openInventoryModal());
+  els.inventoryBackgroundBtn?.addEventListener('click', openInventoryBackgroundModal);
+  els.inventoryBackgroundModalWrap?.addEventListener('click', (event) => { if (event.target === els.inventoryBackgroundModalWrap || event.target.closest('[data-close-inventory-background]')) closeInventoryBackgroundModal(); });
+  els.inventoryBackgroundForm?.addEventListener('input', updateInventoryBackgroundPreview);
+  els.inventoryBackgroundForm?.addEventListener('change', updateInventoryBackgroundPreview);
+  els.inventoryBackgroundForm?.addEventListener('submit', handleInventoryBackgroundSave);
+  els.resetInventoryBackgroundBtn?.addEventListener('click', () => { fillInventoryBackgroundForm({ mode: 'linear', color1: '#f8fafc', color2: '#dbeafe', angle: 135, texture: 'none', textureOpacity: .18 }); updateInventoryBackgroundPreview(); });
   document.querySelectorAll('[data-close-modal]').forEach((btn) => btn.addEventListener('click', closeModals));
   document.querySelectorAll('[data-close-reminder-modal]').forEach((btn) => btn.addEventListener('click', closeReminderComposer));
   els.reminderModalWrap?.addEventListener('click', (e) => { if (e.target === els.reminderModalWrap) closeReminderComposer(); });
@@ -2149,7 +2229,7 @@ function bindApp() {
         }
         return;
       }
-      const compressed = await compressImageFile(file);
+      const compressed = await compressTransparentInventoryImage(file);
       if (hidden) hidden.value = compressed;
       if (preview) {
         preview.src = compressed;
@@ -2168,7 +2248,7 @@ function bindApp() {
         handleInventoryImagePreview();
         return;
       }
-      const compressed = await compressImageFile(file);
+      const compressed = await compressTransparentInventoryImage(file);
       if (els.imageData) els.imageData.value = compressed;
       handleInventoryImagePreview();
     } catch (error) {
@@ -2290,6 +2370,7 @@ function handleInventoryImagePreview() {
   const src = els.imageData?.value || '';
   preview.src = src;
   preview.hidden = !src;
+  if (els.inventoryPreviewSurface) els.inventoryPreviewSurface.style.cssText = inventoryBackgroundCss();
 }
 async function loadData() {
   state.inventory = await getInventory();
@@ -5191,8 +5272,8 @@ function renderInventory() {
     return `
       <div class="inventory-card gallery-style-inventory${expanded ? ' expanded' : ''}">
         <button type="button" class="inventory-gallery-toggle" data-toggle-inventory="${safeText(item.id)}" aria-expanded="${expanded ? 'true' : 'false'}">
-          <div class="gallery-image-wrap inventory-gallery-image-wrap">
-            ${getInventoryImageSrc(item) ? `<img class="gallery-image" src="${getInventoryImageSrc(item)}" alt="${safeText(item.name)}" />` : `<div class="inventory-image-placeholder">No Image</div>`}
+          <div class="gallery-image-wrap inventory-gallery-image-wrap" style="${inventoryBackgroundCss()}">
+            ${getInventoryImageSrc(item) ? `<img class="gallery-image inventory-transparent-image" src="${getInventoryImageSrc(item)}" alt="${safeText(item.name)}" />` : `<div class="inventory-image-placeholder">No Image</div>`}
           </div>
           <div class="gallery-card-body inventory-gallery-body">
             <div class="gallery-card-top inventory-collapsed-title">
@@ -5514,8 +5595,8 @@ function renderCalendarView() {
         const image = getInventoryImageSrc(item);
         const availabilityClass = available <= 0 ? 'none' : available <= Math.max(2, Math.ceil(locationStock * .2)) ? 'low' : 'good';
         return `<div class="quick-peek-inventory-card compact" title="${safeText(item.name)} · ${Math.round(usage.units)} historical units rented">
-          <div class="quick-peek-inventory-image">
-            ${image ? `<img src="${image}" alt="${safeText(item.name)}" />` : '<div class="inventory-image-placeholder">No Image</div>'}
+          <div class="quick-peek-inventory-image inventory-image-surface" style="${inventoryBackgroundCss()}">
+            ${image ? `<img class="inventory-transparent-image" src="${image}" alt="${safeText(item.name)}" />` : '<div class="inventory-image-placeholder">No Image</div>'}
             <div class="quick-peek-remaining ${availabilityClass}"><strong>${available}</strong><span>left</span></div>
           </div>
           <div class="quick-peek-inventory-body">
@@ -5754,8 +5835,8 @@ function renderOrderItemRow(item, config = {}) {
     <div class="card order-item-card compact-order-item-card">
       <input type="hidden" name="item_inventoryId" value="${safeText(selectedId)}" />
       <div class="order-item-line">
-        <div class="order-item-thumb-wrap">
-          ${imageSrc ? `<img class="order-item-thumb" src="${imageSrc}" alt="${safeText(inventoryItem.name || 'Item')}" />` : `<div class="order-item-thumb order-item-thumb-empty">No Image</div>`}
+        <div class="order-item-thumb-wrap inventory-image-surface" style="${inventoryBackgroundCss()}">
+          ${imageSrc ? `<img class="order-item-thumb inventory-transparent-image" src="${imageSrc}" alt="${safeText(inventoryItem.name || 'Item')}" />` : `<div class="order-item-thumb order-item-thumb-empty">No Image</div>`}
         </div>
         <div class="order-item-name-block">
           <strong>${safeText(inventoryItem.name || item.name || 'Inventory item')}</strong>
@@ -5998,6 +6079,7 @@ function openInventoryModal(id = null) {
     renderAccessoryRows([]);
   }
   document.getElementById('inventoryPreview').hidden = !document.getElementById('inventoryPreview').src;
+  if (els.inventoryPreviewSurface) els.inventoryPreviewSurface.style.cssText = inventoryBackgroundCss();
   els.inventoryModalWrap.classList.add('open');
 }
 async function handleInventorySave(event) {
@@ -6006,7 +6088,11 @@ async function handleInventorySave(event) {
   const form = new FormData(els.inventoryForm);
   const existing = state.inventory.find((entry) => entry.id === state.editingInventoryId);
   const uploadedImageData = (form.get('imageData') || '').toString().trim();
-  let imageUrl = existing?.imageUrl || '';
+  // A newly uploaded image is the canonical replacement. Clear any legacy
+  // imageUrl so an older background image can never reappear as a fallback
+  // after refresh. If no new image was uploaded, preserve the existing URL
+  // for backward compatibility with inventory that has not been migrated yet.
+  let imageUrl = uploadedImageData ? '' : (existing?.imageUrl || '');
   const cleaningSeconds = hmsToSeconds(form.get('averageCleaningTime'));
   const loadingSeconds = hmsToSeconds(form.get('averageLoadingTime'));
   const unloadingSeconds = hmsToSeconds(form.get('averageUnloadingTime'));
@@ -6042,6 +6128,55 @@ async function handleInventorySave(event) {
   renderNumbers();
   }, state.editingInventoryId ? 'Saving inventory changes…' : 'Saving inventory item…');
 }
+function fillInventoryBackgroundForm(config = {}) {
+  if (!els.inventoryBackgroundForm) return;
+  const cfg = inventoryBackgroundConfig({ inventoryImageBackground: config });
+  ['mode','color1','color2','angle','texture','textureOpacity'].forEach((name) => {
+    const field = els.inventoryBackgroundForm.elements[name];
+    if (field) field.value = cfg[name];
+  });
+}
+function inventoryBackgroundDraft() {
+  const form = els.inventoryBackgroundForm;
+  if (!form) return inventoryBackgroundConfig();
+  return inventoryBackgroundConfig({ inventoryImageBackground: {
+    mode: form.elements.mode?.value,
+    color1: form.elements.color1?.value,
+    color2: form.elements.color2?.value,
+    angle: Number(form.elements.angle?.value || 135),
+    texture: form.elements.texture?.value,
+    textureOpacity: Number(form.elements.textureOpacity?.value || 0)
+  }});
+}
+function updateInventoryBackgroundPreview() {
+  if (!els.inventoryBackgroundForm) return;
+  const cfg = inventoryBackgroundDraft();
+  if (els.inventoryBackgroundPreview) els.inventoryBackgroundPreview.style.cssText = inventoryBackgroundCss({ inventoryImageBackground: cfg });
+  if (els.inventoryBackgroundAngleLabel) els.inventoryBackgroundAngleLabel.textContent = `${cfg.angle}°`;
+  if (els.inventoryTextureStrengthLabel) els.inventoryTextureStrengthLabel.textContent = `${Math.round(cfg.textureOpacity * 100)}%`;
+  els.inventoryBackgroundForm.querySelector('[data-background-color2-row]')?.classList.toggle('field-disabled', cfg.mode === 'solid');
+  els.inventoryBackgroundForm.querySelector('[data-background-angle-row]')?.classList.toggle('field-disabled', cfg.mode !== 'linear');
+}
+function openInventoryBackgroundModal() {
+  fillInventoryBackgroundForm(inventoryBackgroundConfig());
+  updateInventoryBackgroundPreview();
+  els.inventoryBackgroundModalWrap?.classList.add('open');
+}
+function closeInventoryBackgroundModal() {
+  els.inventoryBackgroundModalWrap?.classList.remove('open');
+}
+async function handleInventoryBackgroundSave(event) {
+  event.preventDefault();
+  const cfg = inventoryBackgroundDraft();
+  await withBusy(async () => {
+    state.settings = { ...state.settings, inventoryImageBackground: cfg };
+    await saveSettings(state.settings);
+    closeInventoryBackgroundModal();
+    renderInventory();
+    renderCalendarView();
+  }, 'Applying image background…');
+}
+
 async function handleBackupExport() {
   const payload = await exportOrdersBackup();
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });

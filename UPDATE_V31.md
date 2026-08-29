@@ -6,4 +6,4 @@ Fixed Quick Picker delivery-address geocoding during Review.
 - Google Maps geocoding is still used first when configured.
 - Photon remains a final fallback.
 - A failed fallback provider no longer prevents the remaining providers from being tried.
-- Cache version bumped to `rental-ux-v33`.
+- Cache version bumped to `rental-ux-v46`.

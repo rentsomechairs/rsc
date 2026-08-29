@@ -18,4 +18,4 @@ Implemented the requested rental-tool updates:
 14. New inquiries are grouped at the very top regardless of rental date and are cleared from "New Inquiry" when opened.
 15. Creating a new order in Admin automatically copies its reminder message after save.
 
-Cache-busting versions were bumped to `rental-ux-v33`.
+Cache-busting versions were bumped to `rental-ux-v46`.

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Admin • Rent Some Orders</title>
-  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v43" />
+  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v46" />
 </head>
 <body class="admin-app-page">
   <div id="loginView" class="login-shell hidden">
@@ -193,6 +193,7 @@
           </div>
           <div class="toolbar">
             <div id="inventoryStats"></div>
+            <button class="btn btn-secondary" id="inventoryBackgroundBtn" type="button">Image Background</button>
             <button class="btn btn-primary" id="addInventoryBtn">Add Inventory</button>
           </div>
         </div>
@@ -567,8 +568,8 @@
           </div>
         </div>
         <div class="form-row two">
-          <div class="form-row"><label>Small Picture</label><input type="file" name="imageUpload" id="imageUpload" accept="image/*" /><div class="small muted" style="margin-top:6px;">Choose an image from your computer. It will be resized and saved with the item.</div><input type="hidden" name="imageData" id="imageData" value="" /></div>
-          <div class="form-row"><label>Preview</label><img id="inventoryPreview" class="inventory-image" alt="Preview" /></div>
+          <div class="form-row"><label>Transparent Product Image</label><input type="file" name="imageUpload" id="imageUpload" accept="image/png,image/webp" /><div class="small muted" style="margin-top:6px;">Use a PNG or WebP with transparency. The product image is stored without the global display background.</div><input type="hidden" name="imageData" id="imageData" value="" /></div>
+          <div class="form-row"><label>Preview</label><div id="inventoryPreviewSurface" class="inventory-preview-surface"><img id="inventoryPreview" class="inventory-image inventory-transparent-image" alt="Preview" /></div></div>
         </div>
 
         <div class="form-row">
@@ -590,6 +591,43 @@
     </div>
   </div>
 
+
+  <div class="modal-backdrop" id="inventoryBackgroundModalWrap">
+    <div class="modal inventory-background-modal" role="dialog" aria-modal="true" aria-labelledby="inventoryBackgroundModalTitle">
+      <div class="section-header">
+        <div><h2 id="inventoryBackgroundModalTitle" style="margin:0;">Inventory Image Background</h2><div class="small muted">One display background is rendered behind every transparent inventory image. Original image files are not changed.</div></div>
+        <button type="button" class="btn btn-ghost" data-close-inventory-background>Close</button>
+      </div>
+      <form id="inventoryBackgroundForm" class="form-grid">
+        <div class="inventory-background-builder">
+          <div class="inventory-background-controls">
+            <div class="form-row two">
+              <div class="form-row"><label>Background type</label><select name="mode"><option value="solid">Solid</option><option value="linear">Linear Gradient</option><option value="radial">Radial Gradient</option></select></div>
+              <div class="form-row"><label>Texture</label><select name="texture"><option value="none">None</option><option value="noise">Subtle Noise</option><option value="dots">Dots</option><option value="grid">Grid</option><option value="linen">Linen</option><option value="diagonal">Diagonal Lines</option></select></div>
+            </div>
+            <div class="form-row two">
+              <div class="form-row"><label>Color 1</label><input type="color" name="color1" value="#f8fafc" /></div>
+              <div class="form-row" data-background-color2-row><label>Color 2</label><input type="color" name="color2" value="#dbeafe" /></div>
+            </div>
+            <div class="form-row two">
+              <div class="form-row" data-background-angle-row><label>Gradient angle <span id="inventoryBackgroundAngleLabel">135°</span></label><input type="range" name="angle" min="0" max="360" step="5" value="135" /></div>
+              <div class="form-row"><label>Texture strength <span id="inventoryTextureStrengthLabel">18%</span></label><input type="range" name="textureOpacity" min="0" max="0.45" step="0.01" value="0.18" /></div>
+            </div>
+            <div class="small muted">Tip: transparent PNGs work best. The same background is used in Inventory, Quick Picker, and the public Gallery.</div>
+          </div>
+          <div>
+            <label class="small muted" style="font-weight:800;">Live preview</label>
+            <div id="inventoryBackgroundPreview" class="inventory-background-preview"><div class="inventory-background-preview-object">CHAIR</div></div>
+          </div>
+        </div>
+        <div class="button-row" style="justify-content:flex-end;">
+          <button type="button" class="btn btn-ghost" id="resetInventoryBackgroundBtn">Reset</button>
+          <button type="button" class="btn btn-secondary" data-close-inventory-background>Cancel</button>
+          <button type="submit" class="btn btn-primary">Apply to All Images</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <div class="modal-backdrop" id="copyPasteModalWrap">
     <div class="modal copy-paste-modal">
@@ -764,6 +802,6 @@
     </div>
   </div>
 
-  <script type="module" src="../assets/js/app-admin.js?v=rental-ux-v43"></script>
+  <script type="module" src="../assets/js/app-admin.js?v=rental-ux-v46"></script>
 </body>
 </html>

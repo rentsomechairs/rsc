@@ -8,4 +8,4 @@ Automatic delivery-fee calculation has been completely removed from the Quick Pi
 - Review shows the same delivery-fee message instead of an estimate.
 - Submitted delivery inquiries store the address but use a $0 delivery fee until it is discussed/entered manually by staff.
 - Delivery inquiries are marked as needing delivery review.
-- Cache version bumped to `rental-ux-v33`.
+- Cache version bumped to `rental-ux-v46`.
