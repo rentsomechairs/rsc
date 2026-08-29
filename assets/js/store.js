@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v46';
+import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v47';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -85,7 +85,7 @@ const defaultSettings = {
   homeQuoteImageData: '',
   homeBrowseImageData: '',
   homeTrackImageData: '',
-  inventoryImageBackground: { mode: 'linear', color1: '#f8fafc', color2: '#dbeafe', angle: 135, texture: 'none', textureOpacity: 0.18 },
+  inventoryImageBackground: { mode: 'linear', color1: '#f8fafc', color2: '#dbeafe', angle: 135, texture: 'none', textureOpacity: 0.18, imageScale: 1.08, imageX: 0, imageY: 0, shadowEnabled: true, shadowColor: '#0f172a', shadowOpacity: 0.28, shadowBlur: 14, shadowX: 0, shadowY: 7, edgeGlow: 0.12, brightness: 1, contrast: 1.04, saturation: 1 },
   pickupCoords: null,
   pickupGeocodedAddress: '',
   pickupGeocodeUpdatedAt: '',
@@ -1079,7 +1079,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v46');
+  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v47');
   return getDocById(COLLECTIONS.reviews, code);
 }
 

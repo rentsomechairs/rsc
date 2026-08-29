@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v46';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v47';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
-import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v46';
+import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v47';
 const state = {
   inventory: [],
   orders: [],
@@ -58,7 +58,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'rental-ux-v46';
+const ADMIN_VERSION = 'rental-ux-v47';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -211,7 +211,20 @@ function inventoryBackgroundConfig(settings = state.settings) {
     color2: color(raw.color2, '#dbeafe'),
     angle: Math.max(0, Math.min(360, Number(raw.angle ?? 135) || 0)),
     texture,
-    textureOpacity: Math.max(0, Math.min(.45, Number(raw.textureOpacity ?? .18) || 0))
+    textureOpacity: Math.max(0, Math.min(.45, Number(raw.textureOpacity ?? .18) || 0)),
+    imageScale: Math.max(.55, Math.min(1.8, Number(raw.imageScale ?? 1.08) || 1.08)),
+    imageX: Math.max(-25, Math.min(25, Number(raw.imageX ?? 0) || 0)),
+    imageY: Math.max(-25, Math.min(25, Number(raw.imageY ?? 0) || 0)),
+    shadowEnabled: raw.shadowEnabled !== false,
+    shadowColor: color(raw.shadowColor, '#0f172a'),
+    shadowOpacity: Math.max(0, Math.min(.8, Number(raw.shadowOpacity ?? .28) || 0)),
+    shadowBlur: Math.max(0, Math.min(40, Number(raw.shadowBlur ?? 14) || 0)),
+    shadowX: Math.max(-20, Math.min(20, Number(raw.shadowX ?? 0) || 0)),
+    shadowY: Math.max(-20, Math.min(20, Number(raw.shadowY ?? 7) || 0)),
+    edgeGlow: Math.max(0, Math.min(.6, Number(raw.edgeGlow ?? .12) || 0)),
+    brightness: Math.max(.7, Math.min(1.35, Number(raw.brightness ?? 1) || 1)),
+    contrast: Math.max(.7, Math.min(1.5, Number(raw.contrast ?? 1.04) || 1.04)),
+    saturation: Math.max(0, Math.min(1.8, Number(raw.saturation ?? 1) || 1))
   };
 }
 function inventoryBackgroundCss(settings = state.settings) {
@@ -219,7 +232,7 @@ function inventoryBackgroundCss(settings = state.settings) {
   const base = cfg.mode === 'solid'
     ? `linear-gradient(${cfg.color1},${cfg.color1})`
     : cfg.mode === 'radial'
-      ? `radial-gradient(circle at 35% 25%,${cfg.color1} 0%,${cfg.color2} 100%)`
+      ? `radial-gradient(circle at 50% 50%,${cfg.color1} 0%,${cfg.color2} 100%)`
       : `linear-gradient(${cfg.angle}deg,${cfg.color1} 0%,${cfg.color2} 100%)`;
   const a = cfg.textureOpacity;
   let texture = '';
@@ -230,6 +243,20 @@ function inventoryBackgroundCss(settings = state.settings) {
   else if (cfg.texture === 'linen') { texture = `repeating-linear-gradient(0deg,rgba(255,255,255,${a}) 0 1px,transparent 1px 4px),repeating-linear-gradient(90deg,rgba(15,23,42,${a * .45}) 0 1px,transparent 1px 5px)`; size = 'auto'; }
   else if (cfg.texture === 'noise') { texture = `repeating-radial-gradient(circle at 20% 30%,rgba(15,23,42,${a * .55}) 0 0.7px,transparent .8px 3px)`; size = '7px 7px,auto'; }
   return `background-color:${cfg.color1};background-image:${texture ? `${texture},${base}` : base};background-size:${size};background-position:center;`;
+}
+function hexToRgba(hex, alpha = 1) {
+  const value = String(hex || '#0f172a').replace('#','');
+  const safe = /^[0-9a-f]{6}$/i.test(value) ? value : '0f172a';
+  const r = parseInt(safe.slice(0,2),16), g = parseInt(safe.slice(2,4),16), b = parseInt(safe.slice(4,6),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+function inventoryImageCss(settings = state.settings) {
+  const cfg = inventoryBackgroundConfig(settings);
+  const filters = [];
+  if (cfg.shadowEnabled && cfg.shadowOpacity > 0) filters.push(`drop-shadow(${cfg.shadowX}px ${cfg.shadowY}px ${cfg.shadowBlur}px ${hexToRgba(cfg.shadowColor,cfg.shadowOpacity)})`);
+  if (cfg.edgeGlow > 0) filters.push(`drop-shadow(0 0 1.5px rgba(255,255,255,${cfg.edgeGlow}))`, `drop-shadow(0 0 1px rgba(15,23,42,${cfg.edgeGlow * .55}))`);
+  filters.push(`brightness(${cfg.brightness})`, `contrast(${cfg.contrast})`, `saturate(${cfg.saturation})`);
+  return `transform:translate(${cfg.imageX}%,${cfg.imageY}%) scale(${cfg.imageScale});transform-origin:center;filter:${filters.join(' ')};`;
 }
 async function compressTransparentInventoryImage(file, maxSize = 900) {
   if (!file) return '';
@@ -2114,7 +2141,7 @@ function bindApp() {
   els.inventoryBackgroundForm?.addEventListener('input', updateInventoryBackgroundPreview);
   els.inventoryBackgroundForm?.addEventListener('change', updateInventoryBackgroundPreview);
   els.inventoryBackgroundForm?.addEventListener('submit', handleInventoryBackgroundSave);
-  els.resetInventoryBackgroundBtn?.addEventListener('click', () => { fillInventoryBackgroundForm({ mode: 'linear', color1: '#f8fafc', color2: '#dbeafe', angle: 135, texture: 'none', textureOpacity: .18 }); updateInventoryBackgroundPreview(); });
+  els.resetInventoryBackgroundBtn?.addEventListener('click', () => { fillInventoryBackgroundForm({ mode: 'linear', color1: '#f8fafc', color2: '#dbeafe', angle: 135, texture: 'none', textureOpacity: .18, imageScale: 1.08, imageX: 0, imageY: 0, shadowEnabled: true, shadowColor: '#0f172a', shadowOpacity: .28, shadowBlur: 14, shadowX: 0, shadowY: 7, edgeGlow: .12, brightness: 1, contrast: 1.04, saturation: 1 }); updateInventoryBackgroundPreview(); });
   document.querySelectorAll('[data-close-modal]').forEach((btn) => btn.addEventListener('click', closeModals));
   document.querySelectorAll('[data-close-reminder-modal]').forEach((btn) => btn.addEventListener('click', closeReminderComposer));
   els.reminderModalWrap?.addEventListener('click', (e) => { if (e.target === els.reminderModalWrap) closeReminderComposer(); });
@@ -2370,7 +2397,7 @@ function handleInventoryImagePreview() {
   const src = els.imageData?.value || '';
   preview.src = src;
   preview.hidden = !src;
-  if (els.inventoryPreviewSurface) els.inventoryPreviewSurface.style.cssText = inventoryBackgroundCss();
+  if (els.inventoryPreviewSurface) { els.inventoryPreviewSurface.style.cssText = inventoryBackgroundCss(); const previewImg = els.inventoryPreviewSurface.querySelector('img'); if (previewImg) previewImg.style.cssText = inventoryImageCss(); }
 }
 async function loadData() {
   state.inventory = await getInventory();
@@ -5273,7 +5300,7 @@ function renderInventory() {
       <div class="inventory-card gallery-style-inventory${expanded ? ' expanded' : ''}">
         <button type="button" class="inventory-gallery-toggle" data-toggle-inventory="${safeText(item.id)}" aria-expanded="${expanded ? 'true' : 'false'}">
           <div class="gallery-image-wrap inventory-gallery-image-wrap" style="${inventoryBackgroundCss()}">
-            ${getInventoryImageSrc(item) ? `<img class="gallery-image inventory-transparent-image" src="${getInventoryImageSrc(item)}" alt="${safeText(item.name)}" />` : `<div class="inventory-image-placeholder">No Image</div>`}
+            ${getInventoryImageSrc(item) ? `<img class="gallery-image inventory-transparent-image" style="${inventoryImageCss()}" src="${getInventoryImageSrc(item)}" alt="${safeText(item.name)}" />` : `<div class="inventory-image-placeholder">No Image</div>`}
           </div>
           <div class="gallery-card-body inventory-gallery-body">
             <div class="gallery-card-top inventory-collapsed-title">
@@ -5596,7 +5623,7 @@ function renderCalendarView() {
         const availabilityClass = available <= 0 ? 'none' : available <= Math.max(2, Math.ceil(locationStock * .2)) ? 'low' : 'good';
         return `<div class="quick-peek-inventory-card compact" title="${safeText(item.name)} · ${Math.round(usage.units)} historical units rented">
           <div class="quick-peek-inventory-image inventory-image-surface" style="${inventoryBackgroundCss()}">
-            ${image ? `<img class="inventory-transparent-image" src="${image}" alt="${safeText(item.name)}" />` : '<div class="inventory-image-placeholder">No Image</div>'}
+            ${image ? `<img class="inventory-transparent-image" style="${inventoryImageCss()}" src="${image}" alt="${safeText(item.name)}" />` : '<div class="inventory-image-placeholder">No Image</div>'}
             <div class="quick-peek-remaining ${availabilityClass}"><strong>${available}</strong><span>left</span></div>
           </div>
           <div class="quick-peek-inventory-body">
@@ -5836,7 +5863,7 @@ function renderOrderItemRow(item, config = {}) {
       <input type="hidden" name="item_inventoryId" value="${safeText(selectedId)}" />
       <div class="order-item-line">
         <div class="order-item-thumb-wrap inventory-image-surface" style="${inventoryBackgroundCss()}">
-          ${imageSrc ? `<img class="order-item-thumb inventory-transparent-image" src="${imageSrc}" alt="${safeText(inventoryItem.name || 'Item')}" />` : `<div class="order-item-thumb order-item-thumb-empty">No Image</div>`}
+          ${imageSrc ? `<img class="order-item-thumb inventory-transparent-image" style="${inventoryImageCss()}" src="${imageSrc}" alt="${safeText(inventoryItem.name || 'Item')}" />` : `<div class="order-item-thumb order-item-thumb-empty">No Image</div>`}
         </div>
         <div class="order-item-name-block">
           <strong>${safeText(inventoryItem.name || item.name || 'Inventory item')}</strong>
@@ -6079,7 +6106,7 @@ function openInventoryModal(id = null) {
     renderAccessoryRows([]);
   }
   document.getElementById('inventoryPreview').hidden = !document.getElementById('inventoryPreview').src;
-  if (els.inventoryPreviewSurface) els.inventoryPreviewSurface.style.cssText = inventoryBackgroundCss();
+  if (els.inventoryPreviewSurface) { els.inventoryPreviewSurface.style.cssText = inventoryBackgroundCss(); const previewImg = els.inventoryPreviewSurface.querySelector('img'); if (previewImg) previewImg.style.cssText = inventoryImageCss(); }
   els.inventoryModalWrap.classList.add('open');
 }
 async function handleInventorySave(event) {
@@ -6131,10 +6158,11 @@ async function handleInventorySave(event) {
 function fillInventoryBackgroundForm(config = {}) {
   if (!els.inventoryBackgroundForm) return;
   const cfg = inventoryBackgroundConfig({ inventoryImageBackground: config });
-  ['mode','color1','color2','angle','texture','textureOpacity'].forEach((name) => {
+  ['mode','color1','color2','angle','texture','textureOpacity','imageScale','imageX','imageY','shadowColor','shadowOpacity','shadowBlur','shadowX','shadowY','edgeGlow','brightness','contrast','saturation'].forEach((name) => {
     const field = els.inventoryBackgroundForm.elements[name];
     if (field) field.value = cfg[name];
   });
+  if (els.inventoryBackgroundForm.elements.shadowEnabled) els.inventoryBackgroundForm.elements.shadowEnabled.checked = cfg.shadowEnabled;
 }
 function inventoryBackgroundDraft() {
   const form = els.inventoryBackgroundForm;
@@ -6145,20 +6173,52 @@ function inventoryBackgroundDraft() {
     color2: form.elements.color2?.value,
     angle: Number(form.elements.angle?.value || 135),
     texture: form.elements.texture?.value,
-    textureOpacity: Number(form.elements.textureOpacity?.value || 0)
+    textureOpacity: Number(form.elements.textureOpacity?.value || 0),
+    imageScale: Number(form.elements.imageScale?.value || 1.08),
+    imageX: Number(form.elements.imageX?.value || 0),
+    imageY: Number(form.elements.imageY?.value || 0),
+    shadowEnabled: !!form.elements.shadowEnabled?.checked,
+    shadowColor: form.elements.shadowColor?.value,
+    shadowOpacity: Number(form.elements.shadowOpacity?.value || 0),
+    shadowBlur: Number(form.elements.shadowBlur?.value || 0),
+    shadowX: Number(form.elements.shadowX?.value || 0),
+    shadowY: Number(form.elements.shadowY?.value || 0),
+    edgeGlow: Number(form.elements.edgeGlow?.value || 0),
+    brightness: Number(form.elements.brightness?.value || 1),
+    contrast: Number(form.elements.contrast?.value || 1),
+    saturation: Number(form.elements.saturation?.value || 1)
   }});
 }
 function updateInventoryBackgroundPreview() {
   if (!els.inventoryBackgroundForm) return;
   const cfg = inventoryBackgroundDraft();
-  if (els.inventoryBackgroundPreview) els.inventoryBackgroundPreview.style.cssText = inventoryBackgroundCss({ inventoryImageBackground: cfg });
+  if (els.inventoryBackgroundPreview) {
+    els.inventoryBackgroundPreview.style.cssText = inventoryBackgroundCss({ inventoryImageBackground: cfg });
+    const sample = els.inventoryBackgroundPreview.querySelector('.inventory-background-preview-object, .inventory-background-preview-image');
+    if (sample) sample.style.cssText = inventoryImageCss({ inventoryImageBackground: cfg });
+  }
   if (els.inventoryBackgroundAngleLabel) els.inventoryBackgroundAngleLabel.textContent = `${cfg.angle}°`;
   if (els.inventoryTextureStrengthLabel) els.inventoryTextureStrengthLabel.textContent = `${Math.round(cfg.textureOpacity * 100)}%`;
+  const labels = {
+    inventoryImageScaleLabel: `${Math.round(cfg.imageScale * 100)}%`, inventoryImageXLabel: `${cfg.imageX}%`, inventoryImageYLabel: `${cfg.imageY}%`,
+    inventoryShadowOpacityLabel: `${Math.round(cfg.shadowOpacity * 100)}%`, inventoryShadowBlurLabel: `${cfg.shadowBlur}px`, inventoryShadowXLabel: `${cfg.shadowX}px`, inventoryShadowYLabel: `${cfg.shadowY}px`,
+    inventoryEdgeGlowLabel: `${Math.round(cfg.edgeGlow * 100)}%`, inventoryBrightnessLabel: `${Math.round(cfg.brightness * 100)}%`, inventoryContrastLabel: `${Math.round(cfg.contrast * 100)}%`, inventorySaturationLabel: `${Math.round(cfg.saturation * 100)}%`
+  };
+  Object.entries(labels).forEach(([id,text]) => { const el = document.getElementById(id); if (el) el.textContent = text; });
+  els.inventoryBackgroundForm.querySelector('[data-shadow-controls]')?.classList.toggle('field-disabled', !cfg.shadowEnabled);
   els.inventoryBackgroundForm.querySelector('[data-background-color2-row]')?.classList.toggle('field-disabled', cfg.mode === 'solid');
   els.inventoryBackgroundForm.querySelector('[data-background-angle-row]')?.classList.toggle('field-disabled', cfg.mode !== 'linear');
 }
 function openInventoryBackgroundModal() {
   fillInventoryBackgroundForm(inventoryBackgroundConfig());
+  if (els.inventoryBackgroundPreview) {
+    const previewItem = (state.inventory || []).find((item) => getInventoryImageSrc(item));
+    if (previewItem) {
+      els.inventoryBackgroundPreview.innerHTML = `<img class="inventory-background-preview-image inventory-transparent-image" src="${getInventoryImageSrc(previewItem)}" alt="Inventory preview" />`;
+    } else {
+      els.inventoryBackgroundPreview.innerHTML = '<div class="inventory-background-preview-object">ITEM</div>';
+    }
+  }
   updateInventoryBackgroundPreview();
   els.inventoryBackgroundModalWrap?.classList.add('open');
 }

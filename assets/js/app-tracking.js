@@ -1,4 +1,4 @@
-import { getPublicReview, getPublicTrackingRecord, getPublicTrackingRecords, getSettings, getSession, savePublicReview } from './store.js?v=rental-ux-v46';
+import { getPublicReview, getPublicTrackingRecord, getPublicTrackingRecords, getSettings, getSession, savePublicReview } from './store.js?v=rental-ux-v47';
 import { currency, formatDateTime, safeText } from './utils.js';
 
 const els = {};
