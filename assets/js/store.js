@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v47';
+import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, listCollectionWhereAll, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v51';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -823,7 +823,10 @@ export async function getUserProfile(uidValue) {
 export async function getSecondaryUsers(primaryUid) {
   if (!primaryUid) return [];
   if (!isFirebaseEnabled()) return clone((cacheUsers || []).filter((u) => u.role === 'secondary' && String(u.primaryEmployeeId || '') === String(primaryUid)));
-  return clone(await listCollectionWhere(COLLECTIONS.users, 'primaryEmployeeId', '==', primaryUid));
+  return clone(await listCollectionWhereAll(COLLECTIONS.users, [
+    { field: 'primaryEmployeeId', op: '==', value: primaryUid },
+    { field: 'role', op: '==', value: 'secondary' }
+  ]));
 }
 
 export async function signupSecondaryEmployee(data) {
@@ -1079,7 +1082,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v47');
+  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v51');
   return getDocById(COLLECTIONS.reviews, code);
 }
 

@@ -84,6 +84,15 @@ export async function listCollectionWhere(name, field, op, value) {
   return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 }
 
+export async function listCollectionWhereAll(name, filters = []) {
+  const { db } = await initFirebase();
+  const fireMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js');
+  const clauses = (filters || []).map((filter) => fireMod.where(filter.field, filter.op || '==', filter.value));
+  const q = fireMod.query(fireMod.collection(db, name), ...clauses);
+  const snap = await fireMod.getDocs(q);
+  return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+}
+
 export async function getDocById(collectionName, id) {
   const { db } = await initFirebase();
   const fireMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js');

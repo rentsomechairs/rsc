@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v47';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v52';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
-import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v47';
+import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v51';
 const state = {
   inventory: [],
   orders: [],
@@ -58,7 +58,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'rental-ux-v47';
+const ADMIN_VERSION = 'rental-ux-v51';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -1330,8 +1330,14 @@ function employeeHourlyEstimateHtml(employee, order, earnings, plain = false) {
   const label = `${currency(estimate.hourlyRate)}/hr · ${estimate.totalMinutes.toFixed(0)} min`;
   return plain ? safeText(label) : `<span class="badge employee-hourly-badge" title="${safeText(`${pieces} = ${estimate.totalMinutes.toFixed(1)} estimated minutes`)}">${label}</span>`;
 }
+const BUILTIN_CASH_PAYOUT_ID = '__cash__';
 function payoutAccountsForEmployee(employee = {}) {
-  return Array.isArray(employee.payoutAccounts) ? employee.payoutAccounts.filter((a) => a && a.id) : [];
+  const saved = Array.isArray(employee.payoutAccounts) ? employee.payoutAccounts.filter((a) => a && a.id) : [];
+  const nonCash = saved.filter((a) => String(a.method || '').trim().toLowerCase() !== 'cash' && a.id !== BUILTIN_CASH_PAYOUT_ID);
+  return [{ id: BUILTIN_CASH_PAYOUT_ID, nickname: 'Cash', method: 'Cash', detail: 'Cash payout (in person)', builtIn: true }, ...nonCash];
+}
+function persistedPayoutAccounts(accounts = []) {
+  return (accounts || []).filter((a) => a && a.id && a.id !== BUILTIN_CASH_PAYOUT_ID && !a.builtIn);
 }
 function employeePayoutRequestTotals(employeeUid = '') {
   return (state.payoutRequests || []).filter((r) => String(r.employeeUid || '') === String(employeeUid)).reduce((acc, r) => {
@@ -1364,7 +1370,7 @@ function renderPayoutModal() {
   const totals = employeePayoutRequestTotals(employee.uid || employee.id);
   if (els.payoutAvailableBalance) els.payoutAvailableBalance.textContent = currency(available);
   if (els.payoutHeldBalance) els.payoutHeldBalance.textContent = totals.pending > 0 ? `${currency(totals.pending)} currently pending` : 'No pending payout requests';
-  if (els.payoutAccountsList) els.payoutAccountsList.innerHTML = accounts.length ? accounts.map((a) => `<div class="payout-account-card ${a.id === state.selectedPayoutAccountId ? 'selected' : ''}"><button type="button" data-select-payout-account="${safeText(a.id)}"><strong>${safeText(a.nickname || a.method)}</strong><span>${safeText(a.method)} · ${safeText(a.detail)}</span></button><button class="btn btn-ghost btn-small" type="button" data-delete-payout-account="${safeText(a.id)}">Remove</button></div>`).join('') : '<div class="empty-state">No payout accounts saved yet. Add one to request a payout.</div>';
+  if (els.payoutAccountsList) els.payoutAccountsList.innerHTML = accounts.map((a) => `<div class="payout-account-card ${a.id === state.selectedPayoutAccountId ? 'selected' : ''}"><button type="button" data-select-payout-account="${safeText(a.id)}"><strong>${safeText(a.nickname || a.method)}${a.builtIn ? ' <span class="badge badge-green">Always available</span>' : ''}</strong><span>${safeText(a.method)} · ${safeText(a.detail)}</span></button>${a.builtIn ? '' : `<button class="btn btn-ghost btn-small" type="button" data-delete-payout-account="${safeText(a.id)}">Remove</button>`}</div>`).join('');
   if (els.payoutAccountSelect) els.payoutAccountSelect.innerHTML = accounts.length ? accounts.map((a) => `<option value="${safeText(a.id)}" ${a.id === state.selectedPayoutAccountId ? 'selected' : ''}>${safeText(a.nickname || a.method)} — ${safeText(a.method)}</option>`).join('') : '<option value="">Add a payout account first</option>';
   const customValue = Math.max(0, Number(els.payoutCustomAmount?.value || 0));
   const payoutModeAmounts = {
@@ -1390,7 +1396,7 @@ function renderAccountManagement() {
   if (!employee || employee.role !== 'employee' || isSecondaryLogin()) return;
   const accounts = payoutAccountsForEmployee(employee);
   if (els.accountPayoutAccountsList) {
-    els.accountPayoutAccountsList.innerHTML = accounts.length ? accounts.map((a) => `<div class="payout-account-card"><div><strong>${safeText(a.nickname || a.method)}</strong><span>${safeText(a.method)} · ${safeText(a.detail)}</span></div><button class="btn btn-ghost btn-small" type="button" data-account-delete-payout-account="${safeText(a.id)}">Remove</button></div>`).join('') : '<div class="empty-state">No payout accounts saved yet.</div>';
+    els.accountPayoutAccountsList.innerHTML = accounts.map((a) => `<div class="payout-account-card"><div><strong>${safeText(a.nickname || a.method)}${a.builtIn ? ' <span class="badge badge-green">Always available</span>' : ''}</strong><span>${safeText(a.method)} · ${safeText(a.detail)}</span></div>${a.builtIn ? '' : `<button class="btn btn-ghost btn-small" type="button" data-account-delete-payout-account="${safeText(a.id)}">Remove</button>`}</div>`).join('');
   }
 }
 async function handleAccountPayoutSubmit(event) {
@@ -1430,7 +1436,7 @@ function closePayoutRequestModal() { els.payoutRequestModalWrap?.classList.remov
 async function savePayoutAccounts(accounts) {
   const employee = getExperienceUser();
   if (!employee || employee.role !== 'employee') return;
-  const saved = await saveOwnPayoutAccounts(employee, accounts);
+  const saved = await saveOwnPayoutAccounts(employee, persistedPayoutAccounts(accounts));
   if (state.viewAsEmployee) state.viewAsEmployee = { ...state.viewAsEmployee, ...saved };
   else state.currentUser = { ...state.currentUser, ...saved };
   state.users = state.users.map((u) => (u.uid || u.id) === (saved.uid || saved.id) ? { ...u, ...saved } : u);
@@ -1486,7 +1492,7 @@ function renderAdminPayoutRequests() {
   const pending = rows.filter((r) => r.status === 'pending');
   const recent = rows.filter((r) => r.status !== 'pending').slice(0, 10);
   const renderRow = (r) => `<div class="admin-payout-request-card payout-status-${safeText(r.status || 'pending')}" data-payout-request-id="${safeText(r.id)}"><div><strong>${safeText(r.employeeName || 'Employee')} · ${currency(Number(r.amount || 0))}</strong><div class="admin-payout-request-meta"><span>${safeText(r.payoutAccountNickname || '')}</span><span>${safeText(r.payoutMethod || '')}</span><span>${safeText(r.payoutDetail || '')}</span><span>${safeText(r.createdAt ? new Date(r.createdAt).toLocaleString() : '')}</span><span>${safeText((r.status || 'pending').toUpperCase())}</span></div></div><div class="admin-payout-request-actions">${r.status === 'pending' ? `<button type="button" class="btn btn-primary btn-small" data-payout-mark-paid="${safeText(r.id)}">Mark Paid</button><button type="button" class="btn btn-ghost btn-small" data-payout-decline="${safeText(r.id)}">Decline</button>` : ''}</div></div>`;
-  els.adminPayoutRequests.innerHTML = `<div class="admin-payout-requests-wrap"><div class="admin-payout-requests-head"><div><strong>Payout Requests</strong><div class="small muted">${pending.length} pending</div></div></div>${pending.length ? pending.map(renderRow).join('') : '<div class="small muted">No pending payout requests.</div>'}${recent.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-weight:700;">Recent processed requests</summary><div class="stack-sm" style="margin-top:8px;">${recent.map(renderRow).join('')}</div></details>` : ''}</div>`;
+  els.adminPayoutRequests.innerHTML = `<div class="admin-payout-requests-wrap"><div class="admin-payout-requests-head"><div><strong>Payout Requests</strong><div class="small muted">${pending.length} pending · Use Mark Paid after you have actually sent or handed over the money.</div></div></div>${pending.length ? pending.map(renderRow).join('') : '<div class="small muted">No pending payout requests.</div>'}${recent.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-weight:700;">Recent processed requests</summary><div class="stack-sm" style="margin-top:8px;">${recent.map(renderRow).join('')}</div></details>` : ''}</div>`;
 }
 async function handleAdminPayoutRequestClick(event) {
   const paid = event.target.closest('[data-payout-mark-paid]');

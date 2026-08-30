@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Admin • Rent Some Orders</title>
-  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v47" />
+  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v51" />
 </head>
 <body class="admin-app-page">
   <div id="loginView" class="login-shell hidden">
@@ -286,11 +286,11 @@
           <div id="secondaryAccessList" class="stack-sm" style="margin-top:10px;"></div>
         </div>
           <div class="card" id="accountPayoutAccountsCard">
-            <div class="section-header"><div><strong>Payout Accounts</strong><div class="small muted">Save the accounts you want management to use when sending payouts.</div></div><button type="button" class="btn btn-secondary btn-small" id="accountAddPayoutAccountBtn">Add Payout Account</button></div>
+            <div class="section-header"><div><strong>Payout Accounts</strong><div class="small muted">Cash is always available automatically. Add any electronic or check payout methods you also want management to use.</div></div><button type="button" class="btn btn-secondary btn-small" id="accountAddPayoutAccountBtn">Add Payout Account</button></div>
             <div id="accountPayoutAccountsList" class="stack-sm"></div>
             <form id="accountPayoutAccountForm" class="payout-account-form hidden">
               <label class="form-row"><span>Nickname</span><input name="nickname" maxlength="40" placeholder="My Venmo" required></label>
-              <label class="form-row"><span>Payout method</span><select name="method" required><option value="">Choose…</option><option>Venmo</option><option>Cash App</option><option>PayPal</option><option>Zelle</option><option>Check</option><option>Cash</option></select></label>
+              <label class="form-row"><span>Payout method</span><select name="method" required><option value="">Choose…</option><option>Venmo</option><option>Cash App</option><option>PayPal</option><option>Zelle</option><option>Check</option></select></label>
               <label class="form-row"><span>Account link / information</span><input name="detail" maxlength="250" placeholder="Venmo/Cash App link, email, phone, etc." required></label>
               <div class="button-row"><button type="button" class="btn btn-ghost btn-small" id="accountCancelPayoutAccountBtn">Cancel</button><button type="submit" class="btn btn-primary btn-small">Save Account</button></div>
             </form>
@@ -318,7 +318,7 @@
           <button class="btn btn-primary" id="copyEmployeeSignupLinkBtn" type="button">Copy Signup Link</button>
         </div>
         <div id="employeeSignupLinkStatus" class="small muted" style="margin-bottom:12px;"></div>
-        <div id="adminPayoutRequests" class="stack-sm" style="margin-bottom:12px;"></div>
+        <div class="small muted" style="margin-bottom:8px;">Employee payout requests appear here. After sending the payment, click <strong>Mark Paid</strong> to complete it.</div><div id="adminPayoutRequests" class="stack-sm" style="margin-bottom:16px;"></div>
         <div id="employeesList" class="stack-sm"></div>
       </section>
 
@@ -772,11 +772,11 @@
       </div>
       <div class="payout-modal-grid">
         <section class="payout-account-pane">
-          <div class="payout-pane-head"><div><strong>Payout accounts</strong><div class="small muted">Save the accounts you want management to use.</div></div><button type="button" class="btn btn-secondary btn-small" id="addPayoutAccountBtn">+ Add</button></div>
+          <div class="payout-pane-head"><div><strong>Payout accounts</strong><div class="small muted">Cash is always available automatically. Save any additional payout methods you want management to use.</div></div><button type="button" class="btn btn-secondary btn-small" id="addPayoutAccountBtn">+ Add</button></div>
           <div id="payoutAccountsList" class="stack-sm"></div>
           <form id="payoutAccountForm" class="payout-account-form hidden">
             <label class="form-row"><span>Nickname</span><input name="nickname" maxlength="40" placeholder="My Venmo" required></label>
-            <label class="form-row"><span>Payout method</span><select name="method" required><option value="">Choose…</option><option>Venmo</option><option>Cash App</option><option>PayPal</option><option>Zelle</option><option>Check</option><option>Cash</option></select></label>
+            <label class="form-row"><span>Payout method</span><select name="method" required><option value="">Choose…</option><option>Venmo</option><option>Cash App</option><option>PayPal</option><option>Zelle</option><option>Check</option></select></label>
             <label class="form-row"><span id="payoutAccountDetailLabel">Account link / information</span><input name="detail" maxlength="250" placeholder="Venmo/Cash App link, email, phone, etc." required></label>
             <div class="button-row"><button type="button" class="btn btn-ghost btn-small" id="cancelPayoutAccountBtn">Cancel</button><button type="submit" class="btn btn-primary btn-small">Save Account</button></div>
           </form>
@@ -788,7 +788,7 @@
             <button type="button" class="payout-amount-option active" data-payout-amount-mode="all">$0.00</button>
             <button type="button" class="payout-amount-option" data-payout-amount-mode="dollar">$0</button>
             <button type="button" class="payout-amount-option" data-payout-amount-mode="ten">$0</button>
-            <button type="button" class="payout-amount-option" data-payout-amount-mode="custom">$—</button>
+            <button type="button" class="payout-amount-option" data-payout-amount-mode="custom">Custom</button>
           </div></div>
           <label class="form-row hidden" id="payoutCustomAmountRow"><span>Custom amount</span><input id="payoutCustomAmount" type="number" min="0.01" step="0.01" inputmode="decimal"></label>
           <div class="payout-request-preview"><span>Request amount</span><strong id="payoutRequestAmountPreview">$0.00</strong></div>
@@ -823,6 +823,6 @@
     </div>
   </div>
 
-  <script type="module" src="../assets/js/app-admin.js?v=rental-ux-v47"></script>
+  <script type="module" src="../assets/js/app-admin.js?v=rental-ux-v52"></script>
 </body>
 </html>
