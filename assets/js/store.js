@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, listCollectionWhereAll, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v51';
+import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, listCollectionWhereAll, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v57';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -882,7 +882,14 @@ export async function createPayoutRequest(request = {}) {
   const payload = { ...next };
   delete payload.id;
   await upsertDoc(COLLECTIONS.payoutRequests, id, payload);
-  return clone(next);
+
+  // Never report a payout request as successful until Firebase confirms that
+  // the exact document exists and belongs to the expected employee.
+  const persisted = await getDocById(COLLECTIONS.payoutRequests, id);
+  if (!persisted || String(persisted.employeeUid || '') !== String(next.employeeUid || '') || persisted.status !== 'pending') {
+    throw new Error('Firebase did not retain the payout request. Nothing was submitted.');
+  }
+  return clone({ ...persisted, id });
 }
 
 export async function updatePayoutRequestStatus(id, status) {
@@ -1082,7 +1089,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v51');
+  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v57');
   return getDocById(COLLECTIONS.reviews, code);
 }
 

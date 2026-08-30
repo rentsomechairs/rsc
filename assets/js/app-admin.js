@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v52';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v57';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
-import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v51';
+import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v57';
 const state = {
   inventory: [],
   orders: [],
@@ -52,13 +52,15 @@ const state = {
   secondaryUsers: [],
   payoutRequests: [],
   payoutAmountMode: 'all',
-  selectedPayoutAccountId: ''
+  selectedPayoutAccountId: '',
+  payoutWatcherTimer: null,
+  knownPendingPayoutIds: new Set()
 };
 const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'rental-ux-v51';
+const ADMIN_VERSION = 'rental-ux-v57';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -411,6 +413,7 @@ async function init() {
     await loadData();
     applyRoleAccess();
     renderAll();
+    startPayoutRequestWatcher();
   }, 'Loading from Firebase…');
 }
 function cacheEls() {
@@ -1382,7 +1385,7 @@ function renderPayoutModal() {
   document.querySelectorAll('[data-payout-amount-mode]').forEach((btn) => {
     const mode = btn.dataset.payoutAmountMode || 'all';
     btn.classList.toggle('active', mode === state.payoutAmountMode);
-    btn.textContent = mode === 'custom' && !(customValue > 0) ? '$—' : currency(payoutModeAmounts[mode] || 0);
+    btn.textContent = mode === 'custom' ? 'Custom' : currency(payoutModeAmounts[mode] || 0);
     btn.title = mode === 'all' ? 'All available' : mode === 'dollar' ? 'Rounded down to the nearest dollar' : mode === 'ten' ? 'Rounded down to the nearest $10' : 'Custom amount';
   });
   els.payoutCustomAmountRow?.classList.toggle('hidden', state.payoutAmountMode !== 'custom');
@@ -1474,17 +1477,113 @@ async function handlePayoutAccountsClick(event) {
 async function submitPayoutRequest() {
   const employee = getExperienceUser();
   if (isSecondaryLogin() || !employee || employee.role !== 'employee') return;
+  if (els.payoutRequestError) els.payoutRequestError.textContent = '';
   const available = employeeAvailablePayout(employee);
   const amount = payoutAmountForMode();
   const account = payoutAccountsForEmployee(employee).find((a) => a.id === (els.payoutAccountSelect?.value || state.selectedPayoutAccountId));
   if (!account) { if (els.payoutRequestError) els.payoutRequestError.textContent = 'Choose or add a payout account.'; return; }
   if (!(amount > 0) || amount > available + 0.001) { if (els.payoutRequestError) els.payoutRequestError.textContent = 'Choose an amount that is within your available balance.'; return; }
-  const request = await withBusy(() => createPayoutRequest({ employeeUid: employee.uid || employee.id, employeeName: employeeDisplayName(employee), amount: Math.round(amount * 100) / 100, amountMode: state.payoutAmountMode, payoutAccountId: account.id, payoutAccountNickname: account.nickname, payoutMethod: account.method, payoutDetail: account.detail }), 'Submitting payout request…');
-  state.payoutRequests = [request, ...state.payoutRequests];
-  closePayoutRequestModal();
-  renderEmployeeEarnedBalance();
+
+  // A real employee must always request against their own authenticated profile.
+  // View-as is the one exception: the owner remains authenticated and may create
+  // the request on behalf of the employee being viewed.
+  const employeeUid = isAdminUser() && state.viewAsEmployee
+    ? (employee.uid || employee.id)
+    : (state.currentUser?.uid || state.currentUser?.id || employee.uid || employee.id);
+
+  try {
+    const request = await withBusy(() => createPayoutRequest({
+      employeeUid,
+      employeeName: employeeDisplayName(employee),
+      amount: Math.round(amount * 100) / 100,
+      amountMode: state.payoutAmountMode,
+      payoutAccountId: account.id,
+      payoutAccountNickname: account.nickname,
+      payoutMethod: account.method,
+      payoutDetail: account.detail
+    }), 'Submitting payout request…');
+
+    // Only show success after Firebase has written AND read the request back.
+    state.payoutRequests = [request, ...state.payoutRequests.filter((r) => r.id !== request.id)];
+    closePayoutRequestModal();
+    renderEmployeeEarnedBalance();
+    renderEmployeePayments();
+    els.payoutConfirmationModalWrap?.classList.add('open');
+  } catch (err) {
+    console.error('Payout request failed:', err);
+    const raw = String(err?.message || err || 'Unknown Firebase error');
+    const permissionDenied = /permission|insufficient|denied/i.test(raw);
+    if (els.payoutRequestError) {
+      els.payoutRequestError.textContent = permissionDenied
+        ? 'Request was NOT submitted. Firebase denied permission. Make sure the V57 Firestore rules are published, then try again.'
+        : `Request was NOT submitted. ${raw}`;
+    }
+  }
+}
+
+function showPayoutRequestToast(request = {}) {
+  if (!isAdminUser()) return;
+  let toast = document.getElementById('payoutRequestToast');
+  if (!toast) {
+    toast = document.createElement('button');
+    toast.type = 'button';
+    toast.id = 'payoutRequestToast';
+    toast.className = 'payout-request-toast';
+    document.body.appendChild(toast);
+    toast.addEventListener('click', () => {
+      toast.classList.remove('show');
+      state.activeTab = 'employees';
+      document.querySelector('[data-tab-btn="employees"]')?.click();
+      setTimeout(() => els.adminPayoutRequests?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
+    });
+  }
+  toast.innerHTML = `<span>💵</span><div><strong>New payout request</strong><small>${safeText(request.employeeName || 'Employee')} requested ${currency(Number(request.amount || 0))}${request.payoutMethod ? ` · ${safeText(request.payoutMethod)}` : ''}</small></div>`;
+  toast.classList.add('show');
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => toast.classList.remove('show'), 7000);
+}
+async function refreshPayoutRequests({ notify = false } = {}) {
+  const employeeUid = isSecondaryLogin()
+    ? (state.primaryEmployee?.uid || state.currentUser?.primaryEmployeeId || '')
+    : (state.currentUser?.uid || state.currentUser?.id || '');
+  let rows = [];
+  if (isAdminUser()) {
+    // Admin rules permit the whole collection. Prefer that so requests are visible
+    // even if an employee profile was renamed, removed, or has legacy UID data.
+    rows = await getPayoutRequests().catch(async (err) => {
+      console.error('Could not load all payout requests; falling back to employee-scoped queries.', err);
+      const employeeIds = (state.users || []).filter((u) => u && u.role === 'employee').map((u) => u.uid || u.id).filter(Boolean);
+      const groups = await Promise.all(employeeIds.map((uid) => getPayoutRequests(uid).catch(() => [])));
+      return groups.flat();
+    });
+  } else if (!isSecondaryLogin() && state.currentUser?.role === 'employee') {
+    rows = await getPayoutRequests(employeeUid).catch((err) => {
+      console.error('Could not load employee payout requests', err);
+      return state.payoutRequests || [];
+    });
+  }
+  const nextPending = new Set((rows || []).filter((r) => r.status === 'pending').map((r) => r.id).filter(Boolean));
+  if (notify && isAdminUser()) {
+    for (const request of (rows || []).filter((r) => r.status === 'pending')) {
+      if (request.id && !state.knownPendingPayoutIds.has(request.id)) showPayoutRequestToast(request);
+    }
+  }
+  state.payoutRequests = rows || [];
+  state.knownPendingPayoutIds = nextPending;
+  renderAdminPayoutRequests();
   renderEmployeePayments();
-  els.payoutConfirmationModalWrap?.classList.add('open');
+  renderEmployeeEarnedBalance();
+  renderEmployees();
+  updateNewInquiryBadge();
+}
+function startPayoutRequestWatcher() {
+  if (state.payoutWatcherTimer) clearInterval(state.payoutWatcherTimer);
+  state.knownPendingPayoutIds = new Set((state.payoutRequests || []).filter((r) => r.status === 'pending').map((r) => r.id).filter(Boolean));
+  // Keep payout requests fresh while the dashboard is open so the bell and
+  // request history update without needing a manual page refresh.
+  state.payoutWatcherTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') refreshPayoutRequests({ notify: true }).catch((err) => console.error('Payout refresh failed', err));
+  }, 30000);
 }
 function renderAdminPayoutRequests() {
   if (!els.adminPayoutRequests || !isAdminUser()) return;
@@ -1504,6 +1603,9 @@ async function handleAdminPayoutRequestClick(event) {
   state.payoutRequests = state.payoutRequests.map((r) => r.id === id ? { ...r, status, updatedAt: new Date().toISOString() } : r);
   renderAdminPayoutRequests();
   renderEmployees();
+  renderEmployeePayments();
+  renderEmployeeEarnedBalance();
+  updateNewInquiryBadge();
 }
 
 function renderEmployeeEarnedBalance() {
@@ -1631,6 +1733,21 @@ function renderEmployeePayments() {
     </div>`;
   }).join('') : '<div class="empty-state">No confirmed or in-progress assigned orders are waiting for completion.</div>';
 
+  const employeePayoutRows = (state.payoutRequests || [])
+    .filter((r) => String(r.employeeUid || '') === String(employeeId))
+    .sort((a,b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const pendingPayoutRows = employeePayoutRows.filter((r) => r.status === 'pending');
+  const completedPayoutRows = employeePayoutRows.filter((r) => r.status === 'paid');
+  const declinedPayoutRows = employeePayoutRows.filter((r) => r.status === 'declined');
+  const payoutRowHtml = (r, statusLabel) => `<div class="employee-payout-history-row"><div><strong>${currency(Number(r.amount || 0))}</strong><span>${safeText(r.payoutAccountNickname || r.payoutMethod || 'Payout')} · ${safeText(r.createdAt ? new Date(r.createdAt).toLocaleString() : '')}</span></div><span class="badge ${r.status === 'paid' ? 'badge-green' : r.status === 'pending' ? 'badge-yellow' : 'badge-light'}">${safeText(statusLabel)}</span></div>`;
+  const employeePayoutHistoryHtml = `<section class="employee-payments-section employee-payout-history-section">
+    <div class="employee-payments-section-head"><div><span class="employee-section-kicker">Payouts</span><h3>Your payout requests</h3><p>Track requests you have submitted and payments management has completed.</p></div></div>
+    <div class="employee-payout-history-grid">
+      <div class="employee-payout-history-card"><div class="employee-payout-history-title"><strong>Pending</strong><span>${pendingPayoutRows.length}</span></div>${pendingPayoutRows.length ? pendingPayoutRows.map((r) => payoutRowHtml(r, 'Pending')).join('') : '<div class="small muted">No payout requests are pending.</div>'}</div>
+      <div class="employee-payout-history-card"><div class="employee-payout-history-title"><strong>Completed</strong><span>${completedPayoutRows.length}</span></div>${completedPayoutRows.length ? completedPayoutRows.map((r) => payoutRowHtml(r, 'Paid')).join('') : '<div class="small muted">No completed payouts yet.</div>'}${declinedPayoutRows.length ? `<details class="employee-declined-payouts"><summary>${declinedPayoutRows.length} declined</summary>${declinedPayoutRows.map((r) => payoutRowHtml(r, 'Declined')).join('')}</details>` : ''}</div>
+    </div>
+  </section>`;
+
   const unpaidRateWidth = Math.max(0, Math.min(100, split.unpaidEmployee));
   const paidRateWidth = Math.max(0, Math.min(100, split.paidEmployee));
 
@@ -1693,6 +1810,8 @@ function renderEmployeePayments() {
       </div>
       <div class="employee-payment-order-list">${projectedRows}</div>
     </section>
+
+    ${employeePayoutHistoryHtml}
 
     <section class="employee-payments-section">
       <div class="employee-payments-section-head">
@@ -2194,6 +2313,13 @@ function bindApp() {
     els.confirmedColumn?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   els.newInquiryBell?.addEventListener('click', () => {
+    const pendingPayouts = isAdminUser() ? (state.payoutRequests || []).filter((r) => r.status === 'pending') : [];
+    if (pendingPayouts.length) {
+      state.activeTab = 'employees';
+      document.querySelector('[data-tab-btn="employees"]')?.click();
+      setTimeout(() => els.adminPayoutRequests?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
+      return;
+    }
     state.activeTab = 'orders';
     state.activeOrderColumn = 'confirmed';
     document.querySelector('[data-tab-btn="orders"]')?.click();
@@ -2413,7 +2539,18 @@ async function loadData() {
   else if (isSecondaryLogin()) state.users = [state.primaryEmployee, state.currentUser].filter(Boolean);
   else state.users = [state.currentUser];
   state.secondaryUsers = (!isSecondaryLogin() && state.currentUser?.role === 'employee') ? await getSecondaryUsers(employeeUid).catch(() => []) : [];
-  state.payoutRequests = isAdminUser() ? await getPayoutRequests().catch(() => []) : (!isSecondaryLogin() && state.currentUser?.role === 'employee' ? await getPayoutRequests(employeeUid).catch(() => []) : []);
+  if (isAdminUser()) {
+    state.payoutRequests = await getPayoutRequests().catch(async (err) => {
+      console.error('Could not load all payout requests; trying employee-scoped queries.', err);
+      const employeeIds = (state.users || []).filter((u) => u && u.role === 'employee').map((u) => u.uid || u.id).filter(Boolean);
+      const payoutGroups = await Promise.all(employeeIds.map((uid) => getPayoutRequests(uid).catch(() => [])));
+      return payoutGroups.flat();
+    });
+  } else {
+    state.payoutRequests = (!isSecondaryLogin() && state.currentUser?.role === 'employee')
+      ? await getPayoutRequests(employeeUid).catch((err) => { console.error('Could not load employee payout requests', err); return []; })
+      : [];
+  }
   state.settings = await getSettings();
   const secondaryApproved = !isSecondaryLogin() || state.currentUser?.status === 'approved';
   if (state.currentUser?.role === 'admin') state.schedules = await getSchedules().catch(() => []);
@@ -2525,6 +2662,7 @@ function renderAll() {
   renderAdminReviews();
   renderNumbers();
   renderEmployees();
+  renderAdminPayoutRequests();
   populateQuickPeekLocationSelect();
   populateOrdersLocationFilter();
   renderSecondaryAccess();
@@ -3720,11 +3858,19 @@ function applyOrderColumnCollapseState() {
 }
 
 function updateNewInquiryBadge() {
-  const count = (state.orders || []).filter((order) => order.newInquiry).length;
+  const inquiryCount = isAdminUser() ? (state.orders || []).filter((order) => order.newInquiry).length : 0;
+  const payoutCount = isAdminUser() ? (state.payoutRequests || []).filter((r) => r.status === 'pending').length : 0;
+  const count = inquiryCount + payoutCount;
   if (!els.newInquiryBadge) return;
   els.newInquiryBadge.textContent = String(count);
   els.newInquiryBadge.classList.toggle('hidden', count === 0);
   els.newInquiryBell?.classList.toggle('has-new', count > 0);
+  const parts = [];
+  if (inquiryCount) parts.push(`${inquiryCount} new ${inquiryCount === 1 ? 'inquiry' : 'inquiries'}`);
+  if (payoutCount) parts.push(`${payoutCount} pending payout ${payoutCount === 1 ? 'request' : 'requests'}`);
+  const label = parts.length ? parts.join(' · ') : 'No new notifications';
+  els.newInquiryBell?.setAttribute('aria-label', label);
+  if (els.newInquiryBell) els.newInquiryBell.title = label;
 }
 
 function getBusinessWeekOfYear(dateStr) {

@@ -1,4 +1,4 @@
-import { signupEmployee, signupSecondaryEmployee, logoutAdmin } from './store.js?v=rental-ux-v51';
+import { signupEmployee, signupSecondaryEmployee, logoutAdmin } from './store.js?v=rental-ux-v57';
 
 const form = document.getElementById('employeeSignupForm');
 const status = document.getElementById('employeeSignupStatus');
