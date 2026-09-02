@@ -1,8 +1,8 @@
-import { createQuickPickerOrder, getCategories, getInventory, getOpenOrders, getSettings } from './store.js?v=rental-ux-v59';
-import { CONTACT_METHODS, addDays, buildContactMap, currency, overlaps, parseDateTime, safeText, uid, formatShortDate, formatDateTime } from './utils.js';
-import { sendInquiryNotification } from './email-notify.js';
+import { createQuickPickerOrder, getCategories, getInventory, getOpenOrders, getSettings } from './store.js?v=rental-ux-v60';
+import { CONTACT_METHODS, addDays, buildContactMap, currency, overlaps, parseDateTime, safeText, uid, formatShortDate, formatDateTime } from './utils.js?v=rental-ux-v60';
+import { sendInquiryNotification } from './email-notify.js?v=rental-ux-v60';
 
-console.log('QUICK PICKER VERSION:', 'rental-ux-v59');
+console.log('QUICK PICKER VERSION:', 'rental-ux-v60');
 
 const state = {
   inventory: [],

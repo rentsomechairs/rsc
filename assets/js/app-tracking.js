@@ -1,8 +1,8 @@
-import { getPublicReview, getPublicTrackingRecord, getPublicTrackingRecords, getSettings, getSession, savePublicReview } from './store.js?v=rental-ux-v59';
-import { currency, formatDateTime, safeText } from './utils.js';
+import { getPublicReview, getPublicTrackingRecord, getPublicTrackingRecords, getSettings, getSession, savePublicReview } from './store.js?v=rental-ux-v60';
+import { currency, formatDateTime, safeText } from './utils.js?v=rental-ux-v60';
 
 const els = {};
-const TRACKING_VERSION = 'v28-single-ticket-ios-safe';
+const TRACKING_VERSION = 'rental-ux-v60';
 const state = { records: [], settings: {}, trackingUrl: '', activeRecord: null, activeReview: null, verifiedCodes: new Set(), adminSession: null };
 const PAYMENT_METHOD_ORDER = ['cash', 'invoice', 'venmo', 'paypal', 'cashapp', 'zelle', 'googlepay', 'crypto'];
 const PAYMENT_METHOD_LABELS = {

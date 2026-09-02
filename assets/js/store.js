@@ -1,6 +1,6 @@
-import { APP_CONFIG } from './config.js';
-import { uid } from './utils.js';
-import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, listCollectionWhereAll, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v59';
+import { APP_CONFIG } from './config.js?v=rental-ux-v60';
+import { uid } from './utils.js?v=rental-ux-v60';
+import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, listCollectionWhereAll, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v60';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -1098,7 +1098,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v59');
+  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v60');
   return getDocById(COLLECTIONS.reviews, code);
 }
 

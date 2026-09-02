@@ -1,4 +1,4 @@
-import { currency, formatDateTime } from './utils.js';
+import { currency, formatDateTime } from './utils.js?v=rental-ux-v60';
 
 function isConfigured(settings = {}) {
   return Boolean(
