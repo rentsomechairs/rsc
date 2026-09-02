@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Admin • Rent Some Orders</title>
-  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v57" />
+  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v59" />
 </head>
 <body class="admin-app-page">
   <div id="loginView" class="login-shell hidden">
@@ -44,11 +44,13 @@
 
         <div class="nav-section-label admin-only">Business</div>
         <button class="nav-btn admin-only" data-tab-btn="numbers"><span class="nav-icon">↗</span><span>The Numbers</span></button>
+        <button class="nav-btn admin-only" data-tab-btn="adminpayments"><span class="nav-icon">$</span><span>Payments</span></button>
         <a class="nav-btn admin-only" href="../finance/index.html"><span class="nav-icon">$</span><span>Financial Records</span></a>
 
         <div class="nav-section-label employee-only hidden">My Account</div>
         <button class="nav-btn employee-only hidden" data-tab-btn="account"><span class="nav-icon">⚙</span><span>Account Management</span></button>
         <button class="nav-btn employee-only hidden" data-tab-btn="payments"><span class="nav-icon">$</span><span>Payments</span></button>
+        <button class="nav-btn employee-only hidden" data-tab-btn="mypayouts"><span class="nav-icon">↗</span><span>My Payouts</span></button>
         <button class="nav-btn employee-only hidden" data-tab-btn="documents"><span class="nav-icon">≡</span><span>Documents</span></button>
 
         <div class="nav-section-label admin-only">System</div>
@@ -76,7 +78,10 @@
         </div>
         <div class="topbar-actions">
           <div id="employeeEarnedBalance" class="employee-earned-balance employee-only hidden" title="Earnings from completed orders"><span>Balance</span><strong>$0.00</strong></div>
-          <button id="newInquiryBell" class="notification-bell" type="button" aria-label="New quote submissions">🔔<span id="newInquiryBadge" class="notification-badge hidden">0</span></button>
+          <div class="notification-center" id="notificationCenter">
+            <button id="newInquiryBell" class="notification-bell" type="button" aria-label="Notifications" aria-expanded="false">🔔<span id="newInquiryBadge" class="notification-badge hidden">0</span></button>
+            <div id="notificationPopover" class="notification-popover hidden" role="dialog" aria-label="Notifications"></div>
+          </div>
         </div>
       </div>
       <div id="viewAsBanner" class="view-as-banner hidden">
@@ -275,6 +280,13 @@
 
 
 
+      <section class="tab-panel admin-only" data-tab-panel="adminpayments">
+        <div class="section-header">
+          <div><h2 style="margin:0;">Payments</h2><div class="muted small">Review employee payout requests and processed payouts.</div></div>
+        </div>
+        <div id="adminPayoutRequests" class="stack-sm"></div>
+      </section>
+
       <section class="tab-panel employee-only hidden" data-tab-panel="account">
         <div class="section-header">
           <div><h2 style="margin:0;">Account Management</h2><div class="muted small">Manage secondary access and payout accounts.</div></div>
@@ -305,6 +317,13 @@
         <div id="employeePaymentsPanel" class="stack-sm"></div>
       </section>
 
+      <section class="tab-panel employee-only hidden" data-tab-panel="mypayouts">
+        <div class="section-header">
+          <div><h2 style="margin:0;">My Payouts</h2><div class="muted small">Track pending requests, completed payouts, and declined requests.</div></div>
+        </div>
+        <div id="employeePayoutsPanel" class="stack-sm"></div>
+      </section>
+
       <section class="tab-panel employee-only hidden" data-tab-panel="documents">
         <div class="section-header">
           <div><h2 style="margin:0;">Documents</h2><div class="muted small">Documents provided by the company for your records.</div></div>
@@ -318,7 +337,6 @@
           <button class="btn btn-primary" id="copyEmployeeSignupLinkBtn" type="button">Copy Signup Link</button>
         </div>
         <div id="employeeSignupLinkStatus" class="small muted" style="margin-bottom:12px;"></div>
-        <div class="small muted" style="margin-bottom:8px;">Employee payout requests appear here. After sending the payment, click <strong>Mark Paid</strong> to complete it.</div><div id="adminPayoutRequests" class="stack-sm" style="margin-bottom:16px;"></div>
         <div id="employeesList" class="stack-sm"></div>
       </section>
 
@@ -799,6 +817,14 @@
     </div>
   </div>
 
+
+  <div class="modal-backdrop" id="notificationOrderModalWrap">
+    <div class="modal notification-order-modal">
+      <div class="section-header"><div><h2 id="notificationOrderModalTitle" style="margin:0;">Order details</h2><div class="small muted">Review the order and anything that still needs attention.</div></div><button type="button" class="btn btn-ghost" data-close-notification-order>Close</button></div>
+      <div id="notificationOrderModalBody"></div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="payoutConfirmationModalWrap">
     <div class="modal" style="max-width:560px;">
       <div class="section-header"><div><h2 style="margin:0;">Payout Request Submitted</h2></div><button type="button" class="btn btn-ghost" data-close-payout-confirmation>Close</button></div>
@@ -813,6 +839,7 @@
     <button class="employee-mobile-nav-btn" type="button" data-tab-btn="orders"><span>▦</span><strong>Orders</strong></button>
     <button class="employee-mobile-nav-btn" type="button" data-tab-btn="schedule"><span>◷</span><strong>Schedule</strong></button>
     <button class="employee-mobile-nav-btn" type="button" data-tab-btn="payments"><span>$</span><strong>Payments</strong></button>
+    <button class="employee-mobile-nav-btn" type="button" data-tab-btn="mypayouts"><span>↗</span><strong>My Payouts</strong></button>
     <button class="employee-mobile-nav-btn" type="button" data-tab-btn="documents"><span>≡</span><strong>Documents</strong></button>
   </nav>
 
@@ -823,6 +850,6 @@
     </div>
   </div>
 
-  <script type="module" src="../assets/js/app-admin.js?v=rental-ux-v57"></script>
+  <script type="module" src="../assets/js/app-admin.js?v=rental-ux-v59"></script>
 </body>
 </html>

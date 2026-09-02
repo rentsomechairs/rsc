@@ -1,6 +1,6 @@
 import { APP_CONFIG } from './config.js';
 import { uid } from './utils.js';
-import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, listCollectionWhereAll, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v57';
+import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, listCollectionWhereAll, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v59';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -373,9 +373,18 @@ function getSnapshotEffectiveTotal(order = {}) {
   if (!Number.isNaN(Number(order.total))) return Number(order.total || 0);
   return Number(order.baseTotal || 0);
 }
-function getSnapshotDepositAmount(order = {}) {
-  if (Number(order.depositAmount || 0) > 0) return Number(order.depositAmount || 0);
-  return Boolean(order.requiresDeposit) ? Math.max(0, Math.round(getSnapshotEffectiveTotal(order) * 0.35)) : 0;
+function getSnapshotDepositMinimumOrder(settings = cacheSettings) {
+  const value = Number(settings?.depositMinimumOrder);
+  return Number.isFinite(value) && value >= 0 ? value : 100;
+}
+function getSnapshotDepositAmount(order = {}, settings = cacheSettings) {
+  // Deposit due is always derived from the CURRENT effective order total.
+  // Never reuse a previously stored depositAmount here: that value may belong
+  // to an older/higher version of the order and can become stale after edits.
+  const total = getSnapshotEffectiveTotal(order);
+  return total > getSnapshotDepositMinimumOrder(settings)
+    ? Math.max(0, Math.round(total * 0.35))
+    : 0;
 }
 function getSnapshotAmountPaid(order = {}) {
   const status = String(order.paymentStatus || '');
@@ -387,7 +396,7 @@ function getSnapshotAmountPaid(order = {}) {
       const value = Number(candidate);
       if (Number.isFinite(value) && value > 0) return Math.min(value, total);
     }
-    return Math.min(getSnapshotDepositAmount(order), total);
+    return Math.min(getSnapshotDepositAmount(order, cacheSettings), total);
   }
   return Number(order.amountPaid || 0);
 }
@@ -419,9 +428,9 @@ function createTrackingSnapshot(order = {}, settings = cacheSettings) {
     setupFee: Number(order.setupFee || 0),
     amountPaid: getSnapshotAmountPaid(order),
     amountRemaining: getSnapshotAmountRemaining(order),
-    depositAmount: getSnapshotDepositAmount(order),
+    depositAmount: getSnapshotDepositAmount(order, settings),
     depositPaidAmount: order.depositPaidAmount ?? '',
-    requiresDeposit: Boolean(order.requiresDeposit),
+    requiresDeposit: getSnapshotEffectiveTotal(order) > getSnapshotDepositMinimumOrder(settings),
     depositWaived: Boolean(order.depositWaived),
     verbalConfirmation: Boolean(order.verbalConfirmation),
     equipmentStillDiscussing: Boolean(order.equipmentStillDiscussing),
@@ -1089,7 +1098,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v57');
+  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v59');
   return getDocById(COLLECTIONS.reviews, code);
 }
 

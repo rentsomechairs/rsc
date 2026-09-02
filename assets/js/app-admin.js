@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v57';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v59';
 import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js';
 import { debounce, geocodeAddress, searchAddresses } from './geo.js';
-import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v57';
+import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v59';
 const state = {
   inventory: [],
   orders: [],
@@ -54,13 +54,15 @@ const state = {
   payoutAmountMode: 'all',
   selectedPayoutAccountId: '',
   payoutWatcherTimer: null,
-  knownPendingPayoutIds: new Set()
+  knownPendingPayoutIds: new Set(),
+  notificationPopoverOpen: false,
+  employeeNotificationWatcherTimer: null
 };
 const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'rental-ux-v57';
+const ADMIN_VERSION = 'rental-ux-v59';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -414,6 +416,7 @@ async function init() {
     applyRoleAccess();
     renderAll();
     startPayoutRequestWatcher();
+    startEmployeeNotificationWatcher();
   }, 'Loading from Firebase…');
 }
 function cacheEls() {
@@ -441,6 +444,11 @@ function cacheEls() {
     backToActiveOrdersBtn: document.getElementById('backToActiveOrdersBtn'),
     newInquiryBell: document.getElementById('newInquiryBell'),
     newInquiryBadge: document.getElementById('newInquiryBadge'),
+    notificationCenter: document.getElementById('notificationCenter'),
+    notificationPopover: document.getElementById('notificationPopover'),
+    notificationOrderModalWrap: document.getElementById('notificationOrderModalWrap'),
+    notificationOrderModalTitle: document.getElementById('notificationOrderModalTitle'),
+    notificationOrderModalBody: document.getElementById('notificationOrderModalBody'),
     employeeEarnedBalance: document.getElementById('employeeEarnedBalance'),
     payoutRequestModalWrap: document.getElementById('payoutRequestModalWrap'),
     payoutAccountsList: document.getElementById('payoutAccountsList'),
@@ -585,6 +593,7 @@ function cacheEls() {
     copyEmployeeSignupLinkBtn: document.getElementById('copyEmployeeSignupLinkBtn'),
     employeeSignupLinkStatus: document.getElementById('employeeSignupLinkStatus'),
     employeePaymentsPanel: document.getElementById('employeePaymentsPanel'),
+    employeePayoutsPanel: document.getElementById('employeePayoutsPanel'),
     employeeDocumentsPanel: document.getElementById('employeeDocumentsPanel'),
     schedulePersonSelect: document.getElementById('schedulePersonSelect'),
     typicalScheduleGrid: document.getElementById('typicalScheduleGrid'),
@@ -643,8 +652,8 @@ function applyRoleAccess() {
   // Reset tab visibility first so exiting View As restores the full admin menu.
   document.querySelectorAll('[data-tab-btn]').forEach((btn) => btn.classList.remove('hidden'));
   if (employee) {
-    state.activeTab = ['orders','schedule','account','payments','documents'].includes(state.activeTab) ? state.activeTab : 'orders';
-    const allowed = new Set(isSecondaryLogin() ? ['orders','schedule'] : ['orders', 'schedule', 'account', 'payments', 'documents']);
+    state.activeTab = ['orders','schedule','account','payments','mypayouts','documents'].includes(state.activeTab) ? state.activeTab : 'orders';
+    const allowed = new Set(isSecondaryLogin() ? ['orders','schedule'] : ['orders', 'schedule', 'account', 'payments', 'mypayouts', 'documents']);
     document.querySelectorAll('[data-tab-btn]').forEach((btn) => btn.classList.toggle('hidden', !allowed.has(btn.dataset.tabBtn)));
   } else {
     document.querySelectorAll('.employee-only[data-tab-btn]').forEach((btn) => btn.classList.add('hidden'));
@@ -663,16 +672,30 @@ function applyRoleAccess() {
 function approvedEmployees() { return (state.users || []).filter((u) => u.role === 'employee' && u.status === 'approved'); }
 function employeeDisplayName(user = {}) { return `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Employee'; }
 function employeeAssignments(user = {}) {
-  return Array.isArray(user.equipmentAssignments) ? user.equipmentAssignments.map((entry) => ({
+  return Array.isArray(user.equipmentAssignments) ? user.equipmentAssignments.map((entry, index) => ({
+    lotId: String(entry.lotId || `${entry.inventoryId || 'item'}_${index}`),
     inventoryId: String(entry.inventoryId || ''),
     quantity: Math.max(0, Number(entry.quantity || 0)),
-    unitCost: Math.max(0, Number(entry.unitCost || 0))
+    unitCost: Math.max(0, Number(entry.unitCost || 0)),
+    accessories: Array.isArray(entry.accessories) ? entry.accessories.map((a) => ({
+      id: String(a?.id || ''),
+      quantity: Math.max(0, Math.floor(Number(a?.quantity || 0)))
+    })).filter((a) => a.id && a.quantity > 0) : []
   })).filter((entry) => entry.inventoryId && entry.quantity > 0) : [];
 }
 function inventoryById(id = '') { return (state.inventory || []).find((item) => String(item.id) === String(id)); }
-function allocationForUser(user = {}, inventoryId = '') { return employeeAssignments(user).find((entry) => entry.inventoryId === String(inventoryId)); }
+function allocationsForUser(user = {}, inventoryId = '') { return employeeAssignments(user).filter((entry) => entry.inventoryId === String(inventoryId)); }
+function allocationForUser(user = {}, inventoryId = '') {
+  const rows = allocationsForUser(user, inventoryId);
+  return rows.length ? { inventoryId: String(inventoryId), quantity: rows.reduce((sum,row) => sum + Number(row.quantity || 0), 0), lots: rows } : null;
+}
 function allocatedQuantityAcrossEmployees(inventoryId = '', excludeUid = '') {
-  return (state.users || []).filter((u) => u.role === 'employee' && (u.uid || u.id) !== excludeUid).reduce((sum, u) => sum + Number(allocationForUser(u, inventoryId)?.quantity || 0), 0);
+  return (state.users || []).filter((u) => u.role === 'employee' && (u.uid || u.id) !== excludeUid).reduce((sum, u) => sum + allocationsForUser(u, inventoryId).reduce((n,a) => n + Number(a.quantity || 0), 0), 0);
+}
+function employeeAccessoryAssignments(user = {}, inventoryId = '') {
+  const totals = new Map();
+  allocationsForUser(user, inventoryId).forEach((lot) => (lot.accessories || []).forEach((a) => totals.set(a.id, (totals.get(a.id) || 0) + Number(a.quantity || 0))));
+  return [...totals.entries()].map(([id, quantity]) => ({ id, quantity }));
 }
 function locationIdForEmployee(uid = '') { return uid ? `employee:${uid}` : 'main'; }
 function orderLocationId(order = {}) {
@@ -735,7 +758,7 @@ function buildPublicPickupLocations() {
     name: `${employeeDisplayName(u)} Pickup`,
     address: String(u.pickupAddress || '').trim(),
     pickupCoords: u.pickupCoords || null,
-    allocations: employeeAssignments(u).map((entry) => ({ inventoryId: entry.inventoryId, quantity: entry.quantity }))
+    allocations: [...new Set(employeeAssignments(u).map((entry) => entry.inventoryId))].map((inventoryId) => ({ inventoryId, quantity: allocationsForUser(u, inventoryId).reduce((sum, entry) => sum + Number(entry.quantity || 0), 0), accessories: employeeAccessoryAssignments(u, inventoryId) }))
   }));
 }
 async function syncPublicPickupLocations() {
@@ -813,14 +836,43 @@ function qualifiedUsageLabel(entry = {}) {
 function calculateEmployeePaymentLedger(user = {}, orders = state.orders) {
   const assignments = employeeAssignments(user);
   const split = employeePaymentSettings(user);
-  const buckets = new Map(assignments.map((a) => [a.inventoryId, {
-    ...a,
-    totalCost: a.quantity * a.unitCost,
-    payoff: 0,
-    employeeEarnings: 0,
-    companyShare: 0,
-    rentalRevenue: 0
-  }]));
+
+  // Equipment can now be assigned in multiple cost lots. For each equipment type,
+  // cheaper lots are always paid off first. Replaying completed-order history against
+  // the current lots also means existing payoff progress automatically shifts to a
+  // newly-added cheaper lot of the same item.
+  const groups = new Map();
+  for (const assignment of assignments) {
+    if (!groups.has(assignment.inventoryId)) groups.set(assignment.inventoryId, { inventoryId: assignment.inventoryId, lots: [] });
+    groups.get(assignment.inventoryId).lots.push({
+      ...assignment,
+      totalCost: assignment.quantity * assignment.unitCost,
+      payoff: 0,
+      employeeEarnings: 0,
+      companyShare: 0,
+      rentalRevenue: 0
+    });
+  }
+  groups.forEach((group) => group.lots.sort((a,b) => Number(a.unitCost || 0) - Number(b.unitCost || 0) || String(a.lotId).localeCompare(String(b.lotId))));
+
+  const paidUnitsForGroup = (group) => group.lots.reduce((sum, lot) => {
+    const paid = lot.unitCost > 0 ? Math.min(lot.quantity, Math.floor((lot.payoff + 1e-9) / lot.unitCost)) : lot.quantity;
+    return sum + paid;
+  }, 0);
+  const applyPayoffToGroup = (group, amount) => {
+    let remaining = Math.max(0, Number(amount || 0));
+    let applied = 0;
+    for (const lot of group.lots) {
+      if (remaining <= 0) break;
+      const needed = Math.max(0, lot.totalCost - lot.payoff);
+      const use = Math.min(remaining, needed);
+      lot.payoff += use;
+      applied += use;
+      remaining -= use;
+    }
+    return { applied, overflow: remaining };
+  };
+
   let employeeEarnings = 0, companyShare = 0, payoffTotal = 0, recognizedRevenue = 0;
   const lines = [];
   const sorted = (orders || [])
@@ -835,62 +887,52 @@ function calculateEmployeePaymentLedger(user = {}, orders = state.orders) {
     const newlyQualified = [];
 
     for (const item of order.items || []) {
-      const bucket = buckets.get(String(item.inventoryId || ''));
-      if (!bucket) continue;
+      const group = groups.get(String(item.inventoryId || ''));
+      if (!group) continue;
       const qty = Math.max(0, Number(item.quantity || 0));
       const unitRental = Math.max(0, Number(item.chargedUnitPrice === '' || item.chargedUnitPrice == null ? item.unitPrice : item.chargedUnitPrice || 0));
       const lineRevenue = qty * unitRental * paidFraction;
       if (!lineRevenue || !qty) continue;
 
-      // Payoff is intentionally unit-based. Money accumulates toward one physical
-      // unit at a time. Only fully paid units receive the paid-off payout rate on
-      // subsequent order revenue. Example: $15 applied to $14 chairs pays off one
-      // chair and leaves $1 of progress toward the next chair.
-      const paidUnitsBefore = bucket.unitCost > 0
-        ? Math.min(bucket.quantity, Math.floor((bucket.payoff + 1e-9) / bucket.unitCost))
-        : bucket.quantity;
+      const totalAssignedQty = group.lots.reduce((sum, lot) => sum + Number(lot.quantity || 0), 0);
+      const paidUnitsBefore = Math.min(totalAssignedQty, paidUnitsForGroup(group));
       const paidQty = Math.min(qty, paidUnitsBefore);
       const unpaidQty = Math.max(0, qty - paidQty);
       const paidRevenue = lineRevenue * (paidQty / qty);
       const unpaidRevenue = lineRevenue * (unpaidQty / qty);
 
-      if (paidQty > 0) {
-        qualifiedUsage.push({ inventoryId: bucket.inventoryId, quantity: paidQty });
-      }
+      if (paidQty > 0) qualifiedUsage.push({ inventoryId: group.inventoryId, quantity: paidQty });
 
       const rawPayoff = unpaidRevenue * (split.equipmentPayoff / 100);
-      const remainingCost = Math.max(0, bucket.totalCost - bucket.payoff);
-      const appliedPayoff = Math.min(rawPayoff, remainingCost);
-      const payoffOverflow = Math.max(0, rawPayoff - appliedPayoff);
+      const payoffResult = applyPayoffToGroup(group, rawPayoff);
+      const paidUnitsAfter = Math.min(totalAssignedQty, paidUnitsForGroup(group));
+      const unlockedNow = Math.max(0, paidUnitsAfter - paidUnitsBefore);
+      if (unlockedNow > 0) newlyQualified.push({ inventoryId: group.inventoryId, quantity: unlockedNow });
 
       const employeePart =
         paidRevenue * (split.paidEmployee / 100) +
         unpaidRevenue * (split.unpaidEmployee / 100) +
-        payoffOverflow;
+        payoffResult.overflow;
       const companyPart =
         paidRevenue * (split.paidCompany / 100) +
         unpaidRevenue * (split.unpaidCompany / 100);
 
-      bucket.payoff += appliedPayoff;
-      const paidUnitsAfter = bucket.unitCost > 0
-        ? Math.min(bucket.quantity, Math.floor((bucket.payoff + 1e-9) / bucket.unitCost))
-        : bucket.quantity;
-      const unlockedNow = Math.max(0, paidUnitsAfter - paidUnitsBefore);
-      if (unlockedNow > 0) {
-        newlyQualified.push({ inventoryId: bucket.inventoryId, quantity: unlockedNow });
-      }
+      // Attribute revenue to the cost lots for display. Payoff itself has already
+      // been applied cheapest-first above.
+      const lotQtyTotal = Math.max(1, totalAssignedQty);
+      group.lots.forEach((lot) => {
+        const share = Number(lot.quantity || 0) / lotQtyTotal;
+        lot.employeeEarnings += employeePart * share;
+        lot.companyShare += companyPart * share;
+        lot.rentalRevenue += lineRevenue * share;
+      });
 
-      bucket.employeeEarnings += employeePart;
-      bucket.companyShare += companyPart;
-      bucket.rentalRevenue += lineRevenue;
       orderEmployee += employeePart;
       orderCompany += companyPart;
-      orderPayoff += appliedPayoff;
+      orderPayoff += payoffResult.applied;
       orderRecognized += lineRevenue;
     }
 
-    // Delivery, setup, and tips belong 100% to the assigned employee. For
-    // partially paid orders, recognize the same paid fraction until completion.
     const directEmployeeRevenue = (
       Number(order.deliveryFee || 0) +
       Number(order.setupFee || 0) +
@@ -906,20 +948,17 @@ function calculateEmployeePaymentLedger(user = {}, orders = state.orders) {
       companyShare += orderCompany;
       payoffTotal += orderPayoff;
       recognizedRevenue += orderRecognized;
-      lines.push({
-        order,
-        employee: orderEmployee,
-        company: orderCompany,
-        payoff: orderPayoff,
-        revenue: orderRecognized,
-        qualifiedUsage,
-        newlyQualified
-      });
+      lines.push({ order, employee: orderEmployee, company: orderCompany, payoff: orderPayoff, revenue: orderRecognized, qualifiedUsage, newlyQualified });
     }
   }
-  return { buckets: [...buckets.values()], employeeEarnings, companyShare, payoffTotal, recognizedRevenue, lines, split };
-}
 
+  const buckets = [...groups.values()].flatMap((group) => group.lots.map((lot, index) => ({
+    ...lot,
+    lotIndex: index,
+    lotCount: group.lots.length
+  })));
+  return { buckets, employeeEarnings, companyShare, payoffTotal, recognizedRevenue, lines, split };
+}
 function employeeContractAgreement(user = {}) {
   const value = user.contractAgreement && typeof user.contractAgreement === 'object' ? user.contractAgreement : {};
   const acceptance = user.contractAcceptance && typeof user.contractAcceptance === 'object' ? user.contractAcceptance : {};
@@ -1220,6 +1259,7 @@ function exitViewAsEmployee() {
   state.expandedOrderId = null;
   applyRoleAccess();
   renderAll();
+  refreshPayoutRequests().catch((err) => console.error('Could not restore admin payout list', err));
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1487,7 +1527,7 @@ async function submitPayoutRequest() {
   // A real employee must always request against their own authenticated profile.
   // View-as is the one exception: the owner remains authenticated and may create
   // the request on behalf of the employee being viewed.
-  const employeeUid = isAdminUser() && state.viewAsEmployee
+  const employeeUid = state.viewAsEmployee
     ? (employee.uid || employee.id)
     : (state.currentUser?.uid || state.currentUser?.id || employee.uid || employee.id);
 
@@ -1532,8 +1572,8 @@ function showPayoutRequestToast(request = {}) {
     document.body.appendChild(toast);
     toast.addEventListener('click', () => {
       toast.classList.remove('show');
-      state.activeTab = 'employees';
-      document.querySelector('[data-tab-btn="employees"]')?.click();
+      state.activeTab = 'adminpayments';
+      document.querySelector('[data-tab-btn="adminpayments"]')?.click();
       setTimeout(() => els.adminPayoutRequests?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
     });
   }
@@ -1547,7 +1587,10 @@ async function refreshPayoutRequests({ notify = false } = {}) {
     ? (state.primaryEmployee?.uid || state.currentUser?.primaryEmployeeId || '')
     : (state.currentUser?.uid || state.currentUser?.id || '');
   let rows = [];
-  if (isAdminUser()) {
+  if (state.viewAsEmployee && isRealAdminUser()) {
+    const viewedUid = state.viewAsEmployee.uid || state.viewAsEmployee.id || '';
+    rows = await getPayoutRequests(viewedUid).catch((err) => { console.error('Could not load viewed employee payout requests', err); return state.payoutRequests || []; });
+  } else if (isAdminUser()) {
     // Admin rules permit the whole collection. Prefer that so requests are visible
     // even if an employee profile was renamed, removed, or has legacy UID data.
     rows = await getPayoutRequests().catch(async (err) => {
@@ -1572,6 +1615,7 @@ async function refreshPayoutRequests({ notify = false } = {}) {
   state.knownPendingPayoutIds = nextPending;
   renderAdminPayoutRequests();
   renderEmployeePayments();
+  renderEmployeePayouts();
   renderEmployeeEarnedBalance();
   renderEmployees();
   updateNewInquiryBadge();
@@ -1585,13 +1629,55 @@ function startPayoutRequestWatcher() {
     if (document.visibilityState === 'visible') refreshPayoutRequests({ notify: true }).catch((err) => console.error('Payout refresh failed', err));
   }, 30000);
 }
+
+async function refreshEmployeeOperationalData() {
+  if (!isEmployeeUser() || state.viewAsEmployee) return;
+  const employeeUid = isSecondaryLogin()
+    ? (state.primaryEmployee?.uid || state.currentUser?.primaryEmployeeId || '')
+    : (state.currentUser?.uid || state.currentUser?.id || '');
+  if (!employeeUid) return;
+  try {
+    const [profile, rawOrders, schedule] = await Promise.all([
+      getUserProfile(employeeUid).catch(() => null),
+      getAssignedOrders(employeeUid).catch(() => null),
+      getSchedule(employeeUid).catch(() => null)
+    ]);
+    if (profile) {
+      if (isSecondaryLogin()) state.primaryEmployee = profile;
+      else state.currentUser = { ...state.currentUser, ...profile };
+      state.users = state.users.map((u) => String(u.uid || u.id) === String(employeeUid) ? { ...u, ...profile } : u);
+    }
+    if (Array.isArray(rawOrders)) {
+      state.orders = rawOrders.map((order) => ({ assignedEmployeeId:'', assignedEmployeeName:'', ...order, paymentStatus: order.paymentStatus === 'Deposit' ? 'Deposit Paid' : order.paymentStatus }))
+        .filter((order) => String(order.assignedEmployeeId || '') === String(employeeUid));
+      syncAllOrdersToDepositRule({ touchUpdatedAt:false });
+      renderOrders();
+      renderOrdersCalendar();
+      renderEmployeePayments();
+      renderEmployeePayouts();
+      renderEmployeeEarnedBalance();
+    }
+    if (schedule) state.schedules = [schedule];
+    if (!isSecondaryLogin()) state.secondaryUsers = await getSecondaryUsers(employeeUid).catch(() => state.secondaryUsers || []);
+    updateNewInquiryBadge();
+  } catch (err) {
+    console.error('Employee notification refresh failed', err);
+  }
+}
+function startEmployeeNotificationWatcher() {
+  if (state.employeeNotificationWatcherTimer) clearInterval(state.employeeNotificationWatcherTimer);
+  if (!isEmployeeUser() || state.viewAsEmployee) return;
+  state.employeeNotificationWatcherTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') refreshEmployeeOperationalData();
+  }, 30000);
+}
 function renderAdminPayoutRequests() {
   if (!els.adminPayoutRequests || !isAdminUser()) return;
   const rows = (state.payoutRequests || []).slice().sort((a,b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   const pending = rows.filter((r) => r.status === 'pending');
-  const recent = rows.filter((r) => r.status !== 'pending').slice(0, 10);
+  const recent = rows.filter((r) => r.status !== 'pending');
   const renderRow = (r) => `<div class="admin-payout-request-card payout-status-${safeText(r.status || 'pending')}" data-payout-request-id="${safeText(r.id)}"><div><strong>${safeText(r.employeeName || 'Employee')} · ${currency(Number(r.amount || 0))}</strong><div class="admin-payout-request-meta"><span>${safeText(r.payoutAccountNickname || '')}</span><span>${safeText(r.payoutMethod || '')}</span><span>${safeText(r.payoutDetail || '')}</span><span>${safeText(r.createdAt ? new Date(r.createdAt).toLocaleString() : '')}</span><span>${safeText((r.status || 'pending').toUpperCase())}</span></div></div><div class="admin-payout-request-actions">${r.status === 'pending' ? `<button type="button" class="btn btn-primary btn-small" data-payout-mark-paid="${safeText(r.id)}">Mark Paid</button><button type="button" class="btn btn-ghost btn-small" data-payout-decline="${safeText(r.id)}">Decline</button>` : ''}</div></div>`;
-  els.adminPayoutRequests.innerHTML = `<div class="admin-payout-requests-wrap"><div class="admin-payout-requests-head"><div><strong>Payout Requests</strong><div class="small muted">${pending.length} pending · Use Mark Paid after you have actually sent or handed over the money.</div></div></div>${pending.length ? pending.map(renderRow).join('') : '<div class="small muted">No pending payout requests.</div>'}${recent.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-weight:700;">Recent processed requests</summary><div class="stack-sm" style="margin-top:8px;">${recent.map(renderRow).join('')}</div></details>` : ''}</div>`;
+  els.adminPayoutRequests.innerHTML = `<div class="admin-payout-requests-wrap"><div class="admin-payout-requests-head"><div><strong>Payout Requests</strong><div class="small muted">${pending.length} pending · Use Mark Paid after you have actually sent or handed over the money.</div></div></div>${pending.length ? pending.map(renderRow).join('') : '<div class="small muted">No pending payout requests.</div>'}${recent.length ? `<details style="margin-top:10px;"><summary style="cursor:pointer;font-weight:700;">Completed / processed requests (${recent.length})</summary><div class="stack-sm" style="margin-top:8px;">${recent.map(renderRow).join('')}</div></details>` : ''}</div>`;
 }
 async function handleAdminPayoutRequestClick(event) {
   const paid = event.target.closest('[data-payout-mark-paid]');
@@ -1604,6 +1690,7 @@ async function handleAdminPayoutRequestClick(event) {
   renderAdminPayoutRequests();
   renderEmployees();
   renderEmployeePayments();
+  renderEmployeePayouts();
   renderEmployeeEarnedBalance();
   updateNewInquiryBadge();
 }
@@ -1811,8 +1898,6 @@ function renderEmployeePayments() {
       <div class="employee-payment-order-list">${projectedRows}</div>
     </section>
 
-    ${employeePayoutHistoryHtml}
-
     <section class="employee-payments-section">
       <div class="employee-payments-section-head">
         <div><span class="employee-section-kicker">History</span><h3>Completed order breakdown</h3><p>Only completed orders appear here, even if an active order has already been marked paid.</p></div>
@@ -1820,6 +1905,30 @@ function renderEmployeePayments() {
       <div class="employee-payment-order-list">${paidRows}</div>
     </section>`;
 }
+function renderEmployeePayouts() {
+  if (!els.employeePayoutsPanel || !isEmployeeUser()) return;
+  const employee = getExperienceUser();
+  const employeeId = employee?.uid || employee?.id || '';
+  const rows = (state.payoutRequests || [])
+    .filter((r) => String(r.employeeUid || '') === String(employeeId))
+    .sort((a,b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const pending = rows.filter((r) => r.status === 'pending');
+  const paid = rows.filter((r) => r.status === 'paid');
+  const declined = rows.filter((r) => r.status === 'declined');
+  const rowHtml = (r, label) => `<div class="employee-payout-history-row"><div><strong>${currency(Number(r.amount || 0))}</strong><span>${safeText(r.payoutAccountNickname || r.payoutMethod || 'Payout')} · ${safeText(r.createdAt ? new Date(r.createdAt).toLocaleString() : '')}${r.updatedAt && r.status === 'paid' ? ` · paid ${safeText(new Date(r.updatedAt).toLocaleString())}` : ''}</span></div><span class="badge ${r.status === 'paid' ? 'badge-green' : r.status === 'pending' ? 'badge-yellow' : 'badge-light'}">${safeText(label)}</span></div>`;
+  els.employeePayoutsPanel.innerHTML = `<section class="employee-payments-section employee-payout-history-section">
+    <div class="employee-payment-summary-grid">
+      <div class="employee-payment-summary-card"><span>Available now</span><strong>${currency(employeeAvailablePayout(employee))}</strong><small>after pending and completed payouts</small></div>
+      <div class="employee-payment-summary-card"><span>Pending</span><strong>${currency(pending.reduce((sum,r) => sum + Number(r.amount || 0), 0))}</strong><small>${pending.length} request${pending.length === 1 ? '' : 's'}</small></div>
+      <div class="employee-payment-summary-card"><span>Paid out</span><strong>${currency(paid.reduce((sum,r) => sum + Number(r.amount || 0), 0))}</strong><small>${paid.length} completed payout${paid.length === 1 ? '' : 's'}</small></div>
+    </div>
+    <div class="employee-payout-history-grid" style="margin-top:14px;">
+      <div class="employee-payout-history-card"><div class="employee-payout-history-title"><strong>Pending requests</strong><span>${pending.length}</span></div>${pending.length ? pending.map((r) => rowHtml(r, 'Pending')).join('') : '<div class="small muted">No payout requests are pending.</div>'}</div>
+      <div class="employee-payout-history-card"><div class="employee-payout-history-title"><strong>Completed payouts</strong><span>${paid.length}</span></div>${paid.length ? paid.map((r) => rowHtml(r, 'Paid')).join('') : '<div class="small muted">No completed payouts yet.</div>'}${declined.length ? `<details class="employee-declined-payouts"><summary>${declined.length} declined request${declined.length === 1 ? '' : 's'}</summary>${declined.map((r) => rowHtml(r, 'Declined')).join('')}</details>` : ''}</div>
+    </div>
+  </section>`;
+}
+
 function renderEmployeeOrderDetails(order = {}) {
   const contact = order.contactMethods || {};
   const pickupAddress = order.fulfillmentType === 'Delivery' ? (order.address || 'No delivery address') : (order.assignedEmployeePickupAddress || getExperienceUser()?.pickupAddress || state.settings?.pickupAddress || 'Pickup address not set');
@@ -1855,6 +1964,7 @@ async function handleEmployeeOrderProgress(orderId, changes = {}) {
     state.orders = state.orders.map((o) => o.id === orderId ? saved : o);
     renderOrders();
     renderEmployeePayments();
+    renderEmployeePayouts();
     renderEmployeeEarnedBalance();
   } catch (error) {
     alert(error?.message || 'Unable to update this order.');
@@ -1899,14 +2009,17 @@ function renderEmployees() {
     const uid = u.uid || u.id;
     const assignments = employeeAssignments(u);
     const totalValue = equipmentValueForUser(u);
-    const rows = assignments.map((a) => {
+    const rows = assignments.map((a, index) => {
       const item = inventoryById(a.inventoryId) || {};
       const otherAllocated = allocatedQuantityAcrossEmployees(a.inventoryId, uid);
       const max = Math.max(0, Number(item.stock || 0) - otherAllocated);
-      return `<div class="employee-allocation-row" data-employee-allocation-row="${safeText(a.inventoryId)}"><div><strong>${safeText(item.name || 'Equipment')}</strong><div class="small muted">${safeText(item.category || 'Other')} · Company total ${Number(item.stock || 0)}</div></div><div class="form-row"><label>Qty</label><input type="number" min="0" max="${max}" step="1" data-employee-equipment-qty="${safeText(a.inventoryId)}" value="${Number(a.quantity || 0)}" /></div><div class="form-row"><label>Cost each</label><input type="number" min="0" step="0.01" data-employee-equipment-cost="${safeText(a.inventoryId)}" value="${a.unitCost || ''}" placeholder="0.00" /></div><div><span class="small muted">Assigned value</span><strong data-allocation-line-total>${currency(Number(a.quantity || 0) * Number(a.unitCost || 0))}</strong></div><button type="button" class="btn btn-ghost btn-small" data-remove-employee-equipment="${safeText(a.inventoryId)}">Remove</button></div>`;
+      const accessories = normalizeAccessories(item.accessories || []);
+      const accessoryMap = new Map((a.accessories || []).map((entry) => [String(entry.id), Number(entry.quantity || 0)]));
+      const accessoryControls = accessories.length ? `<div class="employee-allocation-accessories"><div class="small muted"><strong>Accessories at this location</strong> · set quantity to 0 to remove</div><div class="employee-accessory-allocation-grid">${accessories.map((acc) => `<label class="employee-accessory-allocation"><span>${safeText(acc.name)}</span><input type="number" min="0" max="${Math.max(Number(a.quantity || 0), Number(accessoryMap.get(acc.id) || 0))}" step="1" data-employee-accessory-id="${safeText(acc.id)}" value="${Number(accessoryMap.get(acc.id) || 0)}" /></label>`).join('')}</div></div>` : '<div class="small muted employee-allocation-accessories">No accessories are configured for this inventory item.</div>';
+      return `<div class="employee-allocation-row" data-employee-allocation-row="${safeText(a.lotId)}" data-inventory-id="${safeText(a.inventoryId)}"><div class="employee-allocation-item"><strong>${safeText(item.name || 'Equipment')}</strong><div class="small muted">${safeText(item.category || 'Other')} · Cost group ${index + 1} · Company total ${Number(item.stock || 0)}</div></div><div class="form-row"><label>Qty</label><input type="number" min="0" max="${max}" step="1" data-employee-equipment-qty value="${Number(a.quantity || 0)}" /></div><div class="form-row"><label>Cost each</label><input type="number" min="0" step="0.01" data-employee-equipment-cost value="${a.unitCost || ''}" placeholder="0.00" /></div><div><span class="small muted">Assigned value</span><strong data-allocation-line-total>${currency(Number(a.quantity || 0) * Number(a.unitCost || 0))}</strong></div><div class="employee-allocation-actions"><button type="button" class="btn btn-secondary btn-small" data-add-employee-price-lot="${safeText(a.inventoryId)}">+ Different Price</button><button type="button" class="btn btn-ghost btn-small" data-remove-employee-equipment-lot="${safeText(a.lotId)}">Remove</button></div>${accessoryControls}</div>`;
     }).join('') || '<div class="empty-state">No equipment assigned yet. Use Add Equipment to allocate inventory.</div>';
     const ledger = calculateEmployeePaymentLedger(u, state.orders);
-    return `<div class="card" style="padding:16px;" data-employee-card="${safeText(uid)}"><div class="section-header"><div><strong>${safeText(employeeDisplayName(u))}</strong><div class="small muted">${safeText(u.email || '')} · ${safeText(u.phone || 'No phone')}</div></div><span class="badge ${u.status === 'approved' ? 'badge-green' : 'badge-yellow'}">${safeText(u.status || 'pending')}</span></div><div class="employee-location-row"><div class="small"><strong>Pickup location:</strong> ${safeText(u.pickupAddress || 'Not provided')}</div><label class="employee-exchange-time-field"><span>Average exchange time</span><div><input type="number" min="0" step="0.5" data-employee-average-exchange value="${Number(u.averageExchangeMinutes || 0)}" /><span>min each × 2</span></div></label><button class="btn btn-secondary btn-small" type="button" data-save-employee-exchange-time="${safeText(uid)}">Save</button></div>${u.emergencyContactName ? `<div class="small muted">Emergency contact: ${safeText(u.emergencyContactName)} · ${safeText(u.emergencyContactPhone || '')}</div>` : ''}<div class="employee-allocation-summary"><span class="badge badge-blue">Equipment value: ${currency(totalValue)}</span><span class="badge badge-yellow">Payoff applied: ${currency(ledger.payoffTotal)}</span><span class="badge badge-green">Remaining: ${currency(Math.max(0,totalValue-ledger.payoffTotal))}</span><span class="badge badge-blue">Payout available: ${currency(employeeAvailablePayout(u))}</span></div><details style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Equipment Allocation</summary><div class="employee-equipment-toolbar"><button class="btn btn-primary btn-small" data-open-employee-equipment-picker="${safeText(uid)}" type="button">+ Add Equipment</button><span class="small muted">${assignments.length} equipment type${assignments.length === 1 ? '' : 's'} assigned</span></div><div class="employee-equipment-picker hidden" data-employee-equipment-picker="${safeText(uid)}"></div><div class="employee-allocation-grid">${rows}</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-equipment="${safeText(uid)}" type="button">Save Equipment Allocation</button></div></details><details style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Payment Settings</summary><div class="employee-payment-settings" style="margin-top:10px;"><div class="small muted" style="grid-column:1/-1;"><strong>While equipment is unpaid</strong> — these three percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidEmployee" value="${employeePaymentSettings(u).unpaidEmployee}" /></label><label class="form-row"><span>Equipment payoff %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="equipmentPayoff" value="${employeePaymentSettings(u).equipmentPayoff}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidCompany" value="${employeePaymentSettings(u).unpaidCompany}" /></label><div class="small muted" style="grid-column:1/-1;margin-top:4px;"><strong>After an individual unit is paid off</strong> — these two percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidEmployee" value="${employeePaymentSettings(u).paidEmployee}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidCompany" value="${employeePaymentSettings(u).paidCompany}" /></label></div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-payment="${safeText(uid)}" type="button">Save Payment Settings</button></div></details><details class="employee-visual-settings" style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Order Colors</summary><div class="employee-color-editor" data-employee-color-editor>
+    return `<div class="card" style="padding:16px;" data-employee-card="${safeText(uid)}"><div class="section-header"><div><strong>${safeText(employeeDisplayName(u))}</strong><div class="small muted">${safeText(u.email || '')} · ${safeText(u.phone || 'No phone')}</div></div><span class="badge ${u.status === 'approved' ? 'badge-green' : 'badge-yellow'}">${safeText(u.status || 'pending')}</span></div><div class="employee-location-row"><div class="small"><strong>Pickup location:</strong> ${safeText(u.pickupAddress || 'Not provided')}</div><label class="employee-exchange-time-field"><span>Average exchange time</span><div><input type="number" min="0" step="0.5" data-employee-average-exchange value="${Number(u.averageExchangeMinutes || 0)}" /><span>min each × 2</span></div></label><button class="btn btn-secondary btn-small" type="button" data-save-employee-exchange-time="${safeText(uid)}">Save</button></div>${u.emergencyContactName ? `<div class="small muted">Emergency contact: ${safeText(u.emergencyContactName)} · ${safeText(u.emergencyContactPhone || '')}</div>` : ''}<div class="employee-allocation-summary"><span class="badge badge-blue">Equipment value: ${currency(totalValue)}</span><span class="badge badge-yellow">Payoff applied: ${currency(ledger.payoffTotal)}</span><span class="badge badge-green">Remaining: ${currency(Math.max(0,totalValue-ledger.payoffTotal))}</span><span class="badge badge-blue">Payout available: ${currency(employeeAvailablePayout(u))}</span></div><details style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Equipment Allocation</summary><div class="employee-equipment-toolbar"><button class="btn btn-primary btn-small" data-open-employee-equipment-picker="${safeText(uid)}" type="button">+ Add Equipment</button><span class="small muted">${new Set(assignments.map((a) => a.inventoryId)).size} equipment type${new Set(assignments.map((a) => a.inventoryId)).size === 1 ? '' : 's'} · ${assignments.length} cost group${assignments.length === 1 ? '' : 's'}</span></div><div class="employee-equipment-picker hidden" data-employee-equipment-picker="${safeText(uid)}"></div><div class="employee-allocation-grid">${rows}</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-equipment="${safeText(uid)}" type="button">Save Equipment Allocation</button></div></details><details style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Payment Settings</summary><div class="employee-payment-settings" style="margin-top:10px;"><div class="small muted" style="grid-column:1/-1;"><strong>While equipment is unpaid</strong> — these three percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidEmployee" value="${employeePaymentSettings(u).unpaidEmployee}" /></label><label class="form-row"><span>Equipment payoff %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="equipmentPayoff" value="${employeePaymentSettings(u).equipmentPayoff}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidCompany" value="${employeePaymentSettings(u).unpaidCompany}" /></label><div class="small muted" style="grid-column:1/-1;margin-top:4px;"><strong>After an individual unit is paid off</strong> — these two percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidEmployee" value="${employeePaymentSettings(u).paidEmployee}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidCompany" value="${employeePaymentSettings(u).paidCompany}" /></label></div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-payment="${safeText(uid)}" type="button">Save Payment Settings</button></div></details><details class="employee-visual-settings" style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Order Colors</summary><div class="employee-color-editor" data-employee-color-editor>
   <div class="employee-color-inputs">
     <label class="employee-color-field"><span>Accent / edge</span><input type="color" data-employee-color="accent" value="${safeText(employeeOrderColors(u).accent)}" /></label>
     <label class="employee-color-field"><span>Card background</span><input type="color" data-employee-color="background" value="${safeText(employeeOrderColors(u).background)}" /></label>
@@ -1942,13 +2055,14 @@ async function handleEmployeeListClick(event) {
   const openEquipmentPicker = event.target.closest('[data-open-employee-equipment-picker]');
   const equipmentCategory = event.target.closest('[data-employee-equipment-category]');
   const addEquipmentChoice = event.target.closest('[data-add-employee-equipment-choice]');
-  const removeEquipment = event.target.closest('[data-remove-employee-equipment]');
+  const removeEquipment = event.target.closest('[data-remove-employee-equipment-lot]');
+  const addPriceLot = event.target.closest('[data-add-employee-price-lot]');
   const saveExchangeTime = event.target.closest('[data-save-employee-exchange-time]');
   const savePayment = event.target.closest('[data-save-employee-payment]');
   const saveColor = event.target.closest('[data-save-employee-color]');
   const editContract = event.target.closest('[data-edit-employee-contract]');
   const viewAs = event.target.closest('[data-view-as-employee]');
-  const id = approve?.dataset.approveEmployee || pend?.dataset.pendEmployee || remove?.dataset.deleteEmployee || saveEquipment?.dataset.saveEmployeeEquipment || openEquipmentPicker?.dataset.openEmployeeEquipmentPicker || equipmentCategory?.dataset.employeeId || addEquipmentChoice?.dataset.employeeId || removeEquipment?.closest('[data-employee-card]')?.dataset.employeeCard || saveExchangeTime?.dataset.saveEmployeeExchangeTime || savePayment?.dataset.saveEmployeePayment || saveColor?.dataset.saveEmployeeColor || editContract?.dataset.editEmployeeContract || viewAs?.dataset.viewAsEmployee;
+  const id = approve?.dataset.approveEmployee || pend?.dataset.pendEmployee || remove?.dataset.deleteEmployee || saveEquipment?.dataset.saveEmployeeEquipment || openEquipmentPicker?.dataset.openEmployeeEquipmentPicker || equipmentCategory?.dataset.employeeId || addEquipmentChoice?.dataset.employeeId || removeEquipment?.closest('[data-employee-card]')?.dataset.employeeCard || addPriceLot?.closest('[data-employee-card]')?.dataset.employeeCard || saveExchangeTime?.dataset.saveEmployeeExchangeTime || savePayment?.dataset.saveEmployeePayment || saveColor?.dataset.saveEmployeeColor || editContract?.dataset.editEmployeeContract || viewAs?.dataset.viewAsEmployee;
   if (!id) return;
   const user = state.users.find((u) => (u.uid || u.id) === id);
   if (!user) return;
@@ -1971,16 +2085,24 @@ async function handleEmployeeListClick(event) {
   if (addEquipmentChoice) {
     const inventoryId = addEquipmentChoice.dataset.addEmployeeEquipmentChoice;
     if (!user.equipmentAssignments) user.equipmentAssignments = [];
-    if (!user.equipmentAssignments.some((a) => a.inventoryId === inventoryId)) {
-      user.equipmentAssignments.push({ inventoryId, quantity: 1, unitCost: 0 });
+    if (!user.equipmentAssignments.some((a) => String(a.inventoryId) === String(inventoryId))) {
+      user.equipmentAssignments.push({ lotId: uid('lot'), inventoryId, quantity: 1, unitCost: 0, accessories: [] });
     }
     state.users = state.users.map((entry) => (entry.uid || entry.id) === id ? { ...user } : entry);
     renderEmployees();
     return;
   }
+  if (addPriceLot) {
+    const inventoryId = addPriceLot.dataset.addEmployeePriceLot;
+    if (!user.equipmentAssignments) user.equipmentAssignments = [];
+    user.equipmentAssignments.push({ lotId: uid('lot'), inventoryId, quantity: 1, unitCost: 0, accessories: [] });
+    state.users = state.users.map((entry) => (entry.uid || entry.id) === id ? { ...user } : entry);
+    renderEmployees();
+    return;
+  }
   if (removeEquipment) {
-    const inventoryId = removeEquipment.dataset.removeEmployeeEquipment;
-    user.equipmentAssignments = employeeAssignments(user).filter((a) => a.inventoryId !== inventoryId);
+    const lotId = removeEquipment.dataset.removeEmployeeEquipmentLot;
+    user.equipmentAssignments = employeeAssignments(user).filter((a) => String(a.lotId) !== String(lotId));
     state.users = state.users.map((entry) => (entry.uid || entry.id) === id ? { ...user } : entry);
     renderEmployees();
     return;
@@ -2048,19 +2170,29 @@ async function handleEmployeeListClick(event) {
   if (saveEquipment) {
     const card = saveEquipment.closest('[data-employee-card]');
     const nextAssignments = [];
+    const totalsByInventory = new Map();
     for (const row of card?.querySelectorAll('[data-employee-allocation-row]') || []) {
-      const inventoryId = row.dataset.employeeAllocationRow;
+      const inventoryId = row.dataset.inventoryId || '';
+      const lotId = row.dataset.employeeAllocationRow || uid('lot');
       const item = inventoryById(inventoryId);
       if (!item) continue;
-      const qty = Math.max(0, Math.floor(Number(row.querySelector(`[data-employee-equipment-qty]`)?.value || 0)));
-      const unitCost = Math.max(0, Number(row.querySelector(`[data-employee-equipment-cost]`)?.value || 0));
+      const qty = Math.max(0, Math.floor(Number(row.querySelector('[data-employee-equipment-qty]')?.value || 0)));
+      const unitCost = Math.max(0, Number(row.querySelector('[data-employee-equipment-cost]')?.value || 0));
       if (qty <= 0) continue;
-      const otherAllocated = allocatedQuantityAcrossEmployees(item.id, id);
-      if (qty + otherAllocated > Number(item.stock || 0)) {
-        alert(`${item.name}: only ${Math.max(0, Number(item.stock || 0) - otherAllocated)} can be allocated to this employee.`);
+      const accessories = [...row.querySelectorAll('[data-employee-accessory-id]')].map((input) => ({
+        id: input.dataset.employeeAccessoryId,
+        quantity: Math.max(0, Math.floor(Number(input.value || 0)))
+      })).filter((a) => a.id && a.quantity > 0);
+      nextAssignments.push({ lotId, inventoryId: item.id, quantity: qty, unitCost, accessories });
+      totalsByInventory.set(item.id, (totalsByInventory.get(item.id) || 0) + qty);
+    }
+    for (const [inventoryId, qty] of totalsByInventory.entries()) {
+      const item = inventoryById(inventoryId);
+      const otherAllocated = allocatedQuantityAcrossEmployees(inventoryId, id);
+      if (qty + otherAllocated > Number(item?.stock || 0)) {
+        alert(`${item?.name || 'Equipment'}: only ${Math.max(0, Number(item?.stock || 0) - otherAllocated)} can be allocated to this employee across all price groups.`);
         return;
       }
-      nextAssignments.push({ inventoryId: item.id, quantity: qty, unitCost });
     }
     user.equipmentAssignments = nextAssignments;
     if (user.pickupAddress && !user.pickupCoords) {
@@ -2312,19 +2444,32 @@ function bindApp() {
     applyOrderColumnCollapseState();
     els.confirmedColumn?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
-  els.newInquiryBell?.addEventListener('click', () => {
-    const pendingPayouts = isAdminUser() ? (state.payoutRequests || []).filter((r) => r.status === 'pending') : [];
-    if (pendingPayouts.length) {
-      state.activeTab = 'employees';
-      document.querySelector('[data-tab-btn="employees"]')?.click();
-      setTimeout(() => els.adminPayoutRequests?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
-      return;
+  els.newInquiryBell?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    state.notificationPopoverOpen = !state.notificationPopoverOpen;
+    renderNotificationPopover();
+  });
+  els.notificationPopover?.addEventListener('click', (event) => { event.stopPropagation(); handleNotificationClick(event); });
+  document.addEventListener('click', (event) => {
+    if (els.notificationCenter?.contains(event.target)) return;
+    if (state.notificationPopoverOpen) closeNotificationPopover();
+  });
+  els.notificationOrderModalWrap?.addEventListener('click', (event) => {
+    if (event.target === els.notificationOrderModalWrap || event.target.closest('[data-close-notification-order]')) closeNotificationOrderModal();
+    const open = event.target.closest('[data-notification-open-order]');
+    if (open) {
+      const orderId = open.dataset.notificationOpenOrder;
+      closeNotificationOrderModal();
+      if (isEmployeeUser()) {
+        state.activeTab = 'orders';
+        state.expandedOrderId = orderId;
+        renderTabs(); renderOrders();
+        setTimeout(() => document.querySelector(`[data-expand-order="${CSS.escape(orderId)}"]`)?.scrollIntoView({ behavior:'smooth', block:'center' }), 30);
+      } else {
+        const order = state.orders.find((o) => o.id === orderId);
+        if (order) openOrderModal(order.id);
+      }
     }
-    state.activeTab = 'orders';
-    state.activeOrderColumn = 'confirmed';
-    document.querySelector('[data-tab-btn="orders"]')?.click();
-    applyOrderColumnCollapseState();
-    els.confirmedColumn?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   els.inventoryForm.addEventListener('submit', handleInventorySave);
   els.settingsForm.addEventListener('submit', handleSettingsSave);
@@ -2623,6 +2768,7 @@ async function saveOrderOnly(order, before = null, actor = 'admin-order') {
     renderNumbers();
   renderEmployees();
   renderEmployeePayments();
+  renderEmployeePayouts();
   }, 'Saving order…');
 }
 const WORKSPACE_TITLES = {
@@ -2635,7 +2781,9 @@ const WORKSPACE_TITLES = {
   reviews: ['Reviews', 'Review customer feedback and follow up where needed.'],
   numbers: ['The Numbers', 'See costs, earnings, and operational performance in one place.'],
   employees: ['Employees', 'Manage employee access, equipment, contracts, and compensation.'],
-  payments: ['Payments', 'Track your earnings, Qualified Unit progress, and upcoming payouts.'],
+  payments: ['Payments', 'Track your earnings and Qualified Unit progress.'],
+  mypayouts: ['My Payouts', 'Track your pending requests and completed payouts.'],
+  adminpayments: ['Payments', 'Review employee payout requests and processed payouts.'],
   documents: ['Documents', 'Review your current company documents and contract agreement.'],
   settings: ['Settings', 'Manage company defaults, notifications, pickup details, and backups.']
 };
@@ -2668,6 +2816,7 @@ function renderAll() {
   renderSecondaryAccess();
   renderAccountManagement();
   renderEmployeePayments();
+  renderEmployeePayouts();
   renderEmployeeEarnedBalance();
   renderEmployeeDocuments();
 }
@@ -3857,20 +4006,161 @@ function applyOrderColumnCollapseState() {
   ordersColumns.classList.add('single-open-column');
 }
 
+function notificationContextKey() {
+  if (state.viewAsEmployee) return `employee:${state.viewAsEmployee.uid || state.viewAsEmployee.id || 'preview'}`;
+  if (isEmployeeUser()) return `employee:${getExperienceUser()?.uid || getExperienceUser()?.id || 'employee'}`;
+  return 'admin';
+}
+function notificationReadKey() { return `rso-notification-read-v58:${notificationContextKey()}`; }
+function getReadNotificationIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(notificationReadKey()) || '[]')); } catch (_) { return new Set(); }
+}
+function markNotificationRead(id = '') {
+  if (!id) return;
+  const read = getReadNotificationIds();
+  read.add(id);
+  try { localStorage.setItem(notificationReadKey(), JSON.stringify([...read].slice(-250))); } catch (_) {}
+}
+function employeeEquipmentSignature(employee = getExperienceUser()) {
+  return JSON.stringify(employeeAssignments(employee).map((a) => ({ inventoryId:a.inventoryId, quantity:a.quantity, unitCost:a.unitCost, accessories:a.accessories })).sort((a,b) => `${a.inventoryId}:${a.unitCost}`.localeCompare(`${b.inventoryId}:${b.unitCost}`)));
+}
+function notificationHash(value = '') { let h = 0; for (let i=0;i<String(value).length;i++) h = ((h << 5) - h + String(value).charCodeAt(i)) | 0; return Math.abs(h).toString(36); }
+function persistentChangeNotification(kind, signature, item) {
+  if (!signature) return null;
+  const key = `rso-notification-snapshot-v58:${notificationContextKey()}:${kind}`;
+  let previous = null;
+  try { previous = localStorage.getItem(key); } catch (_) {}
+  if (previous === signature) return null;
+  return { ...item, id:`${item.id}:${notificationHash(signature)}`, snapshotKey:key, snapshotValue:signature };
+}
+function buildNotificationItems() {
+  const items = [];
+  if (isAdminUser()) {
+    (state.orders || []).filter((order) => order.newInquiry).forEach((order) => items.push({
+      id:`inquiry:${order.id}`, icon:'📋', type:'order', orderId:order.id,
+      title:'New order request', detail:`${`${order.firstName || ''} ${order.lastName || ''}`.trim() || 'Customer'} · ${summarizeOrderItems(order.items || [])}`
+    }));
+    (state.payoutRequests || []).filter((r) => r.status === 'pending').forEach((r) => items.push({
+      id:`payout:${r.id}`, icon:'💵', type:'admin-payout', payoutId:r.id,
+      title:'Payout request', detail:`${r.employeeName || 'Employee'} requested ${currency(Number(r.amount || 0))}${r.payoutMethod ? ` · ${r.payoutMethod}` : ''}`
+    }));
+    (state.users || []).filter((u) => u.role === 'employee' && u.status !== 'approved').forEach((u) => items.push({
+      id:`employee-approval:${u.uid || u.id}`, icon:'👤', type:'tab', tab:'employees', title:'Employee approval needed', detail:employeeDisplayName(u)
+    }));
+  } else if (isEmployeeUser()) {
+    const employee = getExperienceUser();
+    const employeeId = employee?.uid || employee?.id || '';
+    (state.orders || []).filter((order) => order.assignedEmployeeId === employeeId && order.status !== 'Completed').forEach((order) => {
+      const missing = [];
+      if (!String(order.exchangeTime || '').trim()) missing.push('exchange time');
+      if (!String(order.returnTime || '').trim()) missing.push('return time');
+      if (order.fulfillmentType === 'Delivery' && !(Number(order.deliveryFee || 0) > 0)) missing.push('delivery fee');
+      items.push({
+        id:`employee-order:${order.id}:${order.updatedAt || order.createdAt || order.status || ''}`, icon:missing.length ? '❗' : '📦', type:'order', orderId:order.id,
+        title:missing.length ? 'Order needs attention' : 'Assigned order updated',
+        detail:`${`${order.firstName || ''} ${order.lastName || ''}`.trim() || 'Customer'}${missing.length ? ` · needs ${missing.join(', ')}` : ` · ${formatFriendlyShortDate(order.exchangeDate || order.eventDate)}`}`
+      });
+    });
+    (state.payoutRequests || []).filter((r) => String(r.employeeUid || '') === String(employeeId) && r.status === 'paid').forEach((r) => items.push({
+      id:`employee-payout-paid:${r.id}:${r.updatedAt || ''}`, icon:'✅', type:'tab', tab:'mypayouts', title:'Payout completed', detail:`${currency(Number(r.amount || 0))} · ${r.payoutMethod || r.payoutAccountNickname || 'Payout'}`
+    }));
+    (state.payoutRequests || []).filter((r) => String(r.employeeUid || '') === String(employeeId) && r.status === 'declined').forEach((r) => items.push({
+      id:`employee-payout-declined:${r.id}:${r.updatedAt || ''}`, icon:'⚠️', type:'tab', tab:'mypayouts', title:'Payout request declined', detail:`${currency(Number(r.amount || 0))} · Open My Payouts for details.`
+    }));
+    const equipmentChange = persistentChangeNotification('equipment', employeeEquipmentSignature(employee), {
+      id:`equipment-change:${employeeId}`, icon:'◇', type:'snapshot-tab', tab:'payments', title:'Equipment allocation changed', detail:'Your assigned equipment, accessories, or payoff cost groups were updated.'
+    });
+    if (equipmentChange) items.push(equipmentChange);
+    const schedule = (state.schedules || []).find((row) => String(row.uid || row.employeeUid || row.id || '') === String(employeeId)) || state.schedules?.[0];
+    if (schedule) {
+      const sig = JSON.stringify(schedule);
+      const scheduleChange = persistentChangeNotification('schedule', sig, { id:`schedule-change:${employeeId}`, icon:'◷', type:'snapshot-tab', tab:'schedule', title:'Schedule updated', detail:'Your availability or date-specific schedule changed.' });
+      if (scheduleChange) items.push(scheduleChange);
+    }
+    const contract = employeeContractAgreement(employee);
+    const contractSig = JSON.stringify(employee.contractAgreement || employee.contractAcceptance || {});
+    if (contract.body) {
+      const contractChange = persistentChangeNotification('contract', contractSig, { id:`contract-change:${employeeId}`, icon:'≡', type:'snapshot-tab', tab:'documents', title:'Contract updated', detail:'Your contract or payout preference was updated.' });
+      if (contractChange) items.push(contractChange);
+    }
+    if (!isSecondaryLogin()) {
+      (state.secondaryUsers || []).filter((u) => u.status !== 'approved').forEach((u) => items.push({ id:`secondary:${u.uid || u.id}`, icon:'👥', type:'tab', tab:'account', title:'Secondary login needs approval', detail:employeeDisplayName(u) }));
+    }
+  }
+  const read = getReadNotificationIds();
+  return items.map((item) => ({ ...item, unread: !read.has(item.id) }));
+}
+function renderNotificationPopover() {
+  if (!els.notificationPopover) return;
+  const items = buildNotificationItems();
+  const unreadCount = items.filter((item) => item.unread).length;
+  els.notificationPopover.innerHTML = `<div class="notification-popover-head"><div><strong>Notifications</strong><span>${unreadCount ? `${unreadCount} new` : 'Up to date'}</span></div>${items.length ? '<button type="button" class="btn btn-ghost btn-small" data-notification-mark-all>Mark all read</button>' : ''}</div><div class="notification-list">${items.length ? items.map((item) => `<button type="button" class="notification-item ${item.unread ? 'unread' : ''}" data-notification-id="${safeText(item.id)}"><span class="notification-item-icon">${item.icon}</span><span class="notification-item-copy"><strong>${safeText(item.title)}</strong><small>${safeText(item.detail || '')}</small></span>${item.unread ? '<span class="notification-unread-dot"></span>' : ''}</button>`).join('') : '<div class="notification-empty">No notifications right now.</div>'}</div>`;
+  els.notificationPopover.classList.toggle('hidden', !state.notificationPopoverOpen);
+  els.newInquiryBell?.setAttribute('aria-expanded', String(state.notificationPopoverOpen));
+}
 function updateNewInquiryBadge() {
-  const inquiryCount = isAdminUser() ? (state.orders || []).filter((order) => order.newInquiry).length : 0;
-  const payoutCount = isAdminUser() ? (state.payoutRequests || []).filter((r) => r.status === 'pending').length : 0;
-  const count = inquiryCount + payoutCount;
+  const items = buildNotificationItems();
+  const count = items.filter((item) => item.unread).length;
   if (!els.newInquiryBadge) return;
   els.newInquiryBadge.textContent = String(count);
   els.newInquiryBadge.classList.toggle('hidden', count === 0);
   els.newInquiryBell?.classList.toggle('has-new', count > 0);
-  const parts = [];
-  if (inquiryCount) parts.push(`${inquiryCount} new ${inquiryCount === 1 ? 'inquiry' : 'inquiries'}`);
-  if (payoutCount) parts.push(`${payoutCount} pending payout ${payoutCount === 1 ? 'request' : 'requests'}`);
-  const label = parts.length ? parts.join(' · ') : 'No new notifications';
+  const label = count ? `${count} unread notification${count === 1 ? '' : 's'}` : 'No new notifications';
   els.newInquiryBell?.setAttribute('aria-label', label);
   if (els.newInquiryBell) els.newInquiryBell.title = label;
+  renderNotificationPopover();
+}
+function closeNotificationPopover() {
+  state.notificationPopoverOpen = false;
+  renderNotificationPopover();
+}
+function openNotificationOrderModal(order = {}) {
+  if (!order || !els.notificationOrderModalWrap || !els.notificationOrderModalBody) return;
+  const name = `${order.firstName || ''} ${order.lastName || ''}`.trim() || 'Customer';
+  const exchangeMissing = !String(order.exchangeTime || '').trim();
+  const returnMissing = !String(order.returnTime || '').trim();
+  const deliveryFeeMissing = order.fulfillmentType === 'Delivery' && !(Number(order.deliveryFee || 0) > 0);
+  const attention = (missing) => missing ? '<span class="notification-attention-icon" title="Needs attention">!</span>' : '';
+  const itemRows = (order.items || []).map((item) => `<div class="notification-order-item"><span>${safeText(item.name || 'Equipment')}</span><strong>${Number(item.quantity || 0)}</strong></div>`).join('') || '<div class="small muted">No equipment listed.</div>';
+  if (els.notificationOrderModalTitle) els.notificationOrderModalTitle.textContent = `${name} — ${order.eventName || 'Rental'}`;
+  els.notificationOrderModalBody.innerHTML = `<div class="notification-order-attention-summary ${(exchangeMissing || returnMissing || deliveryFeeMissing) ? 'needs-attention' : ''}">${(exchangeMissing || returnMissing || deliveryFeeMissing) ? '<strong>Some details still need attention.</strong><span>Items marked with ! should be confirmed before the exchange.</span>' : '<strong>This order has the key exchange details filled in.</strong>'}</div><div class="notification-order-grid">
+    <div><span>Customer</span><strong>${safeText(name)}</strong></div>
+    <div><span>Event</span><strong>${safeText(order.eventName || 'Rental')}</strong></div>
+    <div><span>Event date</span><strong>${safeText(formatDateTime(order.eventDate, order.eventTime || 'To Be Determined'))}</strong></div>
+    <div><span>Exchange ${attention(exchangeMissing)}</span><strong>${safeText(formatDateTime(order.exchangeDate, order.exchangeTime || 'To Be Determined'))}</strong></div>
+    <div><span>Return ${attention(returnMissing)}</span><strong>${safeText(formatDateTime(order.returnDate, order.returnTime || 'To Be Determined'))}</strong></div>
+    <div><span>Fulfillment</span><strong>${safeText(order.fulfillmentType || 'Pickup')}</strong></div>
+    ${order.fulfillmentType === 'Delivery' ? `<div><span>Delivery fee ${attention(deliveryFeeMissing)}</span><strong>${deliveryFeeMissing ? 'Not set' : currency(Number(order.deliveryFee || 0))}</strong></div><div><span>Delivery address</span><strong>${safeText(order.address || 'Not set')}</strong></div>` : ''}
+    <div><span>Order total</span><strong>${currency(getEffectiveOrderTotal(order))}</strong></div>
+    <div><span>Payment</span><strong>${safeText(order.paymentStatus || 'Un-Paid')}</strong></div>
+  </div><div class="notification-order-equipment"><strong>Equipment</strong>${itemRows}</div>${order.notes ? `<div class="note-block small"><strong>Notes:</strong> ${safeText(order.notes)}</div>` : ''}<div class="button-row notification-order-actions"><button type="button" class="btn btn-primary" data-notification-open-order="${safeText(order.id)}">${isEmployeeUser() ? 'Open Order Controls' : 'Edit Order'}</button><button type="button" class="btn btn-ghost" data-close-notification-order>Close</button></div>`;
+  els.notificationOrderModalWrap.classList.add('open');
+}
+function closeNotificationOrderModal() { els.notificationOrderModalWrap?.classList.remove('open'); }
+function handleNotificationClick(event) {
+  if (event.target.closest('[data-notification-mark-all]')) {
+    buildNotificationItems().forEach((item) => {
+      markNotificationRead(item.id);
+      if (item.snapshotKey) { try { localStorage.setItem(item.snapshotKey, item.snapshotValue); } catch (_) {} }
+    });
+    updateNewInquiryBadge();
+    return;
+  }
+  const button = event.target.closest('[data-notification-id]');
+  if (!button) return;
+  const item = buildNotificationItems().find((entry) => entry.id === button.dataset.notificationId);
+  if (!item) return;
+  markNotificationRead(item.id);
+  if (item.snapshotKey) { try { localStorage.setItem(item.snapshotKey, item.snapshotValue); } catch (_) {} }
+  closeNotificationPopover();
+  if (item.type === 'order') {
+    const order = state.orders.find((o) => o.id === item.orderId);
+    if (order) openNotificationOrderModal(order);
+  } else {
+    state.activeTab = item.tab || (item.type === 'admin-payout' ? 'adminpayments' : 'orders');
+    renderTabs();
+  }
+  updateNewInquiryBadge();
 }
 
 function getBusinessWeekOfYear(dateStr) {
@@ -4109,6 +4399,7 @@ async function ensureCompletedOrdersLoaded() {
     renderNumbers();
     renderEmployees();
     renderEmployeePayments();
+    renderEmployeePayouts();
     renderEmployeeEarnedBalance();
   } finally {
     state.completedOrdersLoading = false;

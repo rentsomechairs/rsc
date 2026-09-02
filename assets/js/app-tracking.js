@@ -1,4 +1,4 @@
-import { getPublicReview, getPublicTrackingRecord, getPublicTrackingRecords, getSettings, getSession, savePublicReview } from './store.js?v=rental-ux-v57';
+import { getPublicReview, getPublicTrackingRecord, getPublicTrackingRecords, getSettings, getSession, savePublicReview } from './store.js?v=rental-ux-v59';
 import { currency, formatDateTime, safeText } from './utils.js';
 
 const els = {};
@@ -226,6 +226,22 @@ function getListedTotal(order = {}) {
   return getEffectiveTotal(order);
 }
 
+function getCurrentDepositMinimumOrder() {
+  const value = Number(state.settings?.depositMinimumOrder);
+  return Number.isFinite(value) && value >= 0 ? value : 100;
+}
+
+function getCurrentDepositAmount(record = {}) {
+  // Customer-facing deposit must reflect the CURRENT order total, not a
+  // depositAmount saved on an older version of the order.
+  const total = getEffectiveTotal(record);
+  return total > getCurrentDepositMinimumOrder() ? Math.max(0, Math.round(total * 0.35)) : 0;
+}
+
+function currentOrderRequiresDeposit(record = {}) {
+  return getCurrentDepositAmount(record) > 0;
+}
+
 function getOutstandingAmount(record = {}) {
   if (Number.isFinite(Number(record.amountRemaining)) && Number(record.amountRemaining) >= 0 && ['Paid', 'Free', 'Deposit Paid', 'Deposit'].includes(record.paymentStatus)) return Number(record.amountRemaining || 0);
   const total = getEffectiveTotal(record);
@@ -274,10 +290,11 @@ function buildPaymentUrl(method, amount, record) {
 function renderPaymentCards(record = {}) {
   const methods = buildPaymentMethods(record, true);
   if (!methods.length) return '';
-  const depositAvailable = record.requiresDeposit && !record.depositWaived && !['Deposit Paid', 'Paid', 'Free'].includes(record.paymentStatus) && Number(record.depositAmount || 0) > 0;
+  const currentDeposit = getCurrentDepositAmount(record);
+  const depositAvailable = currentOrderRequiresDeposit(record) && !record.depositWaived && !['Deposit Paid', 'Paid', 'Free'].includes(record.paymentStatus) && currentDeposit > 0;
   const fullAmount = getOutstandingAmount(record);
   const sections = [];
-  if (depositAvailable) sections.push({ title: `Pay Deposit (${currency(record.depositAmount || 0)})`, amount: Number(record.depositAmount || 0) });
+  if (depositAvailable) sections.push({ title: `Pay Deposit (${currency(currentDeposit)})`, amount: currentDeposit });
   if (fullAmount > 0) sections.push({ title: depositAvailable ? `Or Pay Full Remaining Amount (${currency(fullAmount)})` : `Pay Order (${currency(fullAmount)})`, amount: fullAmount });
   if (!sections.length) return '';
   return `<div class="payment-link-grid">${sections.map((section) => `
@@ -351,8 +368,9 @@ async function renderTracking(rawCode) {
     return `<div class="calendar-stock-row"><div><strong>${safeText(item.name || 'Item')}</strong><div class="small muted">${Number(item.quantity || 0)} × ${currency(original)}${current < original ? ` (Marked down to ${currency(current)} each)` : ''}</div></div><div class="calendar-stock-metrics">${(item.accessories || []).map((acc) => `<span class="badge badge-blue">${safeText(acc.name)}</span>`).join(' ')}</div></div>`;
   }).join('') || '<div class="empty-state">No equipment listed.</div>';
   const remainingBalance = getOutstandingAmount(record);
-  const paymentLine = record.requiresDeposit && !record.depositWaived && !['Deposit Paid', 'Paid', 'Free'].includes(record.paymentStatus)
-    ? `Deposit Required: ${currency(record.depositAmount || 0)}`
+  const currentDeposit = getCurrentDepositAmount(record);
+  const paymentLine = currentOrderRequiresDeposit(record) && !record.depositWaived && !['Deposit Paid', 'Paid', 'Free'].includes(record.paymentStatus)
+    ? `Deposit Required: ${currency(currentDeposit)}`
     : `Payment Status: ${safeText(record.paymentStatus || 'Un-Paid')}`;
   els.trackingResult.innerHTML = `
     <div class="card" style="padding:18px; margin-top:18px;">
