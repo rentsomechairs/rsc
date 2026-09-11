@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v61';
-import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js?v=rental-ux-v61';
-import { debounce, geocodeAddress, searchAddresses } from './geo.js?v=rental-ux-v61';
-import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v61';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v65';
+import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js?v=rental-ux-v65';
+import { debounce, geocodeAddress, searchAddresses } from './geo.js?v=rental-ux-v65';
+import { syncCompletedOrderFinancials } from './finance-service.js?v=rental-ux-v65';
 const state = {
   inventory: [],
   orders: [],
@@ -62,7 +62,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'rental-ux-v61';
+const ADMIN_VERSION = 'rental-ux-v65';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -2037,6 +2037,7 @@ async function handleEmployeeOrderProgress(orderId, changes = {}) {
       changes.status ? `Updating order to ${changes.status}…` : 'Saving order times…'
     );
     state.orders = state.orders.map((o) => o.id === orderId ? saved : o);
+    await syncCompletedOrderFinancials(saved).catch((error) => console.error('Employee-completed financial sync failed:', error));
     renderOrders();
     renderEmployeePayments();
     renderEmployeePayouts();
@@ -5203,6 +5204,7 @@ async function saveInlineOrder(orderId) {
   await withBusy(async () => {
     state.orders = state.orders.map((entry) => entry.id === orderId ? next : entry);
     await saveSingleOrder(next, order, { actor: 'admin-inline-edit' });
+    await syncCompletedOrderFinancials(next).catch((error) => console.error('Inline order financial sync failed:', error));
     renderOrders(); renderOrdersCalendar(); renderCalendarView(); renderDeliveryRoute(); renderNumbers();
     await copyLatestOrderUpdate(next, savedChanges);
   }, 'Saving inline changes…');
@@ -5793,7 +5795,7 @@ async function updateOrderStatus(id, status) {
   appendOrderUpdate(order, savedChanges);
   await saveOrderOnly(order, before, 'admin-status');
   await copyLatestOrderUpdate(order, savedChanges);
-  await syncCompletedOrderIncome(order).catch((error) => console.error('Financial income sync failed:', error));
+  await syncCompletedOrderFinancials(order).catch((error) => console.error('Financial order sync failed:', error));
 }
 async function updateOrderPayment(id, paymentStatus) {
   const order = state.orders.find((item) => item.id === id);
@@ -6648,6 +6650,7 @@ async function handleOrderSave(event) {
     state.orders.unshift(order);
   }
   await saveSingleOrder(order, existingOrder ? JSON.parse(JSON.stringify(existingOrder)) : null, { actor: 'admin-edit' });
+  await syncCompletedOrderFinancials(order).catch((error) => console.error('Order financial sync failed:', error));
   if (!existingOrder) await copyTextWithFallback(buildReminderMessage(order), 'Copy the reminder below:');
   else await copyLatestOrderUpdate(order, savedChanges);
   closeModals();

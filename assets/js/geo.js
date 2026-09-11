@@ -202,14 +202,16 @@ async function geocodeAddressGoogle(query, { origin = null, context = null } = {
   const apiKey = getGoogleMapsApiKey(context);
   if (!apiKey) return null;
   await ensureGoogleMaps(apiKey);
+  const { Geocoder } = await google.maps.importLibrary('geocoding');
+  const { LatLngBounds } = await google.maps.importLibrary('core');
   const text = String(query || '').trim();
   if (!text) return null;
 
   const boundsBox = toBBox(origin, 80);
-  const geocoder = new google.maps.Geocoder();
+  const geocoder = new Geocoder();
   const request = { address: text, region: 'US' };
   if (boundsBox) {
-    request.bounds = new google.maps.LatLngBounds(
+    request.bounds = new LatLngBounds(
       { lat: boundsBox.south, lng: boundsBox.west },
       { lat: boundsBox.north, lng: boundsBox.east }
     );
@@ -245,33 +247,28 @@ async function getRoadEstimateGoogle(origin, destination, context = null) {
   const apiKey = getGoogleMapsApiKey(context);
   if (!apiKey) throw new Error('Google Maps API key missing');
   await ensureGoogleMaps(apiKey);
-  const service = new google.maps.DistanceMatrixService();
-  const response = await new Promise((resolve, reject) => {
-    service.getDistanceMatrix({
-      origins: [toGoogleLatLng(origin)],
-      destinations: [toGoogleLatLng(destination)],
-      travelMode: google.maps.TravelMode.DRIVING,
-      unitSystem: google.maps.UnitSystem.IMPERIAL,
-      avoidFerries: false,
-      avoidHighways: false,
-      avoidTolls: false
-    }, (result, status) => {
-      if (status !== 'OK') {
-        reject(new Error(`Distance Matrix failed (${status})`));
-        return;
-      }
-      resolve(result);
-    });
+
+  // Current Maps JavaScript Routes API. DistanceMatrixService was deprecated
+  // in 2026; RouteMatrix is its supported replacement.
+  const { RouteMatrix } = await google.maps.importLibrary('routes');
+  if (!RouteMatrix?.computeRouteMatrix) throw new Error('Google RouteMatrix is unavailable');
+
+  const result = await RouteMatrix.computeRouteMatrix({
+    origins: [toGoogleLatLng(origin)],
+    destinations: [toGoogleLatLng(destination)],
+    travelMode: 'DRIVING',
+    fields: ['distanceMeters', 'durationMillis', 'condition']
   });
 
-  const element = response?.rows?.[0]?.elements?.[0];
-  const meters = Number(element?.distance?.value);
-  if (!Number.isFinite(meters)) throw new Error('No route distance returned');
-  const seconds = Number(element?.duration?.value);
+  const matrix = result?.matrix;
+  const item = matrix?.rows?.[0]?.items?.[0];
+  const meters = Number(item?.distanceMeters);
+  if (!Number.isFinite(meters)) throw new Error('No Google RouteMatrix distance returned');
+  const durationMillis = Number(item?.durationMillis);
   return {
     oneWayMiles: meters / 1609.344,
-    oneWayMinutes: Number.isFinite(seconds) ? Math.max(1, Math.round(seconds / 60)) : null,
-    source: 'google-road'
+    oneWayMinutes: Number.isFinite(durationMillis) ? Math.max(1, Math.round(durationMillis / 60000)) : null,
+    source: 'google-route-matrix'
   };
 }
 

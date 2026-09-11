@@ -1,4 +1,5 @@
-import { initFirebase, isFirebaseEnabled, waitForAuthReady, reauthenticateCurrentUser } from './firebase-service.js?v=mobile-safari-drawer-v25';
+import { initFirebase, isFirebaseEnabled, waitForAuthReady, reauthenticateCurrentUser } from './firebase-service.js?v=rental-ux-v65';
+import { computeDeliveryEstimate, geocodeAddress } from './geo.js?v=rental-ux-v65';
 
 export const FINANCE_COLLECTIONS = {
   expense: 'financeExpenses', income: 'financeIncome', mileage: 'financeMileage',
@@ -119,6 +120,73 @@ export async function syncCompletedOrderIncome(order = {}) {
   await fire.setDoc(ref,{...payload,...(!existing.exists()?{createdAt:fire.serverTimestamp()}:{})},{merge:true});
 }
 
+
+async function getFinanceSettings(){
+  const {db,fire}=await ctx();
+  const snap=await fire.getDoc(fire.doc(db,'settings','app'));
+  return snap.exists()?snap.data():{};
+}
+async function activeMileageVehicle(){
+  const vehicles=await getOwnerCollection(FINANCE_COLLECTIONS.vehicle);
+  return vehicles.find(v=>v.active!==false)||vehicles[0]||null;
+}
+
+export async function syncCompletedOrderMileage(order = {}) {
+  const {db,user,fire}=await ctx();
+  if(!order?.id) throw new Error('Order ID is required for mileage sync.');
+  const ref=fire.doc(db,FINANCE_COLLECTIONS.mileage,`order_${order.id}`);
+  const completed=String(order.status||'')==='Completed';
+  const delivery=String(order.fulfillmentType||'').toLowerCase()==='delivery';
+  if(!completed || !delivery || !String(order.address||'').trim()){
+    const existing=await fire.getDoc(ref);
+    if(existing.exists()) await fire.deleteDoc(ref);
+    return {synced:false,removed:existing.exists(),reason:!completed?'not-completed':!delivery?'not-delivery':'missing-address'};
+  }
+  const settings=await getFinanceSettings();
+  let origin=settings.pickupCoords;
+  if(!(origin?.lat && origin?.lon) && settings.pickupAddress){
+    const match=await geocodeAddress(settings.pickupAddress,{context:settings});
+    if(match) origin={lat:match.lat,lon:match.lon};
+  }
+  if(!(origin?.lat && origin?.lon)) throw new Error('Pickup address coordinates are missing. Save/geocode the pickup address in Admin Settings.');
+  let destinationMatch=null;
+  const savedDestination=order.deliveryCoords && Number.isFinite(Number(order.deliveryCoords.lat)) && Number.isFinite(Number(order.deliveryCoords.lon ?? order.deliveryCoords.lng))
+    ? {lat:Number(order.deliveryCoords.lat),lon:Number(order.deliveryCoords.lon ?? order.deliveryCoords.lng),label:order.address,provider:'saved-order-coordinates'}
+    : null;
+  if(savedDestination){
+    destinationMatch=savedDestination;
+  } else {
+    destinationMatch=await geocodeAddress(order.address,{origin,context:settings});
+  }
+  if(!destinationMatch) throw new Error(`Could not geocode delivery address for order ${order.orderNumber||order.id}.`);
+  const destination={lat:destinationMatch.lat,lon:destinationMatch.lon};
+  const estimate=await computeDeliveryEstimate(origin,destination,settings);
+  const oneWayMiles=Number(estimate.oneWayMiles||0);
+  const milesDriven=Number((oneWayMiles*4).toFixed(1));
+  const vehicle=await activeMileageVehicle();
+  const date=String(order.completedAt||order.returnDate||order.exchangeDate||new Date().toISOString()).slice(0,10);
+  const customer=[order.firstName,order.lastName].filter(Boolean).join(' ')||order.customerName||'Customer';
+  const payload={
+    ownerId:user.uid,companyId:user.uid,recordType:'mileage',source:'completed-order-mileage',sourceOrderId:order.id,orderId:order.id,
+    vehicleId:vehicle?.id||'',startingLocation:settings.pickupAddress||settings.pickupGeocodedAddress||'Business pickup location',
+    destination:destinationMatch.label||order.address,businessPurpose:`Rental delivery and pickup for order ${order.orderNumber||order.id}`,
+    milesDriven,oneWayMiles:Number(oneWayMiles.toFixed(2)),tripMultiplier:4,routeSource:estimate.source||'road',
+    parking:0,tolls:0,customer,date,taxYear:Number(date.slice(0,4))||new Date().getFullYear(),
+    reviewStatus:'Reviewed',documentationStatus:'Complete',archived:false,deletedAt:null,updatedAt:fire.serverTimestamp()
+  };
+  const existing=await fire.getDoc(ref);
+  await fire.setDoc(ref,{...payload,...(!existing.exists()?{createdAt:fire.serverTimestamp()}:{})},{merge:true});
+  return {synced:true,milesDriven,oneWayMiles,vehicleId:vehicle?.id||''};
+}
+
+export async function syncCompletedOrderFinancials(order={}){
+  await syncCompletedOrderIncome(order);
+  let mileage=null;
+  try{ mileage=await syncCompletedOrderMileage(order); }
+  catch(error){ console.warn('Completed-order mileage sync failed:',error); mileage={synced:false,error:error?.message||String(error)}; }
+  return {income:true,mileage};
+}
+
 export async function nukeAllFinancialRecords(password, confirmationPhrase) {
   if (String(confirmationPhrase || '').trim() !== 'DELETE ALL FINANCES') {
     throw new Error('Confirmation phrase does not match.');
@@ -200,7 +268,34 @@ async function getOwnerCollection(collectionName){
   return snap.docs.map(d=>({id:d.id,...d.data()}));
 }
 
-export async function importMasterFinancialRows(rows=[]){
+
+const FINANCE_FINGERPRINT_FIELDS = {
+  expense: ['date','taxYear','vendor','totalAmount','categoryId','categoryName','subcategory','description','businessPurpose','useClassification','businessUsePercent','businessUseExplanation','paymentMethod','accountUsed','customer','vehicleId','assetId','documentationStatus','reviewStatus','notes'],
+  income: ['date','taxYear','payer','grossAmount','amount','processingFee','netDeposit','categoryId','categoryName','paymentMethod','description','incidentId','assetId','source','documentationStatus','reviewStatus','notes'],
+  mileage: ['date','taxYear','vehicleId','startingLocation','destination','businessPurpose','startingOdometer','endingOdometer','milesDriven','parking','tolls','customer','vendor','orderId','source','documentationStatus','reviewStatus','notes'],
+  vehicle: ['date','taxYear','vehicleName','year','make','model','purchaseDate','purchasePrice','businessUseStartDate','currentOdometer','ownershipType','businessUsePercent','deductionMethod','active','documentationStatus','reviewStatus','notes'],
+  asset: ['date','taxYear','assetName','assetCategory','description','inventoryId','vendor','purchaseDate','purchaseAmount','quantity','perUnitCost','activeQuantity','damagedQuantity','lostQuantity','soldQuantity','retiredQuantity','placedInServiceDate','businessUsePercent','documentationStatus','reviewStatus','notes'],
+  incident: ['date','taxYear','description','incidentType','assetId','vehicleId','quantityAffected','repairEstimate','actualRepairCost','replacementCost','amountCharged','amountCollected','amountWaived','insuranceReimbursement','documentationStatus','reviewStatus','notes'],
+  homeOffice: ['date','taxYear','description','businessSquareFeet','totalSquareFeet','businessUsePercent','regularUse','exclusiveUse','documentationStatus','reviewStatus','notes']
+};
+function stableFingerprintValue(value){
+  if(value===undefined||value===null) return '';
+  if(typeof value==='number') return Number.isFinite(value)?String(Number(value.toFixed(6))):'';
+  if(typeof value==='boolean') return value?'true':'false';
+  if(Array.isArray(value)) return JSON.stringify(value.map(stableFingerprintValue));
+  return String(value).trim().replace(/\s+/g,' ');
+}
+function financeFingerprint(type,data={}){
+  const fields=FINANCE_FINGERPRINT_FIELDS[type]||Object.keys(data).sort();
+  return fields.map(key=>`${key}=${stableFingerprintValue(data[key])}`).join('|');
+}
+function duplicateLabel(type,data={}){
+  const title=data.vendor||data.assetName||data.vehicleName||data.payer||data.description||data.businessPurpose||type;
+  const amount=data.totalAmount??data.purchaseAmount??data.purchasePrice??data.grossAmount??data.milesDriven??'';
+  return `${data.date||data.purchaseDate||''} · ${title}${amount!==''?` · ${amount}`:''}`;
+}
+
+export async function importMasterFinancialRows(rows=[], {overrideDuplicates=false}={}){
   if(!Array.isArray(rows) || !rows.length) throw new Error('The Financial CSV did not contain any data rows.');
   const {user}=await ctx();
 
@@ -214,7 +309,12 @@ export async function importMasterFinancialRows(rows=[]){
   const assetMap=new Map(assets.map(x=>[normalizeCsvKey(x.assetName||x.name),x]));
   const incidentMap=new Map(incidents.map(x=>[normalizeCsvKey(x.description||x.name),x]));
 
-  const results={imported:0,skipped:0,errors:[],byType:{}};
+  const results={imported:0,skipped:0,errors:[],duplicates:[],byType:{}};
+  const existingFingerprints={};
+  for(const type of MASTER_FINANCE_TYPES){
+    const existing=await getOwnerCollection(FINANCE_COLLECTIONS[type]);
+    existingFingerprints[type]=new Map(existing.map(record=>[financeFingerprint(type,record),record]));
+  }
   const ordered=[...rows].sort((a,b)=>{
     const priority={vehicle:0,asset:1,incident:2,expense:3,income:3,mileage:3,homeOffice:3,home_office:3,'home office':3};
     const at=String(a.record_type||a.recordType||'').trim();
@@ -310,6 +410,8 @@ export async function importMasterFinancialRows(rows=[]){
           ownershipType:String(row.ownership_type||row.ownershipType||'Owned').trim(),
           businessUsePercent:parseCsvNumber(row.business_use_percent||row.businessUsePercent)??100,
           deductionMethod:String(row.deduction_method||row.deductionMethod||'Undecided').trim(),
+          currentYearDepreciation:parseCsvNumber(row.current_year_depreciation||row.currentYearDepreciation)??0,
+          depreciationTaxYear:parseCsvNumber(row.depreciation_tax_year||row.depreciationTaxYear),
           active:parseCsvBoolean(row.active)??true
         };
       } else if(type==='asset'){
@@ -356,8 +458,17 @@ export async function importMasterFinancialRows(rows=[]){
       }
 
       data=compactData(data);
+      const fingerprint=financeFingerprint(type,data);
+      const duplicate=existingFingerprints[type]?.get(fingerprint);
+      if(duplicate && !overrideDuplicates){
+        results.skipped++;
+        results.duplicates.push({row,type,existingId:duplicate.id,label:duplicateLabel(type,data)});
+        continue;
+      }
+      data.importFingerprint=fingerprint;
       const id=await saveFinanceRecord(type,data);
       const saved={id,...data};
+      existingFingerprints[type]?.set(fingerprint,saved);
 
       if(type==='vehicle' && saved.vehicleName) vehicleMap.set(normalizeCsvKey(saved.vehicleName),saved);
       if(type==='asset' && saved.assetName) assetMap.set(normalizeCsvKey(saved.assetName),saved);
@@ -383,26 +494,33 @@ export async function reconcileCompletedOrdersIncome(){
     const gross=Number(order.adjustedTotal !== '' && order.adjustedTotal != null ? order.adjustedTotal : (order.total||order.baseTotal||0));
     return completed && !free && gross>0;
   });
+  const completedDelivery=orders.filter(order=>String(order.status||'')==='Completed' && String(order.fulfillmentType||'').toLowerCase()==='delivery' && String(order.address||'').trim());
   const eligibleIds=new Set(eligible.map(o=>o.id));
+  const mileageIds=new Set(completedDelivery.map(o=>o.id));
 
-  const existingSnap=await fire.getDocs(
-    fire.query(fire.collection(db,FINANCE_COLLECTIONS.income),fire.where('ownerId','==',user.uid))
-  );
-  const existingOrderIncome=existingSnap.docs
-    .map(d=>({id:d.id,...d.data()}))
-    .filter(x=>x.source==='completed-order');
+  const existingSnap=await fire.getDocs(fire.query(fire.collection(db,FINANCE_COLLECTIONS.income),fire.where('ownerId','==',user.uid)));
+  const existingOrderIncome=existingSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.source==='completed-order');
+  const existingMileageSnap=await fire.getDocs(fire.query(fire.collection(db,FINANCE_COLLECTIONS.mileage),fire.where('ownerId','==',user.uid)));
+  const existingOrderMileage=existingMileageSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.source==='completed-order-mileage');
 
-  let synced=0,removed=0;
-  for(const order of eligible){
-    await syncCompletedOrderIncome(order);
-    synced++;
-  }
+  let synced=0,removed=0,mileageSynced=0,mileageRemoved=0,mileageSkipped=0;
+  for(const order of eligible){ await syncCompletedOrderIncome(order); synced++; }
   for(const income of existingOrderIncome){
     const sourceId=String(income.sourceOrderId||income.orderId||'');
-    if(!eligibleIds.has(sourceId)){
-      await fire.deleteDoc(fire.doc(db,FINANCE_COLLECTIONS.income,income.id));
-      removed++;
-    }
+    if(!eligibleIds.has(sourceId)){ await fire.deleteDoc(fire.doc(db,FINANCE_COLLECTIONS.income,income.id)); removed++; }
   }
-  return {eligible:eligible.length,synced,removed};
+  const mileageQueue=[...completedDelivery];
+  const worker=async()=>{
+    while(mileageQueue.length){
+      const order=mileageQueue.shift();
+      try{ const result=await syncCompletedOrderMileage(order); if(result?.synced)mileageSynced++; else mileageSkipped++; }
+      catch(error){ console.warn('Mileage auto-sync skipped an order:',order.id,error); mileageSkipped++; }
+    }
+  };
+  await Promise.all(Array.from({length:Math.min(4,Math.max(1,mileageQueue.length))},()=>worker()));
+  for(const mileage of existingOrderMileage){
+    const sourceId=String(mileage.sourceOrderId||mileage.orderId||'');
+    if(!mileageIds.has(sourceId)){ await fire.deleteDoc(fire.doc(db,FINANCE_COLLECTIONS.mileage,mileage.id)); mileageRemoved++; }
+  }
+  return {eligible:eligible.length,synced,removed,mileageEligible:completedDelivery.length,mileageSynced,mileageRemoved,mileageSkipped};
 }
