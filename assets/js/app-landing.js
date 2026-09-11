@@ -1,6 +1,6 @@
-import { getSettings } from './store.js?v=rental-ux-v60';
-import { currency, deliveryFeeFromMiles, safeText } from './utils.js?v=rental-ux-v60';
-import { computeDeliveryEstimate, debounce, geocodeAddress, searchAddresses } from './geo.js?v=rental-ux-v60';
+import { getSettings } from './store.js?v=rental-ux-v61';
+import { currency, deliveryFeeFromMiles, safeText } from './utils.js?v=rental-ux-v61';
+import { computeDeliveryEstimate, debounce, geocodeAddress, searchAddresses } from './geo.js?v=rental-ux-v61';
 
 const state = {
   settings: null,

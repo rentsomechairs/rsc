@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v60';
-import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js?v=rental-ux-v60';
-import { debounce, geocodeAddress, searchAddresses } from './geo.js?v=rental-ux-v60';
-import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v60';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v61';
+import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js?v=rental-ux-v61';
+import { debounce, geocodeAddress, searchAddresses } from './geo.js?v=rental-ux-v61';
+import { syncCompletedOrderIncome } from './finance-service.js?v=rental-ux-v61';
 const state = {
   inventory: [],
   orders: [],
@@ -35,7 +35,7 @@ const state = {
   busyCount: 0,
   activeTemplateField: null,
   reminderComposer: null,
-  quickPeekLocationId: 'main',
+  quickPeekLocationId: 'company',
   viewAsEmployee: null,
   editingContractEmployeeId: null,
   ordersView: 'list',
@@ -62,7 +62,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'rental-ux-v60';
+const ADMIN_VERSION = 'rental-ux-v61';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -679,7 +679,8 @@ function employeeAssignments(user = {}) {
     unitCost: Math.max(0, Number(entry.unitCost || 0)),
     accessories: Array.isArray(entry.accessories) ? entry.accessories.map((a) => ({
       id: String(a?.id || ''),
-      quantity: Math.max(0, Math.floor(Number(a?.quantity || 0)))
+      quantity: Math.max(0, Math.floor(Number(a?.quantity || 0))),
+      unitCost: Math.max(0, Number(a?.unitCost || 0))
     })).filter((a) => a.id && a.quantity > 0) : []
   })).filter((entry) => entry.inventoryId && entry.quantity > 0) : [];
 }
@@ -694,8 +695,13 @@ function allocatedQuantityAcrossEmployees(inventoryId = '', excludeUid = '') {
 }
 function employeeAccessoryAssignments(user = {}, inventoryId = '') {
   const totals = new Map();
-  allocationsForUser(user, inventoryId).forEach((lot) => (lot.accessories || []).forEach((a) => totals.set(a.id, (totals.get(a.id) || 0) + Number(a.quantity || 0))));
-  return [...totals.entries()].map(([id, quantity]) => ({ id, quantity }));
+  allocationsForUser(user, inventoryId).forEach((lot) => (lot.accessories || []).forEach((a) => {
+    const current = totals.get(a.id) || { quantity: 0, costValue: 0 };
+    current.quantity += Number(a.quantity || 0);
+    current.costValue += Number(a.quantity || 0) * Number(a.unitCost || 0);
+    totals.set(a.id, current);
+  }));
+  return [...totals.entries()].map(([id, value]) => ({ id, quantity: value.quantity, unitCost: value.quantity ? value.costValue / value.quantity : 0 }));
 }
 function locationIdForEmployee(uid = '') { return uid ? `employee:${uid}` : 'main'; }
 function orderLocationId(order = {}) {
@@ -765,7 +771,7 @@ async function syncPublicPickupLocations() {
   state.settings = { ...state.settings, employeePickupLocations: buildPublicPickupLocations() };
   await saveSettings(state.settings);
 }
-function equipmentValueForUser(user = {}) { return employeeAssignments(user).reduce((sum, entry) => sum + entry.quantity * entry.unitCost, 0); }
+function equipmentValueForUser(user = {}) { return employeeAssignments(user).reduce((sum, entry) => sum + entry.quantity * entry.unitCost + (entry.accessories || []).reduce((a, acc) => a + Number(acc.quantity || 0) * Number(acc.unitCost || 0), 0), 0); }
 function employeePaymentSettings(user = {}) {
   const raw = user.paymentSplit || {};
   const unpaidEmployee = Math.max(0, Number(raw.unpaidEmployee ?? 65));
@@ -794,7 +800,8 @@ function employeeEquipmentRentalValue(order = {}) {
         ? item.unitPrice
         : item.chargedUnitPrice || 0
     ));
-    return sum + (qty * unit);
+    const accessories = (item.accessories || []).reduce((a, acc) => a + qty * Math.max(0, Number(acc.price || 0)), 0);
+    return sum + (qty * unit) + accessories;
   }, 0);
 }
 
@@ -831,6 +838,7 @@ function qualifiedUnitEmoji(item = {}) {
 function qualifiedUsageLabel(entry = {}) {
   const item = inventoryById(entry.inventoryId) || {};
   const qty = Math.max(0, Number(entry.quantity || 0));
+  if (entry.accessoryName) return `+${qty} ✦ ${entry.accessoryName}`;
   return `+${qty} ${qualifiedUnitEmoji(item)} ${item.name || 'Qualified Unit'}`;
 }
 function calculateEmployeePaymentLedger(user = {}, orders = state.orders) {
@@ -850,10 +858,38 @@ function calculateEmployeePaymentLedger(user = {}, orders = state.orders) {
       payoff: 0,
       employeeEarnings: 0,
       companyShare: 0,
-      rentalRevenue: 0
+      rentalRevenue: 0,
+      kind: 'equipment'
     });
   }
   groups.forEach((group) => group.lots.sort((a,b) => Number(a.unitCost || 0) - Number(b.unitCost || 0) || String(a.lotId).localeCompare(String(b.lotId))));
+
+  // Accessories allocated to an employee are payoff assets too. They maintain
+  // their own cost buckets and are paid off from accessory revenue on orders.
+  const accessoryGroups = new Map();
+  for (const assignment of assignments) {
+    const inv = inventoryById(assignment.inventoryId) || {};
+    const defs = new Map(normalizeAccessories(inv.accessories || []).map((a) => [String(a.id), a]));
+    for (const accessory of assignment.accessories || []) {
+      const key = `${assignment.inventoryId}::${accessory.id}`;
+      if (!accessoryGroups.has(key)) accessoryGroups.set(key, { inventoryId: assignment.inventoryId, accessoryId: accessory.id, accessoryName: defs.get(String(accessory.id))?.name || 'Accessory', lots: [] });
+      accessoryGroups.get(key).lots.push({
+        lotId: `${assignment.lotId}::${accessory.id}`,
+        inventoryId: assignment.inventoryId,
+        accessoryId: accessory.id,
+        accessoryName: defs.get(String(accessory.id))?.name || 'Accessory',
+        quantity: Number(accessory.quantity || 0),
+        unitCost: Number(accessory.unitCost || 0),
+        totalCost: Number(accessory.quantity || 0) * Number(accessory.unitCost || 0),
+        payoff: 0,
+        employeeEarnings: 0,
+        companyShare: 0,
+        rentalRevenue: 0,
+        kind: 'accessory'
+      });
+    }
+  }
+  accessoryGroups.forEach((group) => group.lots.sort((a,b) => Number(a.unitCost || 0) - Number(b.unitCost || 0) || String(a.lotId).localeCompare(String(b.lotId))));
 
   const paidUnitsForGroup = (group) => group.lots.reduce((sum, lot) => {
     const paid = lot.unitCost > 0 ? Math.min(lot.quantity, Math.floor((lot.payoff + 1e-9) / lot.unitCost)) : lot.quantity;
@@ -933,6 +969,44 @@ function calculateEmployeePaymentLedger(user = {}, orders = state.orders) {
       orderRecognized += lineRevenue;
     }
 
+    // Process accessories selected on this order independently from the base item.
+    for (const item of order.items || []) {
+      const qty = Math.max(0, Number(item.quantity || 0));
+      if (!qty) continue;
+      for (const accessory of item.accessories || []) {
+        const key = `${item.inventoryId || ''}::${accessory.id || ''}`;
+        const group = accessoryGroups.get(key);
+        if (!group) continue;
+        const lineRevenue = qty * Math.max(0, Number(accessory.price || 0)) * paidFraction;
+        if (!lineRevenue) continue;
+        const totalAssignedQty = group.lots.reduce((sum, lot) => sum + Number(lot.quantity || 0), 0);
+        const paidUnitsBefore = Math.min(totalAssignedQty, paidUnitsForGroup(group));
+        const paidQty = Math.min(qty, paidUnitsBefore);
+        const unpaidQty = Math.max(0, qty - paidQty);
+        const paidRevenue = lineRevenue * (paidQty / qty);
+        const unpaidRevenue = lineRevenue * (unpaidQty / qty);
+        if (paidQty > 0) qualifiedUsage.push({ inventoryId: group.inventoryId, accessoryId: group.accessoryId, accessoryName: group.accessoryName, quantity: paidQty });
+        const rawPayoff = unpaidRevenue * (split.equipmentPayoff / 100);
+        const payoffResult = applyPayoffToGroup(group, rawPayoff);
+        const paidUnitsAfter = Math.min(totalAssignedQty, paidUnitsForGroup(group));
+        const unlockedNow = Math.max(0, paidUnitsAfter - paidUnitsBefore);
+        if (unlockedNow > 0) newlyQualified.push({ inventoryId: group.inventoryId, accessoryId: group.accessoryId, accessoryName: group.accessoryName, quantity: unlockedNow });
+        const employeePart = paidRevenue * (split.paidEmployee / 100) + unpaidRevenue * (split.unpaidEmployee / 100) + payoffResult.overflow;
+        const companyPart = paidRevenue * (split.paidCompany / 100) + unpaidRevenue * (split.unpaidCompany / 100);
+        const lotQtyTotal = Math.max(1, totalAssignedQty);
+        group.lots.forEach((lot) => {
+          const share = Number(lot.quantity || 0) / lotQtyTotal;
+          lot.employeeEarnings += employeePart * share;
+          lot.companyShare += companyPart * share;
+          lot.rentalRevenue += lineRevenue * share;
+        });
+        orderEmployee += employeePart;
+        orderCompany += companyPart;
+        orderPayoff += payoffResult.applied;
+        orderRecognized += lineRevenue;
+      }
+    }
+
     const directEmployeeRevenue = (
       Number(order.deliveryFee || 0) +
       Number(order.setupFee || 0) +
@@ -952,11 +1026,9 @@ function calculateEmployeePaymentLedger(user = {}, orders = state.orders) {
     }
   }
 
-  const buckets = [...groups.values()].flatMap((group) => group.lots.map((lot, index) => ({
-    ...lot,
-    lotIndex: index,
-    lotCount: group.lots.length
-  })));
+  const equipmentBuckets = [...groups.values()].flatMap((group) => group.lots.map((lot, index) => ({ ...lot, kind: 'equipment', lotIndex: index, lotCount: group.lots.length })));
+  const accessoryBuckets = [...accessoryGroups.values()].flatMap((group) => group.lots.map((lot, index) => ({ ...lot, kind: 'accessory', lotIndex: index, lotCount: group.lots.length })));
+  const buckets = [...equipmentBuckets, ...accessoryBuckets];
   return { buckets, employeeEarnings, companyShare, payoffTotal, recognizedRevenue, lines, split };
 }
 function employeeContractAgreement(user = {}) {
@@ -1727,6 +1799,7 @@ function renderEmployeePayments() {
 
   const equipmentRows = ledger.buckets.length ? ledger.buckets.map((b) => {
     const item = inventoryById(b.inventoryId) || {};
+    const displayAssetName = b.kind === 'accessory' ? `${b.accessoryName || 'Accessory'} (Accessory)` : (item.name || 'Equipment');
     const paidUnits = b.unitCost > 0 ? Math.min(b.quantity, Math.floor((b.payoff + 1e-9) / b.unitCost)) : b.quantity;
     const progressIntoNext = b.unitCost > 0 && paidUnits < b.quantity ? Math.max(0, b.payoff - (paidUnits * b.unitCost)) : 0;
     const nextPercent = b.unitCost > 0 && paidUnits < b.quantity ? Math.min(100, (progressIntoNext / b.unitCost) * 100) : 100;
@@ -1738,7 +1811,7 @@ function renderEmployeePayments() {
     return `<div class="employee-progress-card">
       <div class="employee-progress-card-head">
         <div>
-          <strong>${safeText(item.name || 'Equipment')}</strong>
+          <strong>${safeText(displayAssetName)}</strong>
           <div class="small muted">${b.quantity} assigned · ${currency(b.unitCost)} each</div>
         </div>
         <div class="qualified-unit-count"><strong>${paidUnits}</strong><span>of ${b.quantity}<br>qualified</span></div>
@@ -1794,7 +1867,9 @@ function renderEmployeePayments() {
     const qualifiedBoosts = (projection.qualifiedUsage || []).map(qualifiedUsageLabel);
     const unlocked = (projection.newlyQualified || []).map((entry) => {
       const item = inventoryById(entry.inventoryId) || {};
-      return `Unlocked +${entry.quantity} ${qualifiedUnitEmoji(item)} ${item.name || 'Qualified Unit'}`;
+      return entry.accessoryName
+        ? `Unlocked +${entry.quantity} ✦ ${entry.accessoryName}`
+        : `Unlocked +${entry.quantity} ${qualifiedUnitEmoji(item)} ${item.name || 'Qualified Unit'}`;
     });
     return `<div class="employee-payment-order-card projected-payment">
       <div class="projection-priority-strip">
@@ -2002,37 +2077,54 @@ function renderEmployeeEquipmentCategoryResults(employee, category) {
     </button>`;
   }).join('') : '<div class="empty-state">No unassigned equipment in this category.</div>';
 }
+function renderAdminEmployeePayoutSummary(employee = {}) {
+  const employeeId = employee.uid || employee.id || '';
+  const rows = (state.payoutRequests || []).filter((r) => String(r.employeeUid || '') === String(employeeId)).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  if (!rows.length) return '<div class="empty-state compact">No payout requests submitted.</div>';
+  return `<div class="employee-admin-payout-list">${rows.map((r)=>`<div class="employee-admin-payout-row"><div><strong>${currency(Number(r.amount||0))}</strong><span>${safeText(r.payoutMethod || r.payoutAccountNickname || 'Payout')} · ${safeText(r.createdAt ? new Date(r.createdAt).toLocaleString() : '')}</span></div><span class="badge ${r.status==='paid'?'badge-green':r.status==='pending'?'badge-yellow':'badge-light'}">${safeText((r.status||'pending').toUpperCase())}</span></div>`).join('')}</div>`;
+}
+function renderAdminEmployeeScheduleSummary(employee = {}) {
+  const employeeId = employee.uid || employee.id || '';
+  const schedule = scheduleForUid(employeeId);
+  const weekly = SCHEDULE_DAYS.map((day) => {
+    const row = schedule.typical[day.key] || { mode:'unavailable' };
+    const label = row.mode === 'available' ? `${formatClockTime(row.start)} – ${formatClockTime(row.end)}` : row.mode === 'allday' ? 'Available all day' : 'Unavailable';
+    return `<div class="employee-admin-schedule-row"><strong>${safeText(day.label)}</strong><span>${safeText(label)}</span></div>`;
+  }).join('');
+  const upcoming = (schedule.changes || []).filter((c)=>String(c.date||'') >= new Date().toISOString().slice(0,10)).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).slice(0,12);
+  return `<div class="employee-admin-schedule"><div class="employee-admin-weekly">${weekly}</div>${upcoming.length ? `<div class="small muted" style="margin-top:10px;"><strong>Upcoming changes</strong></div><div class="employee-admin-schedule-changes">${upcoming.map((c)=>`<div><strong>${safeText(formatFriendlyShortDate(c.date))}</strong><span>${safeText(c.mode==='blocked'?'Blocked off':c.mode==='allday'?'Available all day':`${formatClockTime(c.start)} – ${formatClockTime(c.end)}`)}${c.note?` · ${safeText(c.note)}`:''}</span></div>`).join('')}</div>` : '<div class="small muted" style="margin-top:10px;">No upcoming schedule changes.</div>'}</div>`;
+}
+function employeeSectionButton(key, label, content, badge='') {
+  return `<div class="employee-admin-section" data-employee-section="${safeText(key)}"><button type="button" class="employee-admin-section-button" data-employee-section-toggle="${safeText(key)}"><span>${safeText(label)}</span>${badge ? `<span class="badge badge-light">${safeText(badge)}</span>` : ''}</button><div class="employee-admin-section-panel hidden" data-employee-section-panel="${safeText(key)}">${content}</div></div>`;
+}
 function renderEmployees() {
   if (!els.employeesList || !isAdminUser()) return;
   const employees = (state.users || []).filter((u) => u.role === 'employee').sort((a,b) => (a.status === 'pending' ? -1 : 1) - (b.status === 'pending' ? -1 : 1));
   els.employeesList.innerHTML = employees.length ? employees.map((u) => {
-    const uid = u.uid || u.id;
+    const employeeId = u.uid || u.id;
     const assignments = employeeAssignments(u);
     const totalValue = equipmentValueForUser(u);
-    const rows = assignments.map((a, index) => {
-      const item = inventoryById(a.inventoryId) || {};
-      const otherAllocated = allocatedQuantityAcrossEmployees(a.inventoryId, uid);
+    const ledger = calculateEmployeePaymentLedger(u, state.orders);
+    const rows = assignments.map((assignment, index) => {
+      const item = inventoryById(assignment.inventoryId) || {};
+      const otherAllocated = allocatedQuantityAcrossEmployees(assignment.inventoryId, employeeId);
       const max = Math.max(0, Number(item.stock || 0) - otherAllocated);
       const accessories = normalizeAccessories(item.accessories || []);
-      const accessoryMap = new Map((a.accessories || []).map((entry) => [String(entry.id), Number(entry.quantity || 0)]));
-      const accessoryControls = accessories.length ? `<div class="employee-allocation-accessories"><div class="small muted"><strong>Accessories at this location</strong> · set quantity to 0 to remove</div><div class="employee-accessory-allocation-grid">${accessories.map((acc) => `<label class="employee-accessory-allocation"><span>${safeText(acc.name)}</span><input type="number" min="0" max="${Math.max(Number(a.quantity || 0), Number(accessoryMap.get(acc.id) || 0))}" step="1" data-employee-accessory-id="${safeText(acc.id)}" value="${Number(accessoryMap.get(acc.id) || 0)}" /></label>`).join('')}</div></div>` : '<div class="small muted employee-allocation-accessories">No accessories are configured for this inventory item.</div>';
-      return `<div class="employee-allocation-row" data-employee-allocation-row="${safeText(a.lotId)}" data-inventory-id="${safeText(a.inventoryId)}"><div class="employee-allocation-item"><strong>${safeText(item.name || 'Equipment')}</strong><div class="small muted">${safeText(item.category || 'Other')} · Cost group ${index + 1} · Company total ${Number(item.stock || 0)}</div></div><div class="form-row"><label>Qty</label><input type="number" min="0" max="${max}" step="1" data-employee-equipment-qty value="${Number(a.quantity || 0)}" /></div><div class="form-row"><label>Cost each</label><input type="number" min="0" step="0.01" data-employee-equipment-cost value="${a.unitCost || ''}" placeholder="0.00" /></div><div><span class="small muted">Assigned value</span><strong data-allocation-line-total>${currency(Number(a.quantity || 0) * Number(a.unitCost || 0))}</strong></div><div class="employee-allocation-actions"><button type="button" class="btn btn-secondary btn-small" data-add-employee-price-lot="${safeText(a.inventoryId)}">+ Different Price</button><button type="button" class="btn btn-ghost btn-small" data-remove-employee-equipment-lot="${safeText(a.lotId)}">Remove</button></div>${accessoryControls}</div>`;
+      const accessoryMap = new Map((assignment.accessories || []).map((entry) => [String(entry.id), entry]));
+      const accessoryControls = accessories.length ? `<div class="employee-allocation-accessories"><div class="small muted"><strong>Accessories at this location</strong> · accessory cost is included in Qualified Unit payoff.</div><div class="employee-accessory-allocation-grid">${accessories.map((acc) => { const saved=accessoryMap.get(String(acc.id))||{}; return `<div class="employee-accessory-allocation"><span>${safeText(acc.name)}</span><label><small>Qty</small><input type="number" min="0" step="1" data-employee-accessory-id="${safeText(acc.id)}" value="${Number(saved.quantity || 0)}" /></label><label><small>Cost each</small><input type="number" min="0" step="0.01" data-employee-accessory-cost="${safeText(acc.id)}" value="${saved.unitCost || ''}" placeholder="0.00" /></label></div>`; }).join('')}</div></div>` : '<div class="small muted employee-allocation-accessories">No accessories are configured for this inventory item.</div>';
+      const accessoryValue=(assignment.accessories||[]).reduce((sum,a)=>sum+Number(a.quantity||0)*Number(a.unitCost||0),0);
+      return `<div class="employee-allocation-row" data-employee-allocation-row="${safeText(assignment.lotId)}" data-inventory-id="${safeText(assignment.inventoryId)}"><div class="employee-allocation-item"><strong>${safeText(item.name || 'Equipment')}</strong><div class="small muted">${safeText(item.category || 'Other')} · Cost group ${index + 1} · Company total ${Number(item.stock || 0)}</div></div><div class="form-row"><label>Qty</label><input type="number" min="0" max="${max}" step="1" data-employee-equipment-qty value="${Number(assignment.quantity || 0)}" /></div><div class="form-row"><label>Cost each</label><input type="number" min="0" step="0.01" data-employee-equipment-cost value="${assignment.unitCost || ''}" placeholder="0.00" /></div><div><span class="small muted">Assigned value</span><strong>${currency(Number(assignment.quantity || 0)*Number(assignment.unitCost||0)+accessoryValue)}</strong></div><div class="employee-allocation-actions"><button type="button" class="btn btn-secondary btn-small" data-add-employee-price-lot="${safeText(assignment.inventoryId)}">+ Different Price</button><button type="button" class="btn btn-ghost btn-small" data-remove-employee-equipment-lot="${safeText(assignment.lotId)}">Remove</button></div>${accessoryControls}</div>`;
     }).join('') || '<div class="empty-state">No equipment assigned yet. Use Add Equipment to allocate inventory.</div>';
-    const ledger = calculateEmployeePaymentLedger(u, state.orders);
-    return `<div class="card" style="padding:16px;" data-employee-card="${safeText(uid)}"><div class="section-header"><div><strong>${safeText(employeeDisplayName(u))}</strong><div class="small muted">${safeText(u.email || '')} · ${safeText(u.phone || 'No phone')}</div></div><span class="badge ${u.status === 'approved' ? 'badge-green' : 'badge-yellow'}">${safeText(u.status || 'pending')}</span></div><div class="employee-location-row"><div class="small"><strong>Pickup location:</strong> ${safeText(u.pickupAddress || 'Not provided')}</div><label class="employee-exchange-time-field"><span>Average exchange time</span><div><input type="number" min="0" step="0.5" data-employee-average-exchange value="${Number(u.averageExchangeMinutes || 0)}" /><span>min each × 2</span></div></label><button class="btn btn-secondary btn-small" type="button" data-save-employee-exchange-time="${safeText(uid)}">Save</button></div>${u.emergencyContactName ? `<div class="small muted">Emergency contact: ${safeText(u.emergencyContactName)} · ${safeText(u.emergencyContactPhone || '')}</div>` : ''}<div class="employee-allocation-summary"><span class="badge badge-blue">Equipment value: ${currency(totalValue)}</span><span class="badge badge-yellow">Payoff applied: ${currency(ledger.payoffTotal)}</span><span class="badge badge-green">Remaining: ${currency(Math.max(0,totalValue-ledger.payoffTotal))}</span><span class="badge badge-blue">Payout available: ${currency(employeeAvailablePayout(u))}</span></div><details style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Equipment Allocation</summary><div class="employee-equipment-toolbar"><button class="btn btn-primary btn-small" data-open-employee-equipment-picker="${safeText(uid)}" type="button">+ Add Equipment</button><span class="small muted">${new Set(assignments.map((a) => a.inventoryId)).size} equipment type${new Set(assignments.map((a) => a.inventoryId)).size === 1 ? '' : 's'} · ${assignments.length} cost group${assignments.length === 1 ? '' : 's'}</span></div><div class="employee-equipment-picker hidden" data-employee-equipment-picker="${safeText(uid)}"></div><div class="employee-allocation-grid">${rows}</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-equipment="${safeText(uid)}" type="button">Save Equipment Allocation</button></div></details><details style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Payment Settings</summary><div class="employee-payment-settings" style="margin-top:10px;"><div class="small muted" style="grid-column:1/-1;"><strong>While equipment is unpaid</strong> — these three percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidEmployee" value="${employeePaymentSettings(u).unpaidEmployee}" /></label><label class="form-row"><span>Equipment payoff %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="equipmentPayoff" value="${employeePaymentSettings(u).equipmentPayoff}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidCompany" value="${employeePaymentSettings(u).unpaidCompany}" /></label><div class="small muted" style="grid-column:1/-1;margin-top:4px;"><strong>After an individual unit is paid off</strong> — these two percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidEmployee" value="${employeePaymentSettings(u).paidEmployee}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidCompany" value="${employeePaymentSettings(u).paidCompany}" /></label></div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-payment="${safeText(uid)}" type="button">Save Payment Settings</button></div></details><details class="employee-visual-settings" style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Order Colors</summary><div class="employee-color-editor" data-employee-color-editor>
-  <div class="employee-color-inputs">
-    <label class="employee-color-field"><span>Accent / edge</span><input type="color" data-employee-color="accent" value="${safeText(employeeOrderColors(u).accent)}" /></label>
-    <label class="employee-color-field"><span>Card background</span><input type="color" data-employee-color="background" value="${safeText(employeeOrderColors(u).background)}" /></label>
-    <label class="employee-color-field"><span>Name badge</span><input type="color" data-employee-color="badge" value="${safeText(employeeOrderColors(u).badge)}" /></label>
-  </div>
-  <div class="employee-color-preview-label small muted">Live preview</div>
-  <div class="employee-order-color-preview" data-employee-color-preview style="--preview-accent:${safeText(employeeOrderColors(u).accent)};--preview-background:${safeText(employeeOrderColors(u).background)};--preview-badge:${safeText(employeeOrderColors(u).badge)};--preview-badge-text:${safeText(readableTextColor(employeeOrderColors(u).badge))}">
-    <div class="preview-order-main"><strong>7:00 pm</strong><span>📋</span><strong>Sample Customer</strong><strong>$66.00</strong></div>
-    <div class="preview-order-sub">36 White Folding Chair, 6 Six Foot White Folding Table</div>
-    <div class="preview-order-meta"><span>Exchange Fri, Aug 28</span><span class="preview-employee-badge">Assigned to ${safeText(employeeDisplayName(u))}</span></div>
-  </div>
-  <div class="employee-color-actions"><button class="btn btn-secondary btn-small" data-save-employee-color="${safeText(uid)}" type="button">Save Order Colors</button></div>
-</div></details><div class="employee-contract-summary"><div><strong>Contract Agreement</strong><div class="small muted">${employeeContractAgreement(u).body ? `Saved · ${safeText(employeeContractAgreement(u).status)}` : 'No contract saved yet'}</div></div><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-secondary btn-small" data-edit-employee-contract="${safeText(uid)}" type="button">${employeeContractAgreement(u).body ? 'Edit Contract' : 'Create Contract'}</button><button class="btn btn-ghost btn-small" data-view-as-employee="${safeText(uid)}" type="button">View as Employee</button></div></div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">${u.status !== 'approved' ? `<button class="btn btn-primary btn-small" data-approve-employee="${safeText(uid)}">Approve</button>` : `<button class="btn btn-ghost btn-small" data-pend-employee="${safeText(uid)}">Set Pending</button>`}<button class="btn btn-danger btn-small" data-delete-employee="${safeText(uid)}">Delete Employee</button></div></div>`;
+
+    const profileContent = `<div class="employee-location-row"><div class="small"><strong>Pickup location:</strong> ${safeText(u.pickupAddress || 'Not provided')}</div><label class="employee-exchange-time-field"><span>Average exchange time</span><div><input type="number" min="0" step="0.5" data-employee-average-exchange value="${Number(u.averageExchangeMinutes || 0)}" /><span>min each × 2</span></div></label><button class="btn btn-secondary btn-small" type="button" data-save-employee-exchange-time="${safeText(employeeId)}">Save</button></div>${u.emergencyContactName ? `<div class="small muted">Emergency contact: ${safeText(u.emergencyContactName)} · ${safeText(u.emergencyContactPhone || '')}</div>` : ''}<div class="employee-allocation-summary"><span class="badge badge-blue">Equipment + accessories: ${currency(totalValue)}</span><span class="badge badge-yellow">Payoff applied: ${currency(ledger.payoffTotal)}</span><span class="badge badge-green">Remaining: ${currency(Math.max(0,totalValue-ledger.payoffTotal))}</span><span class="badge badge-blue">Payout available: ${currency(employeeAvailablePayout(u))}</span></div>`;
+    const equipmentContent = `<div class="employee-equipment-toolbar"><button class="btn btn-primary btn-small" data-open-employee-equipment-picker="${safeText(employeeId)}" type="button">+ Add Equipment</button><span class="small muted">${new Set(assignments.map((a) => a.inventoryId)).size} equipment type(s) · ${assignments.length} cost group(s)</span></div><div class="employee-equipment-picker hidden" data-employee-equipment-picker="${safeText(employeeId)}"></div><div class="employee-allocation-grid">${rows}</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-equipment="${safeText(employeeId)}" type="button">Save Equipment Allocation</button></div>`;
+    const payoutCount=(state.payoutRequests||[]).filter((r)=>String(r.employeeUid||'')===String(employeeId)).length;
+    const paymentContent = `<div class="employee-payment-settings"><div class="small muted" style="grid-column:1/-1;"><strong>While equipment is unpaid</strong> — these three percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidEmployee" value="${employeePaymentSettings(u).unpaidEmployee}" /></label><label class="form-row"><span>Equipment payoff %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="equipmentPayoff" value="${employeePaymentSettings(u).equipmentPayoff}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidCompany" value="${employeePaymentSettings(u).unpaidCompany}" /></label><div class="small muted" style="grid-column:1/-1;margin-top:4px;"><strong>After an individual unit or accessory qualifies</strong> — these two percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidEmployee" value="${employeePaymentSettings(u).paidEmployee}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidCompany" value="${employeePaymentSettings(u).paidCompany}" /></label></div><div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-payment="${safeText(employeeId)}" type="button">Save Payment Settings</button></div><div class="hr"></div><div style="margin-top:10px;"><strong>Submitted payouts</strong><div class="small muted" style="margin:3px 0 8px;">Pending and processed payout requests for this employee.</div>${renderAdminEmployeePayoutSummary(u)}</div>`;
+    const colorsContent = `<div class="employee-color-editor" data-employee-color-editor><div class="employee-color-inputs"><label class="employee-color-field"><span>Accent / edge</span><input type="color" data-employee-color="accent" value="${safeText(employeeOrderColors(u).accent)}" /></label><label class="employee-color-field"><span>Card background</span><input type="color" data-employee-color="background" value="${safeText(employeeOrderColors(u).background)}" /></label><label class="employee-color-field"><span>Name badge</span><input type="color" data-employee-color="badge" value="${safeText(employeeOrderColors(u).badge)}" /></label></div><div class="employee-order-color-preview" data-employee-color-preview style="--preview-accent:${safeText(employeeOrderColors(u).accent)};--preview-background:${safeText(employeeOrderColors(u).background)};--preview-badge:${safeText(employeeOrderColors(u).badge)};--preview-badge-text:${safeText(readableTextColor(employeeOrderColors(u).badge))}"><div class="preview-order-main"><strong>7:00 pm</strong><span>📋</span><strong>Sample Customer</strong><strong>$66.00</strong></div><div class="preview-order-meta"><span>Exchange Fri</span><span class="preview-employee-badge">Assigned to ${safeText(employeeDisplayName(u))}</span></div></div><div class="employee-color-actions"><button class="btn btn-secondary btn-small" data-save-employee-color="${safeText(employeeId)}" type="button">Save Order Colors</button></div></div>`;
+    const contractContent = `<div class="employee-contract-summary"><div><strong>Contract Agreement</strong><div class="small muted">${employeeContractAgreement(u).body ? `Saved · ${safeText(employeeContractAgreement(u).status)}` : 'No contract saved yet'}</div></div><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-secondary btn-small" data-edit-employee-contract="${safeText(employeeId)}" type="button">${employeeContractAgreement(u).body ? 'Edit Contract' : 'Create Contract'}</button><button class="btn btn-ghost btn-small" data-view-as-employee="${safeText(employeeId)}" type="button">View as Employee</button></div></div>`;
+    const accountContent = `<div style="display:flex;gap:8px;flex-wrap:wrap;">${u.status !== 'approved' ? `<button class="btn btn-primary btn-small" data-approve-employee="${safeText(employeeId)}">Approve</button>` : `<button class="btn btn-ghost btn-small" data-pend-employee="${safeText(employeeId)}">Set Pending</button>`}<button class="btn btn-danger btn-small" data-delete-employee="${safeText(employeeId)}">Delete Employee</button></div><div class="small muted" style="margin-top:8px;">Deleting requires three separate confirmations.</div>`;
+
+    return `<div class="card employee-admin-card" data-employee-card="${safeText(employeeId)}"><div class="section-header"><div><strong>${safeText(employeeDisplayName(u))}</strong><div class="small muted">${safeText(u.email || '')}</div></div><span class="badge ${u.status === 'approved' ? 'badge-green' : 'badge-yellow'}">${safeText(u.status || 'pending')}</span></div><div class="employee-admin-button-stack">${employeeSectionButton('profile','Profile & Pickup',profileContent)}${employeeSectionButton('equipment','Equipment Allocation',equipmentContent,`${assignments.length}`)}${employeeSectionButton('payments','Payment Settings',paymentContent,payoutCount?`${payoutCount} payout${payoutCount===1?'':'s'}`:'')}${employeeSectionButton('schedule','Schedule',renderAdminEmployeeScheduleSummary(u))}${employeeSectionButton('colors','Order Colors',colorsContent)}${employeeSectionButton('contract','Contract & View As',contractContent)}${employeeSectionButton('account','Account Actions',accountContent)}</div></div>`;
   }).join('') : '<div class="empty-state">No employee signups yet.</div>';
 }
 function updateEmployeeColorPreview(editor) {
@@ -2048,6 +2140,17 @@ function updateEmployeeColorPreview(editor) {
   preview.style.setProperty('--preview-badge-text', readableTextColor(badge));
 }
 async function handleEmployeeListClick(event) {
+  const sectionToggle = event.target.closest('[data-employee-section-toggle]');
+  if (sectionToggle) {
+    const card = sectionToggle.closest('[data-employee-card]');
+    const key = sectionToggle.dataset.employeeSectionToggle;
+    const target = card?.querySelector(`[data-employee-section-panel="${CSS.escape(key)}"]`);
+    const opening = target?.classList.contains('hidden');
+    card?.querySelectorAll('[data-employee-section-panel]').forEach((panel) => panel.classList.add('hidden'));
+    card?.querySelectorAll('[data-employee-section-toggle]').forEach((btn) => btn.classList.remove('active'));
+    if (opening && target) { target.classList.remove('hidden'); sectionToggle.classList.add('active'); }
+    return;
+  }
   const approve = event.target.closest('[data-approve-employee]');
   const pend = event.target.closest('[data-pend-employee]');
   const remove = event.target.closest('[data-delete-employee]');
@@ -2181,7 +2284,8 @@ async function handleEmployeeListClick(event) {
       if (qty <= 0) continue;
       const accessories = [...row.querySelectorAll('[data-employee-accessory-id]')].map((input) => ({
         id: input.dataset.employeeAccessoryId,
-        quantity: Math.max(0, Math.floor(Number(input.value || 0)))
+        quantity: Math.max(0, Math.floor(Number(input.value || 0))),
+        unitCost: Math.max(0, Number(row.querySelector(`[data-employee-accessory-cost="${CSS.escape(input.dataset.employeeAccessoryId)}"]`)?.value || 0))
       })).filter((a) => a.id && a.quantity > 0);
       nextAssignments.push({ lotId, inventoryId: item.id, quantity: qty, unitCost, accessories });
       totalsByInventory.set(item.id, (totalsByInventory.get(item.id) || 0) + qty);
@@ -2206,10 +2310,17 @@ async function handleEmployeeListClick(event) {
 
   if (remove) {
     const assignedOrders = state.orders.filter((order) => order.assignedEmployeeId === id);
+    const employeeName = employeeDisplayName(user);
     const warning = assignedOrders.length
-      ? `This employee is assigned to ${assignedOrders.length} order${assignedOrders.length === 1 ? '' : 's'}. Deleting them will return those orders to Unassigned. Continue?`
-      : `Delete ${employeeDisplayName(user)}?`;
+      ? `${employeeName} is assigned to ${assignedOrders.length} order${assignedOrders.length === 1 ? '' : 's'}. Deleting will unassign those orders. This is confirmation 1 of 3. Continue?`
+      : `Delete ${employeeName}? This is confirmation 1 of 3.`;
     if (!window.confirm(warning)) return;
+    const typedName = window.prompt(`Confirmation 2 of 3: Type the employee's full name exactly:
+
+${employeeName}`);
+    if (String(typedName || '').trim() !== String(employeeName).trim()) { alert('Employee name did not match. Nothing was deleted.'); return; }
+    const typedDelete = window.prompt('Confirmation 3 of 3: Type DELETE EMPLOYEE to permanently remove this employee.');
+    if (String(typedDelete || '').trim().toUpperCase() !== 'DELETE EMPLOYEE') { alert('Final confirmation did not match. Nothing was deleted.'); return; }
     await withBusy(async () => {
       for (const order of assignedOrders) {
         const before = JSON.parse(JSON.stringify(order));
@@ -2821,7 +2932,12 @@ function renderAll() {
   renderEmployeeDocuments();
 }
 function setTab(tab) {
+  const enteringQuickPeek = tab === 'calendar' && state.activeTab !== 'calendar';
   state.activeTab = tab;
+  if (enteringQuickPeek) {
+    state.quickPeekLocationId = 'company';
+    populateQuickPeekLocationSelect();
+  }
   renderTabs();
 }
 function openMobileSidebar() {
@@ -4968,7 +5084,7 @@ function renderOrderAccordion(order, mode) {
   const employeeColors = employeeOrderColors(employeeForColor || {});
   const employeeBadgeText = readableTextColor(employeeColors.badge);
   const headerTitle = `<div class="order-glance-primary"><span class="order-glance-time">${safeText(displayTime)}</span><span class="order-glance-icons" aria-label="Order indicators">${iconParts.join(' ')}</span><span class="order-glance-name">${displayName}</span><span class="order-glance-total">${currency(effectiveTotal)}</span></div>
-    <div class="order-glance-equipment">${safeText(itemSummary)}</div>`;
+    <div class="order-glance-equipment order-equipment-chips">${renderOrderItemChips(order.items || [])}</div>`;
   const headerSub = mode === 'completed'
     ? `<span>${formatDateTime(order.exchangeDate, order.exchangeTime)}</span>${order.completedAt ? `<span>Completed ${new Date(order.completedAt).toLocaleDateString()}</span>` : ''}<span>${safeText(paymentLabel)}</span>`
     : `<span class="order-next-action-meta"><strong>${actionLabel}</strong> ${safeText(formatFriendlyShortDate(actionDate))}</span><span>${safeText(fulfillmentLabel)}</span>${order.eventDate ? `<span>Event ${formatFriendlyShortDate(order.eventDate)}</span>` : ''}<span>${safeText(paymentLabel)}</span><span>Remaining ${currency(getOrderAmountRemaining(order))}</span>`;
@@ -5092,8 +5208,19 @@ async function saveInlineOrder(orderId) {
   }, 'Saving inline changes…');
 }
 function summarizeOrderItems(items = []) {
-  const parts = items.map((item) => `${item.quantity} ${item.name}`);
+  const parts = items.map((item) => {
+    const accessories = (item.accessories || []).map((a) => a.name).filter(Boolean);
+    return `${item.quantity} ${item.name}${accessories.length ? ` + ${accessories.join(' + ')}` : ''}`;
+  });
   return parts.join(', ') || 'No equipment selected';
+}
+function renderOrderItemChips(items = []) {
+  if (!items.length) return '<span class="order-equipment-chip empty">No equipment</span>';
+  return items.map((item) => {
+    const base = `<span class="order-equipment-main">${safeText(item.quantity)} ${safeText(item.name || 'Equipment')}</span>`;
+    const accessories = (item.accessories || []).map((a) => `<span class="order-equipment-plus">+</span><span class="order-equipment-accessory">${safeText(a.name || 'Accessory')}</span>`).join('');
+    return `<span class="order-equipment-chip">${base}${accessories}</span>`;
+  }).join('');
 }
 function bindOrderCardActions() {
   if (!state.orderActionDelegatesBound) {
@@ -5994,6 +6121,27 @@ function renderSettings() {
 function renderReminderEditor() {}
 async function handleReminderSettingsSave(event) { if (event) event.preventDefault(); }
 function insertTemplateToken(token) {}
+function getLocationAccessoryStock(inventoryId = '', accessoryId = '', locationId = 'company') {
+  const item = inventoryById(inventoryId) || {};
+  const accessory = normalizeAccessories(item.accessories || []).find((a) => String(a.id) === String(accessoryId)) || {};
+  const companyQty = Math.max(0, Number(accessory.costQuantity || 0));
+  if (locationId === 'company') return companyQty;
+  const employeeAllocated = (state.users || []).filter((u) => u.role === 'employee').reduce((sum, u) => sum + employeeAccessoryAssignments(u, inventoryId).filter((a) => String(a.id) === String(accessoryId)).reduce((n,a)=>n+Number(a.quantity||0),0), 0);
+  if (locationId === 'main') return Math.max(0, companyQty - employeeAllocated);
+  if (String(locationId).startsWith('employee:')) {
+    const uidValue = String(locationId).slice('employee:'.length);
+    const user = (state.users || []).find((u) => String(u.uid || u.id) === uidValue);
+    return employeeAccessoryAssignments(user || {}, inventoryId).filter((a) => String(a.id) === String(accessoryId)).reduce((n,a)=>n+Number(a.quantity||0),0);
+  }
+  return companyQty;
+}
+function quantityAccessoryBookedForQuickPeekRange(inventoryId, accessoryId, rangeStartDate, rangeEndDate, statuses, locationId = 'company') {
+  return (state.orders || []).filter((order) => (locationId === 'company' || orderLocationId(order) === locationId) && statusMatchesOrder(order, statuses)).filter((order) => {
+    const start = order.exchangeDate || order.eventDate || order.date;
+    const end = order.returnDate || order.eventDate || order.exchangeDate || order.date;
+    return dateRangeOverlaps(rangeStartDate, rangeEndDate, start, end);
+  }).reduce((sum, order) => sum + (order.items || []).filter((item) => String(item.inventoryId || '') === String(inventoryId) && (item.accessories || []).some((a) => String(a.id || '') === String(accessoryId))).reduce((n,item)=>n+Number(item.quantity||0),0), 0);
+}
 function renderCalendarView() {
   if (!els.calendarAvailabilityBoard) return;
   updateQuickPeekProgressiveFields();
@@ -6037,7 +6185,7 @@ function renderCalendarView() {
               ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(`2000-01-01T${timeRaw}:00`))
               : '??:??';
             return `<div class="calendar-stock-row quick-peek-order-row">
-              <div><strong>${safeText(time)} ${safeText(name)}</strong><div class="small muted">${safeText(items)}</div></div>
+              <div><strong>${safeText(time)} ${safeText(name)}</strong><div class="order-equipment-chips compact">${renderOrderItemChips(order.items || [])}</div></div>
               <div class="calendar-stock-metrics"><span class="badge badge-${statusClass}">${safeText(order.status)}</span></div>
             </div>`;
           }).join('')}
@@ -6074,6 +6222,13 @@ function renderCalendarView() {
             <div class="quick-peek-stock-strip">
               <span><b>${confirmed}</b> out</span>${pending ? `<span><b>${pending}</b> pending</span>` : ''}
             </div>
+            ${normalizeAccessories(item.accessories || []).length ? `<div class="quick-peek-accessory-list">${normalizeAccessories(item.accessories || []).map((acc) => {
+              const accStock = getLocationAccessoryStock(item.id, acc.id, selectedLocationId);
+              const accConfirmed = quantityAccessoryBookedForQuickPeekRange(item.id, acc.id, exchangeDate, returnDate, ['Confirmed','In-Progress'], selectedLocationId);
+              const accPending = quantityAccessoryBookedForQuickPeekRange(item.id, acc.id, exchangeDate, returnDate, ['Pending'], selectedLocationId);
+              const accLeft = Math.max(0, accStock - accConfirmed - accPending);
+              return `<span class="quick-peek-accessory-chip"><b>+ ${safeText(acc.name)}</b><em>${accLeft} left${accConfirmed ? ` · ${accConfirmed} out` : ''}${accPending ? ` · ${accPending} pending` : ''}</em></span>`;
+            }).join('')}</div>` : ''}
           </div>
         </div>`;
       }).join('') || '<div class="empty-state">No inventory yet.</div>'}

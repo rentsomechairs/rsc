@@ -457,3 +457,9 @@ body.public-site {
   .public-site .tracking-page-card { padding:14px; border-radius:18px; }
   .public-site .mobile-total-bar { top:0; border-radius:0 0 14px 14px; }
 }
+
+
+/* V61 login entry */
+.public-site .site-login-button{margin-left:8px;padding:9px 13px;border-radius:12px;border:1px solid var(--site-line);background:#fff;color:var(--site-brand-dark);font-weight:800;box-shadow:0 4px 12px rgba(21,48,70,.06)}
+.public-site .site-login-button:hover{background:var(--site-brand-soft);text-decoration:none}
+@media(max-width:760px){.public-site .site-login-button{margin-left:4px;padding:8px 10px}.public-site .site-nav{gap:2px}}

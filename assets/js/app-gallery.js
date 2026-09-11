@@ -1,5 +1,5 @@
-import { getInventory, getOrders, getSettings } from './store.js?v=rental-ux-v60';
-import { currency, safeText } from './utils.js?v=rental-ux-v60';
+import { getInventory, getOrders, getSettings } from './store.js?v=rental-ux-v61';
+import { currency, safeText } from './utils.js?v=rental-ux-v61';
 
 const els = {
   filters: document.getElementById('galleryFilters'),
