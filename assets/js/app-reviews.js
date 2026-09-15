@@ -1,5 +1,5 @@
-import { getPublicReviews } from './store.js?v=rental-ux-v65';
-import { safeText } from './utils.js?v=rental-ux-v65';
+import { getPublicReviews } from './store.js?v=rental-ux-v66';
+import { safeText } from './utils.js?v=rental-ux-v66';
 
 const list = document.getElementById('publicReviewsList');
 const status = document.getElementById('publicReviewsStatus');

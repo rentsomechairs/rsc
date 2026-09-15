@@ -3556,6 +3556,7 @@ textarea{line-height:1.45}
     -webkit-backdrop-filter:blur(14px);
   }
   .employee-mobile-nav.hidden{display:none!important}
+  body.payout-request-open .employee-mobile-nav{display:none!important}
   .employee-mobile-nav-btn{
     flex:1 1 0;
     min-width:0;

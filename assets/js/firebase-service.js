@@ -1,4 +1,4 @@
-import { APP_CONFIG } from './config.js?v=rental-ux-v65';
+import { APP_CONFIG } from './config.js?v=rental-ux-v66';
 
 let firebaseApp;
 let auth;

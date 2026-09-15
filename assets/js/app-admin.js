@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v65';
-import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js?v=rental-ux-v65';
-import { debounce, geocodeAddress, searchAddresses } from './geo.js?v=rental-ux-v65';
-import { syncCompletedOrderFinancials } from './finance-service.js?v=rental-ux-v65';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v66';
+import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js?v=rental-ux-v66';
+import { debounce, geocodeAddress, searchAddresses } from './geo.js?v=rental-ux-v66';
+import { syncCompletedOrderFinancials } from './finance-service.js?v=rental-ux-v66';
 const state = {
   inventory: [],
   orders: [],
@@ -62,7 +62,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'rental-ux-v65';
+const ADMIN_VERSION = 'rental-ux-v66';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -1546,8 +1546,12 @@ function openPayoutRequestModal() {
   els.payoutAccountForm?.classList.add('hidden');
   renderPayoutModal();
   els.payoutRequestModalWrap?.classList.add('open');
+  document.body.classList.add('payout-request-open');
 }
-function closePayoutRequestModal() { els.payoutRequestModalWrap?.classList.remove('open'); }
+function closePayoutRequestModal() {
+  els.payoutRequestModalWrap?.classList.remove('open');
+  document.body.classList.remove('payout-request-open');
+}
 async function savePayoutAccounts(accounts) {
   const employee = getExperienceUser();
   if (!employee || employee.role !== 'employee') return;

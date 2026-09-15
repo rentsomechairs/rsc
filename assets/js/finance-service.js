@@ -1,5 +1,5 @@
-import { initFirebase, isFirebaseEnabled, waitForAuthReady, reauthenticateCurrentUser } from './firebase-service.js?v=rental-ux-v65';
-import { computeDeliveryEstimate, geocodeAddress } from './geo.js?v=rental-ux-v65';
+import { initFirebase, isFirebaseEnabled, waitForAuthReady, reauthenticateCurrentUser } from './firebase-service.js?v=rental-ux-v66';
+import { computeDeliveryEstimate, geocodeAddress } from './geo.js?v=rental-ux-v66';
 
 export const FINANCE_COLLECTIONS = {
   expense: 'financeExpenses', income: 'financeIncome', mileage: 'financeMileage',
