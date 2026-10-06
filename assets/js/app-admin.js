@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v66';
-import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js?v=rental-ux-v66';
-import { debounce, geocodeAddress, searchAddresses } from './geo.js?v=rental-ux-v66';
-import { syncCompletedOrderFinancials } from './finance-service.js?v=rental-ux-v66';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v69';
+import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js?v=rental-ux-v69';
+import { debounce, geocodeAddress, searchAddresses } from './geo.js?v=rental-ux-v69';
+import { syncCompletedOrderFinancials } from './finance-service.js?v=rental-ux-v69';
 const state = {
   inventory: [],
   orders: [],
@@ -56,13 +56,15 @@ const state = {
   payoutWatcherTimer: null,
   knownPendingPayoutIds: new Set(),
   notificationPopoverOpen: false,
-  employeeNotificationWatcherTimer: null
+  employeeNotificationWatcherTimer: null,
+  employeeAdminOpenSections: {},
+  supportEquipment: []
 };
 const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'rental-ux-v66';
+const ADMIN_VERSION = 'rental-ux-v68';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -1314,14 +1316,32 @@ function loadBlankContractIntoEditor() {
   if (els.contractForm.elements.body.value.trim() && !window.confirm('Replace the current contract body with a fresh blank template?')) return;
   els.contractForm.elements.body.value = buildBlankEmployeeContractTemplate(user);
 }
-function enterViewAsEmployee(user = {}) {
+async function enterViewAsEmployee(user = {}) {
   if (!isRealAdminUser()) return;
+  // View As is also the admin's employee-feature test mode. Make sure completed
+  // orders are present so Payments can test payout breakdowns and Actual Hourly.
+  if (!state.completedOrdersLoaded && !state.completedOrdersLoading) {
+    state.completedOrdersLoading = true;
+    try {
+      const completed = await loadCompletedOrders();
+      const byId = new Map((state.orders || []).map((order) => [order.id, order]));
+      (completed || []).forEach((order) => byId.set(order.id, order));
+      state.orders = [...byId.values()];
+      state.completedOrdersLoaded = true;
+    } catch (error) {
+      console.error('Could not load completed orders for View As testing', error);
+    } finally {
+      state.completedOrdersLoading = false;
+    }
+  }
   state.viewAsEmployee = user;
   state.schedulePersonId = user.uid || user.id || '';
   state.activeTab = 'orders';
   state.expandedOrderId = null;
   applyRoleAccess();
   renderAll();
+  await refreshPayoutRequests().catch((error) => console.error('Could not load viewed employee payouts', error));
+  renderEmployeePayments();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 function exitViewAsEmployee() {
@@ -1444,6 +1464,95 @@ function employeeHourlyEstimateHtml(employee, order, earnings, plain = false) {
   ].filter(Boolean).join(' + ');
   const label = `${currency(estimate.hourlyRate)}/hr · ${estimate.totalMinutes.toFixed(0)} min`;
   return plain ? safeText(label) : `<span class="badge employee-hourly-badge" title="${safeText(`${pieces} = ${estimate.totalMinutes.toFixed(1)} estimated minutes`)}">${label}</span>`;
+}
+
+function employeeActualLabor(order = {}, earnings = 0) {
+  const actual = order.employeeActualLabor || {};
+  const cleaning = Math.max(0, Number(actual.cleaningMinutes || 0));
+  const loadingUnloading = Math.max(0, Number(actual.loadingUnloadingMinutes || 0));
+  const drivingWaiting = Math.max(0, Number(actual.drivingWaitingMinutes || 0));
+  const expenses = Math.max(0, Number(actual.totalExpenses || 0));
+  const totalMinutes = cleaning + loadingUnloading + drivingWaiting;
+  const hourlyRate = totalMinutes > 0 ? (Math.max(0, Number(earnings || 0)) / totalMinutes) * 60 : null;
+  return { cleaning, loadingUnloading, drivingWaiting, expenses, totalMinutes, hourlyRate, hasActual: Boolean(actual.updatedAt || totalMinutes || expenses) };
+}
+function employeeRateLabel(employee, order, earnings) {
+  const actual = employeeActualLabor(order, earnings);
+  if (actual.hasActual && actual.totalMinutes > 0) return `Actual rate ${currency(actual.hourlyRate)}/hr · ${employeeDurationLabel(actual.totalMinutes)}`;
+  const estimate = estimateEmployeeOrderLabor(employee, order, earnings);
+  return estimate.totalMinutes > 0 ? `Estimated rate ${currency(estimate.hourlyRate)}/hr · ${estimate.totalMinutes.toFixed(0)} min` : 'Estimated rate —';
+}
+function employeeOrderRateBreakdownHtml(line = {}) {
+  const order = line.order || {};
+  const rates = employeePaymentSettings(getExperienceUser());
+  const paidFraction = eligiblePaidFraction(order);
+  const qualified = new Map((line.qualifiedUsage || []).map((entry) => [`${entry.inventoryId}::${entry.accessoryId || ''}`, Number(entry.quantity || 0)]));
+  const rows = [];
+  const addRow = (name, qty, rate, unitPrice, rateLabel) => {
+    if (!qty) return;
+    const amount = Math.max(0, qty * Math.max(0, Number(unitPrice || 0)) * paidFraction * (Math.max(0, Number(rate || 0)) / 100));
+    rows.push(`<div class="employee-breakdown-row"><span><strong>${safeText(name || 'Equipment')} (${currency(amount)})</strong></span><strong>${qty} at ${rateLabel} (${Number(rate || 0).toFixed(0)}%)</strong></div>`);
+  };
+  for (const item of order.items || []) {
+    const qty = Math.max(0, Number(item.quantity || 0));
+    const q = Math.min(qty, qualified.get(`${item.inventoryId || ''}::`) || 0);
+    const uq = Math.max(0, qty - q);
+    const unitRental = Math.max(0, Number(item.chargedUnitPrice === '' || item.chargedUnitPrice == null ? item.unitPrice : item.chargedUnitPrice || 0));
+    addRow(item.name || 'Equipment', uq, rates.unpaidEmployee, unitRental, 'unqualified rate');
+    addRow(item.name || 'Equipment', q, rates.paidEmployee, unitRental, 'qualified rate');
+    for (const acc of item.accessories || []) {
+      const aq = Math.min(qty, qualified.get(`${item.inventoryId || ''}::${acc.id || ''}`) || 0);
+      const auq = Math.max(0, qty - aq);
+      addRow(acc.name || 'Accessory', auq, rates.unpaidEmployee, Number(acc.price || 0), 'unqualified rate');
+      addRow(acc.name || 'Accessory', aq, rates.paidEmployee, Number(acc.price || 0), 'qualified rate');
+    }
+  }
+  return rows.join('') || '<div class="small muted">No equipment-rate breakdown is available for this order.</div>';
+}
+function actualMinutesToParts(minutes = 0) {
+  const total = Math.max(0, Math.round(Number(minutes || 0)));
+  return { hours: Math.floor(total / 60), minutes: total % 60 };
+}
+function actualPartsToMinutes(hours, minutes) {
+  return Math.max(0, Number(hours || 0)) * 60 + Math.max(0, Math.min(59, Number(minutes || 0)));
+}
+function employeeDurationLabel(totalMinutes = 0) {
+  const parts = actualMinutesToParts(totalMinutes);
+  if (parts.hours && parts.minutes) return `${parts.hours} hr ${parts.minutes} min`;
+  if (parts.hours) return `${parts.hours} hr`;
+  return `${parts.minutes} min`;
+}
+function openEmployeeCompletedOrderModal(orderId) {
+  const employee = getExperienceUser();
+  const ledger = calculateEmployeePaymentLedger(employee, state.orders);
+  const line = ledger.lines.find((entry) => String(entry.order?.id || '') === String(orderId || ''));
+  if (!line) return;
+  const order = line.order;
+  const actual = employeeActualLabor(order, line.employee);
+  const clean = actualMinutesToParts(actual.cleaning), load = actualMinutesToParts(actual.loadingUnloading), drive = actualMinutesToParts(actual.drivingWaiting);
+  let modal = document.getElementById('employeeCompletedOrderModal');
+  if (!modal) { modal = document.createElement('div'); modal.id = 'employeeCompletedOrderModal'; modal.className = 'modal-backdrop'; document.body.appendChild(modal); }
+  const timeRow = (label, key, parts) => `<div class="employee-time-row"><strong>${label}</strong><label><span>Hours</span><input type="number" min="0" step="1" data-actual-${key}-hours value="${parts.hours || ''}" inputmode="numeric"></label><label><span>Minutes</span><input type="number" min="0" max="59" step="1" data-actual-${key}-minutes value="${parts.minutes || ''}" inputmode="numeric"></label></div>`;
+  modal.innerHTML = `<div class="modal employee-actual-modal"><div class="modal-header"><div><h3>${safeText(`${order.firstName || ''} ${order.lastName || ''}`.trim() || 'Completed order')}</h3><div class="small muted">${safeText(summarizeOrderItems(order.items || []))}</div></div><button type="button" class="icon-btn" data-close-actual-modal>×</button></div>
+    <section class="employee-completed-breakdown"><h4>What you were paid for</h4>${employeeOrderRateBreakdownHtml(line)}</section>
+    <div class="employee-actual-summary"><span>You earned</span><strong>${currency(line.employee)}</strong><small>${safeText(employeeRateLabel(employee, order, line.employee))}</small></div>
+    <section class="employee-actual-time-section"><div class="employee-section-heading"><div><h4>Time Spent</h4><p class="small muted">Enter the actual hours and minutes you spent on this job.</p></div></div><div class="employee-time-grid">${timeRow('Cleaning','cleaning',clean)}${timeRow('Loading and Unloading','loading',load)}${timeRow('Driving / Waiting','driving',drive)}</div></section>
+    <section class="employee-expenses-section"><h4>Expenses</h4><p class="small muted">Gas, cleaning supplies, etc. Expenses are recorded for reference and do not change your earned payout.</p><label class="employee-expense-input"><span>Total Expenses</span><div class="money-input-wrap"><span>$</span><input type="number" min="0" step="0.01" data-actual-expenses value="${actual.expenses || ''}" inputmode="decimal"></div></label></section>
+    <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close-actual-modal>Cancel</button><button type="button" class="btn btn-primary" data-save-actual-labor="${safeText(order.id)}">Save Actual Time</button></div></div>`;
+  modal.classList.add('open');
+  modal.querySelectorAll('[data-close-actual-modal]').forEach((btn) => btn.onclick = () => modal.classList.remove('open'));
+  modal.onclick = (event) => { if (event.target === modal) modal.classList.remove('open'); };
+  modal.querySelector('[data-save-actual-labor]')?.addEventListener('click', async () => {
+    const val = (sel) => modal.querySelector(sel)?.value || 0;
+    const actualLabor = {
+      cleaningMinutes: actualPartsToMinutes(val('[data-actual-cleaning-hours]'), val('[data-actual-cleaning-minutes]')),
+      loadingUnloadingMinutes: actualPartsToMinutes(val('[data-actual-loading-hours]'), val('[data-actual-loading-minutes]')),
+      drivingWaitingMinutes: actualPartsToMinutes(val('[data-actual-driving-hours]'), val('[data-actual-driving-minutes]')),
+      totalExpenses: Math.max(0, Number(val('[data-actual-expenses]'))), updatedAt: new Date().toISOString()
+    };
+    await handleEmployeeOrderProgress(order.id, { actualLabor });
+    modal.classList.remove('open');
+  });
 }
 const BUILTIN_CASH_PAYOUT_ID = '__cash__';
 function payoutAccountsForEmployee(employee = {}) {
@@ -1836,7 +1945,7 @@ function renderEmployeePayments() {
 
   const paidRows = ledger.lines.length ? ledger.lines.slice().reverse().map((line) => {
     const order = line.order;
-    return `<div class="employee-payment-order-card completed-payment">
+    return `<div class="employee-payment-order-card completed-payment clickable" data-completed-payment-order="${safeText(order.id)}" role="button" tabindex="0">
       <div class="employee-payment-order-head">
         <div>
           <span class="employee-payment-order-state">Completed</span>
@@ -1849,8 +1958,8 @@ function renderEmployeePayments() {
       <div class="employee-payment-split-row">
         <div><span>Qualified Unit progress</span><strong>${currency(line.payoff)}</strong></div>
         <div><span>Company</span><strong>${currency(line.company)}</strong></div>
-        <div><span>Estimated rate</span><strong>${employeeHourlyEstimateHtml(employee, order, line.employee, true)}</strong></div>
-      </div>
+        <div><span>Hourly</span><strong>${safeText(employeeRateLabel(employee, order, line.employee))}</strong></div>
+      </div><div class="employee-payment-open-hint">Click to view payout breakdown & actual hourly</div>
     </div>`;
   }).join('') : '<div class="empty-state">Complete an assigned order to see its final payment breakdown here.</div>';
 
@@ -2023,8 +2132,6 @@ function renderEmployeeOrderDetails(order = {}) {
     </div>
     <div class="employee-order-control-actions">
       <button type="button" class="btn btn-secondary btn-small" data-save-employee-times="${safeText(order.id)}" ${previewDisabled}>Save Times</button>
-      ${canStart ? `<button type="button" class="btn btn-primary btn-small" data-employee-order-status="${safeText(order.id)}" data-next-status="In-Progress" ${previewDisabled}>Set In-Progress</button>` : ''}
-      ${canComplete ? `<button type="button" class="btn btn-primary btn-small" data-employee-order-status="${safeText(order.id)}" data-next-status="Completed" ${previewDisabled}>Mark Completed</button>` : ''}
     </div>
   </div>`;
   return `<div class="employee-order-details"><div class="employee-order-kv"><div><span>Customer</span><strong>${safeText(`${order.firstName || ''} ${order.lastName || ''}`.trim() || 'Unnamed')}</strong></div><div><span>Event</span><strong>${safeText(order.eventName || 'Rental')}</strong></div><div><span>Event date</span><strong>${safeText(formatDateTime(order.eventDate, order.eventTime || 'To Be Determined'))}</strong></div><div><span>Exchange</span><strong>${safeText(formatDateTime(order.exchangeDate, order.exchangeTime || 'To Be Determined'))}</strong></div><div><span>Return</span><strong>${safeText(formatDateTime(order.returnDate, order.returnTime || 'To Be Determined'))}</strong></div><div><span>${order.fulfillmentType === 'Delivery' ? 'Delivery address' : 'Pickup address'}</span><strong>${safeText(pickupAddress)}</strong></div>${contact.text ? `<div><span>Phone</span><strong>${safeText(contact.text)}</strong></div>` : ''}${contact.email ? `<div><span>Email</span><strong>${safeText(contact.email)}</strong></div>` : ''}<div><span>Order total</span><strong>${currency(getEffectiveOrderTotal(order))}</strong></div><div><span>Payment</span><strong>${safeText(order.paymentStatus || 'Un-Paid')}</strong></div></div><div><strong>Equipment</strong><div class="calendar-stock-list" style="margin-top:6px;">${items}</div></div>${order.notes ? `<div class="note-block small"><strong>Notes:</strong> ${safeText(order.notes)}</div>` : ''}${controls}</div>`;
@@ -2122,15 +2229,17 @@ function renderEmployees() {
     }).join('') || '<div class="empty-state">No equipment assigned yet. Use Add Equipment to allocate inventory.</div>';
 
     const profileContent = `<div class="employee-location-row"><div class="small"><strong>Pickup location:</strong> ${safeText(u.pickupAddress || 'Not provided')}</div><label class="employee-exchange-time-field"><span>Average exchange time</span><div><input type="number" min="0" step="0.5" data-employee-average-exchange value="${Number(u.averageExchangeMinutes || 0)}" /><span>min each × 2</span></div></label><button class="btn btn-secondary btn-small" type="button" data-save-employee-exchange-time="${safeText(employeeId)}">Save</button></div>${u.emergencyContactName ? `<div class="small muted">Emergency contact: ${safeText(u.emergencyContactName)} · ${safeText(u.emergencyContactPhone || '')}</div>` : ''}<div class="employee-allocation-summary"><span class="badge badge-blue">Equipment + accessories: ${currency(totalValue)}</span><span class="badge badge-yellow">Payoff applied: ${currency(ledger.payoffTotal)}</span><span class="badge badge-green">Remaining: ${currency(Math.max(0,totalValue-ledger.payoffTotal))}</span><span class="badge badge-blue">Payout available: ${currency(employeeAvailablePayout(u))}</span></div>`;
-    const equipmentContent = `<div class="employee-equipment-toolbar"><button class="btn btn-primary btn-small" data-open-employee-equipment-picker="${safeText(employeeId)}" type="button">+ Add Equipment</button><span class="small muted">${new Set(assignments.map((a) => a.inventoryId)).size} equipment type(s) · ${assignments.length} cost group(s)</span></div><div class="employee-equipment-picker hidden" data-employee-equipment-picker="${safeText(employeeId)}"></div><div class="employee-allocation-grid">${rows}</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-equipment="${safeText(employeeId)}" type="button">Save Equipment Allocation</button></div>`;
+    const supportRows = supportEquipmentItems().map((item) => { const assigned=supportEquipmentAssignments(u).find(a=>a.id===item.id); const other=allocatedSupportEquipment(item.id, employeeId); const max=Math.max(0,Number(item.quantity||0)-other); return `<div class="employee-support-allocation-row"><div><strong>${safeText(item.name)}</strong><div class="small muted">${max} available to this employee</div></div><label class="form-row"><span>Qty</span><input type="number" min="0" max="${max}" step="1" data-support-allocation-id="${safeText(item.id)}" value="${Number(assigned?.quantity||0)}"></label></div>`; }).join('') || '<div class="small muted">No operational equipment has been added yet.</div>';
+    const equipmentContent = `<div class="employee-equipment-toolbar"><button class="btn btn-primary btn-small" data-open-employee-equipment-picker="${safeText(employeeId)}" type="button">+ Add Rental Inventory</button><span class="small muted">${new Set(assignments.map((a) => a.inventoryId)).size} inventory type(s) · ${assignments.length} cost group(s)</span></div><div class="employee-equipment-picker hidden" data-employee-equipment-picker="${safeText(employeeId)}"></div><div class="employee-allocation-grid">${rows}</div><div class="hr"></div><div class="section-header"><div><strong>Operational Equipment</strong><div class="small muted">Straps, dollies, carts, and other non-rental equipment. No cost/payoff calculation.</div></div></div><div class="employee-support-allocation-grid">${supportRows}</div><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-equipment="${safeText(employeeId)}" type="button">Save Inventory Allocation</button></div>`;
     const payoutCount=(state.payoutRequests||[]).filter((r)=>String(r.employeeUid||'')===String(employeeId)).length;
     const paymentContent = `<div class="employee-payment-settings"><div class="small muted" style="grid-column:1/-1;"><strong>While equipment is unpaid</strong> — these three percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidEmployee" value="${employeePaymentSettings(u).unpaidEmployee}" /></label><label class="form-row"><span>Equipment payoff %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="equipmentPayoff" value="${employeePaymentSettings(u).equipmentPayoff}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="unpaidCompany" value="${employeePaymentSettings(u).unpaidCompany}" /></label><div class="small muted" style="grid-column:1/-1;margin-top:4px;"><strong>After an individual unit or accessory qualifies</strong> — these two percentages must total 100%.</div><label class="form-row"><span>Employee %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidEmployee" value="${employeePaymentSettings(u).paidEmployee}" /></label><label class="form-row"><span>Company %</span><input type="number" min="0" max="100" step="0.01" data-payment-split="paidCompany" value="${employeePaymentSettings(u).paidCompany}" /></label></div><div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap;"><button class="btn btn-primary btn-small" data-save-employee-payment="${safeText(employeeId)}" type="button">Save Payment Settings</button></div><div class="hr"></div><div style="margin-top:10px;"><strong>Submitted payouts</strong><div class="small muted" style="margin:3px 0 8px;">Pending and processed payout requests for this employee.</div>${renderAdminEmployeePayoutSummary(u)}</div>`;
     const colorsContent = `<div class="employee-color-editor" data-employee-color-editor><div class="employee-color-inputs"><label class="employee-color-field"><span>Accent / edge</span><input type="color" data-employee-color="accent" value="${safeText(employeeOrderColors(u).accent)}" /></label><label class="employee-color-field"><span>Card background</span><input type="color" data-employee-color="background" value="${safeText(employeeOrderColors(u).background)}" /></label><label class="employee-color-field"><span>Name badge</span><input type="color" data-employee-color="badge" value="${safeText(employeeOrderColors(u).badge)}" /></label></div><div class="employee-order-color-preview" data-employee-color-preview style="--preview-accent:${safeText(employeeOrderColors(u).accent)};--preview-background:${safeText(employeeOrderColors(u).background)};--preview-badge:${safeText(employeeOrderColors(u).badge)};--preview-badge-text:${safeText(readableTextColor(employeeOrderColors(u).badge))}"><div class="preview-order-main"><strong>7:00 pm</strong><span>📋</span><strong>Sample Customer</strong><strong>$66.00</strong></div><div class="preview-order-meta"><span>Exchange Fri</span><span class="preview-employee-badge">Assigned to ${safeText(employeeDisplayName(u))}</span></div></div><div class="employee-color-actions"><button class="btn btn-secondary btn-small" data-save-employee-color="${safeText(employeeId)}" type="button">Save Order Colors</button></div></div>`;
-    const contractContent = `<div class="employee-contract-summary"><div><strong>Contract Agreement</strong><div class="small muted">${employeeContractAgreement(u).body ? `Saved · ${safeText(employeeContractAgreement(u).status)}` : 'No contract saved yet'}</div></div><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-secondary btn-small" data-edit-employee-contract="${safeText(employeeId)}" type="button">${employeeContractAgreement(u).body ? 'Edit Contract' : 'Create Contract'}</button><button class="btn btn-ghost btn-small" data-view-as-employee="${safeText(employeeId)}" type="button">View as Employee</button></div></div>`;
+    const contractContent = `<div class="employee-contract-summary"><div><strong>Contract Agreement</strong><div class="small muted">${employeeContractAgreement(u).body ? `Saved · ${safeText(employeeContractAgreement(u).status)}` : 'No contract saved yet'}</div></div><div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-secondary btn-small" data-edit-employee-contract="${safeText(employeeId)}" type="button">${employeeContractAgreement(u).body ? 'Edit Contract' : 'Create Contract'}</button></div></div>`;
     const accountContent = `<div style="display:flex;gap:8px;flex-wrap:wrap;">${u.status !== 'approved' ? `<button class="btn btn-primary btn-small" data-approve-employee="${safeText(employeeId)}">Approve</button>` : `<button class="btn btn-ghost btn-small" data-pend-employee="${safeText(employeeId)}">Set Pending</button>`}<button class="btn btn-danger btn-small" data-delete-employee="${safeText(employeeId)}">Delete Employee</button></div><div class="small muted" style="margin-top:8px;">Deleting requires three separate confirmations.</div>`;
 
-    return `<div class="card employee-admin-card" data-employee-card="${safeText(employeeId)}"><div class="section-header"><div><strong>${safeText(employeeDisplayName(u))}</strong><div class="small muted">${safeText(u.email || '')}</div></div><span class="badge ${u.status === 'approved' ? 'badge-green' : 'badge-yellow'}">${safeText(u.status || 'pending')}</span></div><div class="employee-admin-button-stack">${employeeSectionButton('profile','Profile & Pickup',profileContent)}${employeeSectionButton('equipment','Equipment Allocation',equipmentContent,`${assignments.length}`)}${employeeSectionButton('payments','Payment Settings',paymentContent,payoutCount?`${payoutCount} payout${payoutCount===1?'':'s'}`:'')}${employeeSectionButton('schedule','Schedule',renderAdminEmployeeScheduleSummary(u))}${employeeSectionButton('colors','Order Colors',colorsContent)}${employeeSectionButton('contract','Contract & View As',contractContent)}${employeeSectionButton('account','Account Actions',accountContent)}</div></div>`;
+    return `<div class="card employee-admin-card" data-employee-card="${safeText(employeeId)}"><div class="section-header"><div><div class="employee-name-actions"><strong>${safeText(employeeDisplayName(u))}</strong><button class="btn btn-ghost btn-small" data-view-as-employee="${safeText(employeeId)}" type="button">View as</button></div><div class="small muted">${safeText(u.email || '')}</div></div><div class="employee-card-head-badges"><span class="badge badge-blue">Balance ${currency(employeeAvailablePayout(u))}</span><span class="badge ${u.status === 'approved' ? 'badge-green' : 'badge-yellow'}">${safeText(u.status || 'pending')}</span></div></div><div class="employee-admin-button-stack">${employeeSectionButton('profile','Profile & Pickup',profileContent)}${employeeSectionButton('equipment','Inventory Allocation',equipmentContent,`${assignments.length}`)}${employeeSectionButton('payments','Payment Settings',paymentContent,payoutCount?`${payoutCount} payout${payoutCount===1?'':'s'}`:'')}${employeeSectionButton('schedule','Schedule',renderAdminEmployeeScheduleSummary(u))}${employeeSectionButton('colors','Order Colors',colorsContent)}${employeeSectionButton('contract','Contract',contractContent)}${employeeSectionButton('account','Account Actions',accountContent)}</div></div>`;
   }).join('') : '<div class="empty-state">No employee signups yet.</div>';
+  els.employeesList.querySelectorAll('[data-employee-card]').forEach((card) => { const key = state.employeeAdminOpenSections[card.dataset.employeeCard]; if (!key) return; const panel=card.querySelector(`[data-employee-section-panel="${CSS.escape(key)}"]`); const btn=card.querySelector(`[data-employee-section-toggle="${CSS.escape(key)}"]`); panel?.classList.remove('hidden'); btn?.classList.add('active'); });
 }
 function updateEmployeeColorPreview(editor) {
   if (!editor) return;
@@ -2153,7 +2262,8 @@ async function handleEmployeeListClick(event) {
     const opening = target?.classList.contains('hidden');
     card?.querySelectorAll('[data-employee-section-panel]').forEach((panel) => panel.classList.add('hidden'));
     card?.querySelectorAll('[data-employee-section-toggle]').forEach((btn) => btn.classList.remove('active'));
-    if (opening && target) { target.classList.remove('hidden'); sectionToggle.classList.add('active'); }
+    if (opening && target) { target.classList.remove('hidden'); sectionToggle.classList.add('active'); state.employeeAdminOpenSections[card?.dataset.employeeCard || ''] = key; }
+    else if (card?.dataset.employeeCard) delete state.employeeAdminOpenSections[card.dataset.employeeCard];
     return;
   }
   const approve = event.target.closest('[data-approve-employee]');
@@ -2304,6 +2414,8 @@ async function handleEmployeeListClick(event) {
       }
     }
     user.equipmentAssignments = nextAssignments;
+    user.supportEquipmentAssignments = [...(card?.querySelectorAll('[data-support-allocation-id]') || [])].map((input) => ({ id: input.dataset.supportAllocationId, quantity: Math.max(0, Math.floor(Number(input.value || 0))) })).filter((a) => a.id && a.quantity > 0);
+    for (const a of user.supportEquipmentAssignments) { const item=supportEquipmentItems().find(x=>x.id===a.id); const other=allocatedSupportEquipment(a.id,id); if (a.quantity + other > Number(item?.quantity||0)) { alert(`${item?.name || 'Equipment'}: only ${Math.max(0,Number(item?.quantity||0)-other)} can be allocated to this employee.`); return; } }
     if (user.pickupAddress && !user.pickupCoords) {
       try { user.pickupCoords = await geocodeAddress(user.pickupAddress, { context: state.settings || null }); } catch (_) {}
     }
@@ -2879,18 +2991,18 @@ async function saveOrderOnly(order, before = null, actor = 'admin-order') {
     renderOrders();
     renderOrdersCalendar();
     renderCalendarView();
-    renderDeliveryRoute();
-    renderAdminReviews();
-    renderNumbers();
-  renderEmployees();
-  renderEmployeePayments();
-  renderEmployeePayouts();
+    if (actor === 'admin-status' || actor === 'admin-payment' || actor === 'admin-verbal-confirmation' || actor === 'admin-inquiry-seen') {
+      if (actor === 'admin-status') { renderDeliveryRoute(); renderNumbers(); renderEmployees(); }
+    } else {
+      renderDeliveryRoute(); renderAdminReviews(); renderNumbers(); renderEmployees(); renderEmployeePayments(); renderEmployeePayouts();
+    }
   }, 'Saving order…');
 }
 const WORKSPACE_TITLES = {
   orders: ['Orders', 'Manage active rentals and quickly review what needs attention.'],
   route: ['Delivery Route', 'Plan upcoming deliveries and customer pickups by date.'],
-  inventory: ['Inventory', 'Manage company equipment, quantities, accessories, and availability.'],
+  inventory: ['Inventory', 'Manage rental inventory, quantities, accessories, and availability.'],
+  equipment: ['Equipment', 'Track operational equipment such as straps, dollies, and chair carts.'],
   calendar: ['Quick Peek', 'Check equipment and team availability for a specific rental window.'],
   schedule: ['Schedule', 'Set typical availability and date-specific changes.'],
   account: ['Account Management', 'Manage secondary access and payout accounts.'],
@@ -2920,6 +3032,7 @@ function renderAll() {
   renderSchedule();
   renderDeliveryRoute();
   renderInventory();
+  renderSupportEquipment();
   renderCalendarView();
   renderReminderEditor();
   renderSettings();
@@ -5108,13 +5221,14 @@ function renderOrderAccordion(order, mode) {
         </div>`;
   return `
     <div class="order-card order-accordion ${order.status === 'Pending' ? 'pending-order' : ''} ${order.status === 'In-Progress' ? 'in-progress' : ''} ${isOpen ? 'open' : ''} ${isAdminUser() && order.assignedEmployeeId ? 'employee-assigned-order' : ''}" ${isAdminUser() && order.assignedEmployeeId ? `style="--employee-highlight:${safeText(employeeColors.accent)};--employee-background:${safeText(employeeColors.background)};--employee-badge:${safeText(employeeColors.badge)};--employee-badge-text:${safeText(employeeBadgeText)}"` : ''}>
-      <button type="button" class="order-accordion-summary" data-expand-order="${order.id}">
+      <div class="order-accordion-summary" data-expand-order="${order.id}" role="button" tabindex="0">
         <div class="order-summary-main">
           <div class="order-summary-title separated-order-title">${headerTitle}</div>
           <div class="order-summary-sub order-glance-meta">${headerSub}${order.assignedEmployeeId && order.assignedEmployeeName ? `<span class="badge employee-assigned-chip">Assigned to ${safeText(order.assignedEmployeeName)}</span>` : ''}${order.newInquiry && isAdminUser() ? `<button type="button" class="badge badge-blue new-inquiry-clear" data-clear-new-inquiry="${order.id}" title="Mark this inquiry as seen">New Inquiry</button>` : ''}</div>
         </div>
         <div class="order-expand-cue"><span>${isOpen ? 'Hide' : 'Details'}</span><span class="order-summary-arrow">⌄</span></div>
-      </button>
+        ${isAdminUser() ? `<div class="collapsed-order-actions" data-no-expand>${order.fulfillmentType === 'Delivery' && order.address ? `<button type="button" class="btn btn-ghost btn-small" data-open-delivery-address="${safeText(order.id)}">Address</button>` : ''}${['Deposit Paid','Deposit'].includes(order.paymentStatus) ? `<button type="button" class="btn btn-ghost btn-small" data-edit-deposit-amount="${safeText(order.id)}">Deposit ${currency(getOrderAmountPaid(order))}</button>` : ''}<select class="compact-order-select" data-status-select="${safeText(order.id)}" aria-label="Order status">${ORDER_STATUSES.map((status)=>`<option ${status===order.status?'selected':''}>${status}</option>`).join('')}</select><select class="compact-order-select" data-payment-select="${safeText(order.id)}" aria-label="Payment status">${PAYMENT_STATUSES.map((status)=>`<option ${status===order.paymentStatus?'selected':''}>${status}</option>`).join('')}</select></div>` : isEmployeeUser() ? `<div class="collapsed-order-actions employee-collapsed-order-actions" data-no-expand>${order.fulfillmentType === 'Delivery' && order.address ? `<button type="button" class="btn btn-secondary btn-small" data-open-delivery-address="${safeText(order.id)}">Open Address</button>` : ''}${['Confirmed','Pending'].includes(order.status) ? `<button type="button" class="btn btn-primary btn-small" data-employee-order-status="${safeText(order.id)}" data-next-status="In-Progress">Set In-Progress</button>` : ''}${['Confirmed','In-Progress'].includes(order.status) ? `<button type="button" class="btn btn-primary btn-small" data-employee-order-status="${safeText(order.id)}" data-next-status="Completed">Mark Completed</button>` : ''}</div>` : ''}
+      </div>
       <div class="order-accordion-body">${isEmployeeUser() ? employeeBody : adminBody}</div>
     </div>`;
 }
@@ -5232,7 +5346,10 @@ function bindOrderCardActions() {
   if (!state.orderActionDelegatesBound) {
     state.orderActionDelegatesBound = true;
     document.addEventListener('click', (event) => {
-      const highlightBtn = event.target.closest('[data-toggle-day-highlight]');
+      const addSupport = event.target.closest('#addSupportEquipmentBtn'); if (addSupport) { event.preventDefault(); editSupportEquipment(); return; }
+      const editSupport = event.target.closest('[data-edit-support-equipment]'); if (editSupport) { event.preventDefault(); editSupportEquipment(editSupport.dataset.editSupportEquipment); return; }
+      const delSupport = event.target.closest('[data-delete-support-equipment]'); if (delSupport) { event.preventDefault(); deleteSupportEquipmentItem(delSupport.dataset.deleteSupportEquipment); return; }
+            const highlightBtn = event.target.closest('[data-toggle-day-highlight]');
       if (highlightBtn) {
         event.preventDefault();
         const date = highlightBtn.dataset.toggleDayHighlight;
@@ -5249,6 +5366,7 @@ function bindOrderCardActions() {
       }
       const expandBtn = event.target.closest('[data-expand-order]');
       if (expandBtn) {
+        if (event.target.closest('[data-no-expand], select, input, button, a') && !event.target.closest('.order-expand-cue')) return;
         const orderId = expandBtn.dataset.expandOrder;
         const opening = state.expandedOrderId !== orderId;
         state.expandedOrderId = opening ? orderId : null;
@@ -5325,6 +5443,12 @@ function bindOrderCardActions() {
         renderEarnings();
         return;
       }
+      const completedPaymentCard = event.target.closest('[data-completed-payment-order]');
+      if (completedPaymentCard) {
+        event.preventDefault();
+        openEmployeeCompletedOrderModal(completedPaymentCard.dataset.completedPaymentOrder);
+        return;
+      }
       const saveEmployeeTimesBtn = event.target.closest('[data-save-employee-times]');
       if (saveEmployeeTimesBtn) {
         event.preventDefault();
@@ -5356,7 +5480,10 @@ function bindOrderCardActions() {
         copyUpdateMessage(copyUpdateBtn.dataset.copyUpdate);
         return;
       }
-      const copyDeliveryBtn = event.target.closest('[data-copy-delivery-address]');
+      const editDepositBtn = event.target.closest('[data-edit-deposit-amount]'); if (editDepositBtn) { event.preventDefault(); event.stopPropagation(); updateOrderPayment(editDepositBtn.dataset.editDepositAmount, 'Deposit Paid'); return; }
+            const openAddressBtn = event.target.closest('[data-open-delivery-address]');
+      if (openAddressBtn) { event.preventDefault(); event.stopPropagation(); openAddressWithPreferredApp(openAddressBtn.dataset.openDeliveryAddress); return; }
+            const copyDeliveryBtn = event.target.closest('[data-copy-delivery-address]');
       if (copyDeliveryBtn) {
         event.preventDefault();
         copyDeliveryAddress(copyDeliveryBtn.dataset.copyDeliveryAddress);
@@ -5480,7 +5607,8 @@ function buildReminderMessage(order, options = {}) {
   lines.push(`If anything has changed or you need to make adjustments, please let us know. Otherwise, we look forward to taking care of your order ${getReminderTimingText(order)}!`);
   if (opts.includeTracking && order?.trackingCode) {
     lines.push('');
-    lines.push(`Track your order here! ${getTrackingLinkForOrder(order)} and use ${order.trackingAccessCode || 'your 4-digit code'} to access.`);
+    lines.push(`Track your order: ${getTrackingLinkForOrder(order)}`);
+    lines.push(`Access code: ${order.trackingAccessCode || 'your 4-digit code'} (enter this code on the tracking page).`);
   }
   return lines.filter((line, index, arr) => !(line === '' && arr[index - 1] === '')).join('\n').trim();
 }
@@ -5742,6 +5870,22 @@ function renderAdminReviews() {
     </div>`;
   }).join('');
 }
+function openAddressWithPreferredApp(orderId) {
+  const order = state.orders.find((o) => o.id === orderId);
+  if (!order?.address) return;
+  const key = 'rscPreferredMapsApp';
+  const openWith = (app) => {
+    try { localStorage.setItem(key, app); } catch (_) {}
+    const q = encodeURIComponent(order.address);
+    const href = app === 'apple' ? `https://maps.apple.com/?q=${q}` : app === 'waze' ? `https://www.waze.com/ul?q=${q}&navigate=yes` : `https://www.google.com/maps/search/?api=1&query=${q}`;
+    window.open(href, '_blank', 'noopener');
+  };
+  let preferred = ''; try { preferred = localStorage.getItem(key) || ''; } catch (_) {}
+  if (preferred) { openWith(preferred); return; }
+  const modal=document.createElement('div'); modal.className='modal-backdrop open';
+  modal.innerHTML=`<div class="modal" style="max-width:430px"><div class="section-header"><h2 style="margin:0">Choose Maps App</h2></div><p class="small muted">We’ll remember this choice on this device.</p><div class="stack-sm"><button class="btn btn-primary" data-map-app="google">Google Maps</button><button class="btn btn-secondary" data-map-app="apple">Apple Maps</button><button class="btn btn-secondary" data-map-app="waze">Waze</button><button class="btn btn-ghost" data-map-cancel>Cancel</button></div></div>`;
+  document.body.appendChild(modal); modal.querySelectorAll('[data-map-app]').forEach(b=>b.addEventListener('click',()=>{const app=b.dataset.mapApp;modal.remove();openWith(app);})); modal.querySelector('[data-map-cancel]').addEventListener('click',()=>modal.remove());
+}
 async function copyDeliveryAddress(id) {
   const order = getOrderById(id);
   if (!order?.address) return;
@@ -5826,19 +5970,23 @@ function confirmDepositPaidAmount(order = {}, suggested = 0, currentDeposit = 0)
   return new Promise((resolve) => {
     const modal = document.createElement('div');
     modal.className = 'modal-backdrop open';
-    modal.innerHTML = `<div class="modal deposit-confirm-modal"><div class="section-header"><h2 style="margin:0;">Confirm Deposit Paid</h2></div>
-      <p class="small muted">This locks the amount the customer actually paid. If the order total changes later, the remaining deposit/balance will adjust against this paid amount.</p>
-      <div class="numbers-summary-grid"><div class="numbers-metric"><div class="metric-label">Current 35% Deposit</div><div class="metric-value">${currency(currentDeposit)}</div></div><div class="numbers-metric"><div class="metric-label">Order Total</div><div class="metric-value">${currency(getEffectiveOrderTotal(order))}</div></div></div>
-      <label class="form-row"><span>Amount customer paid</span><input type="number" step="0.01" min="0" data-deposit-confirm-input value="${Number(suggested || 0).toFixed(2)}" /></label>
-      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:14px;"><button type="button" class="btn btn-ghost" data-deposit-cancel>Cancel</button><button type="button" class="btn btn-primary" data-deposit-save>Confirm Paid</button></div></div>`;
+    const existing = Number(order.depositPaidAmount || order.amountPaid || 0);
+    modal.innerHTML = `<div class="modal deposit-confirm-modal"><div class="section-header"><h2 style="margin:0;">Deposit Paid Amount</h2></div>
+      <p class="small muted">Save what the customer actually paid. This amount will stay fixed even if items are added later.</p>
+      ${existing > 0 ? `<div class="badge badge-blue" style="margin-bottom:10px;">Currently recorded: ${currency(existing)}</div>` : ''}
+      <div class="deposit-choice-grid">
+        <button type="button" class="btn btn-primary deposit-choice" data-deposit-auto><strong>Auto calculated amount</strong><span>${currency(currentDeposit)}</span></button>
+        <button type="button" class="btn btn-secondary deposit-choice" data-deposit-other><strong>Other</strong><span>Enter a different amount</span></button>
+      </div>
+      <div class="deposit-other-entry hidden" data-deposit-other-entry><label class="form-row"><span>Amount customer paid</span><input type="number" step="0.01" min="0" data-deposit-confirm-input value="${Number(suggested || 0).toFixed(2)}" /></label><button type="button" class="btn btn-primary" data-deposit-save>Save Amount</button></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px;"><button type="button" class="btn btn-ghost" data-deposit-cancel>Cancel</button></div></div>`;
     document.body.appendChild(modal);
     const finish = (value) => { modal.remove(); resolve(value); };
     modal.querySelector('[data-deposit-cancel]').addEventListener('click', () => finish(null));
     modal.addEventListener('click', (event) => { if (event.target === modal) finish(null); });
-    modal.querySelector('[data-deposit-save]').addEventListener('click', () => {
-      const amount = Number(modal.querySelector('[data-deposit-confirm-input]')?.value || 0);
-      finish({ amount: Number.isFinite(amount) ? amount : 0 });
-    });
+    modal.querySelector('[data-deposit-auto]').addEventListener('click', () => finish({ amount: Number(currentDeposit || 0) }));
+    modal.querySelector('[data-deposit-other]').addEventListener('click', () => { modal.querySelector('[data-deposit-other-entry]')?.classList.remove('hidden'); modal.querySelector('[data-deposit-confirm-input]')?.focus(); });
+    modal.querySelector('[data-deposit-save]').addEventListener('click', () => { const amount = Number(modal.querySelector('[data-deposit-confirm-input]')?.value || 0); if (!Number.isFinite(amount) || amount < 0) return; finish({ amount }); });
   });
 }
 async function updateOrderVerbalConfirmation(id, verbalConfirmation) {
@@ -5867,6 +6015,19 @@ async function deleteOrder(id) {
     renderNumbers();
   }, 'Deleting order…');
 }
+function supportEquipmentItems() { return Array.isArray(state.settings?.supportEquipment) ? state.settings.supportEquipment : []; }
+function supportEquipmentAssignments(user={}) { return Array.isArray(user.supportEquipmentAssignments) ? user.supportEquipmentAssignments : []; }
+function allocatedSupportEquipment(id, exclude='') { return (state.users||[]).filter(u=>u.role==='employee' && String(u.uid||u.id)!==String(exclude)).reduce((sum,u)=>sum+supportEquipmentAssignments(u).filter(a=>a.id===id).reduce((n,a)=>n+Number(a.quantity||0),0),0); }
+function renderSupportEquipment() {
+  const host=document.getElementById('supportEquipmentList'); if(!host) return;
+  const items=supportEquipmentItems();
+  host.innerHTML=items.length?items.map(item=>`<div class="card support-equipment-card"><div><strong>${safeText(item.name)}</strong><div class="small muted">${Number(item.quantity||0)} total · ${Math.max(0,Number(item.quantity||0)-allocatedSupportEquipment(item.id))} at main location</div></div><div class="button-row"><button class="btn btn-secondary btn-small" data-edit-support-equipment="${safeText(item.id)}">Edit</button><button class="btn btn-ghost btn-small" data-delete-support-equipment="${safeText(item.id)}">Delete</button></div></div>`).join(''):'<div class="empty-state">No operational equipment added yet.</div>';
+}
+async function editSupportEquipment(id='') {
+  const current=supportEquipmentItems().find(x=>x.id===id)||{}; const name=window.prompt('Equipment name (chair straps, dolly, chair cart, etc.)',current.name||''); if(name===null||!name.trim()) return; const qty=Number(window.prompt('Total quantity',String(current.quantity??1))); if(!Number.isFinite(qty)||qty<0)return;
+  const items=supportEquipmentItems().filter(x=>x.id!==id); items.push({id:id||uid('equip'),name:name.trim(),quantity:Math.floor(qty)}); state.settings={...state.settings,supportEquipment:items}; await withBusy(()=>saveSettings(state.settings),'Saving equipment…'); renderSupportEquipment(); renderEmployees();
+}
+async function deleteSupportEquipmentItem(id){ if(!window.confirm('Delete this equipment item?'))return; state.settings={...state.settings,supportEquipment:supportEquipmentItems().filter(x=>x.id!==id)}; await withBusy(()=>saveSettings(state.settings),'Deleting equipment…'); renderSupportEquipment(); }
 function renderInventory() {
   const html = state.inventory.map((item) => {
     const stats = inventoryAvailabilityStats(item.id);

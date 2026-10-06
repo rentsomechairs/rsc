@@ -1,6 +1,6 @@
-import { APP_CONFIG } from './config.js?v=rental-ux-v66';
-import { uid } from './utils.js?v=rental-ux-v66';
-import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, listCollectionWhereAll, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v66';
+import { APP_CONFIG } from './config.js?v=rental-ux-v68';
+import { uid } from './utils.js?v=rental-ux-v68';
+import { deleteDocById, getDocById, bootstrapOrGetUserProfile, firebaseLogin, firebaseLogout, firebaseSignup, getCurrentFirebaseUser, isFirebaseEnabled, listCollection, listCollectionWhere, listCollectionWhereAll, upsertDoc, updateDocFields, uploadFile, waitForAuthReady , callAdminFunction } from './firebase-service.js?v=rental-ux-v68';
 
 const STORAGE_KEYS = {
   session: 'rso_session_v2',
@@ -599,6 +599,7 @@ export async function saveEmployeeOrderProgress(orderId, employeeUid, changes = 
   const next = clone(current);
   if (changes.exchangeTime !== undefined) next.exchangeTime = String(changes.exchangeTime || '');
   if (changes.returnTime !== undefined) next.returnTime = String(changes.returnTime || '');
+  if (changes.actualLabor !== undefined) next.employeeActualLabor = { ...(changes.actualLabor || {}) };
   if (changes.status !== undefined) {
     const status = String(changes.status || '');
     if (!allowedStatus.has(status)) throw new Error('That order status is not available to employees.');
@@ -632,6 +633,7 @@ export async function saveEmployeeOrderProgress(orderId, employeeUid, changes = 
   const orderPatch = { updatedAt: next.updatedAt };
   if (changes.exchangeTime !== undefined) orderPatch.exchangeTime = next.exchangeTime;
   if (changes.returnTime !== undefined) orderPatch.returnTime = next.returnTime;
+  if (changes.actualLabor !== undefined) orderPatch.employeeActualLabor = next.employeeActualLabor;
   if (changes.status !== undefined) {
     orderPatch.status = next.status;
     orderPatch.completedAt = next.completedAt;
@@ -640,8 +642,6 @@ export async function saveEmployeeOrderProgress(orderId, employeeUid, changes = 
     orderPatch.depositPaidAmount = next.depositPaidAmount ?? '';
     orderPatch.amountRemaining = next.amountRemaining ?? getSnapshotAmountRemaining(next);
   }
-  await updateDocFields(COLLECTIONS.orders, next.id, orderPatch);
-
   const trackingPatch = { updatedAt: next.updatedAt };
   if (changes.exchangeTime !== undefined) trackingPatch.exchangeTime = next.exchangeTime;
   if (changes.returnTime !== undefined) trackingPatch.returnTime = next.returnTime;
@@ -652,7 +652,10 @@ export async function saveEmployeeOrderProgress(orderId, employeeUid, changes = 
     trackingPatch.depositPaidAmount = next.depositPaidAmount ?? '';
     trackingPatch.amountRemaining = getSnapshotAmountRemaining(next);
   }
-  await updateDocFields(COLLECTIONS.tracking, next.id, trackingPatch);
+  // These documents are independent; writing them together removes one full network round-trip on mobile.
+  const writes = [updateDocFields(COLLECTIONS.orders, next.id, orderPatch)];
+  if (changes.exchangeTime !== undefined || changes.returnTime !== undefined || changes.status !== undefined) writes.push(updateDocFields(COLLECTIONS.tracking, next.id, trackingPatch));
+  await Promise.all(writes);
   return clone(next);
 }
 
@@ -1098,7 +1101,7 @@ export async function getPublicReview(trackingCode) {
     hydrateCachesFromLocal();
     return clone(cacheReviews.find((entry) => entry.id === code) || null);
   }
-  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v66');
+  const { getDocById } = await import('./firebase-service.js?v=rental-ux-v68');
   return getDocById(COLLECTIONS.reviews, code);
 }
 

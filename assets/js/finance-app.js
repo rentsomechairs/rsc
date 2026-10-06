@@ -1,5 +1,5 @@
-import { archiveFinanceRecord, currentFinanceUser, getFinanceRecord, listAttachments, listFinanceRecords, listReferenceRecords, permanentlyDeleteFinanceRecord, restoreFinanceRecord, saveFinanceRecord, seedFinanceCategories, uploadFinanceAttachment, nukeAllFinancialRecords, importMasterFinancialRows, reconcileCompletedOrdersIncome } from './finance-service.js?v=rental-ux-v66';
-import { currency, safeText, uid } from './utils.js?v=rental-ux-v66';
+import { archiveFinanceRecord, currentFinanceUser, getFinanceRecord, listAttachments, listFinanceRecords, listReferenceRecords, permanentlyDeleteFinanceRecord, restoreFinanceRecord, saveFinanceRecord, seedFinanceCategories, uploadFinanceAttachment, nukeAllFinancialRecords, importMasterFinancialRows, reconcileCompletedOrdersIncome } from './finance-service.js?v=rental-ux-v68';
+import { currency, safeText, uid } from './utils.js?v=rental-ux-v68';
 
 const RECORDS=['expense','income','mileage','vehicle','asset','incident','homeOffice'];
 const LABELS={expense:'Expenses',income:'Income',mileage:'Mileage',vehicle:'Vehicles',asset:'Assets',incident:'Damage / Loss',homeOffice:'Home Office'};

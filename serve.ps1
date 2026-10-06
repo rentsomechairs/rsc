@@ -20,7 +20,19 @@ function Get-ContentType($path) {
 
 try {
   $Listener.Start()
-  Start-Process $Prefix
+  # Always launch the local tool in Google Chrome when available.
+  $ChromeCandidates = @(
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+  )
+  $Chrome = $ChromeCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+  if ($Chrome) {
+    Start-Process -FilePath $Chrome -ArgumentList $Prefix
+  } else {
+    try { Start-Process -FilePath "chrome.exe" -ArgumentList $Prefix }
+    catch { Start-Process $Prefix }
+  }
   Write-Host "Server running at $Prefix"
 } catch {
   Write-Host "FAILED TO START:"

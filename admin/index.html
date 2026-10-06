@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Admin • Rent Some Orders</title>
-  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v66" />
+  <link rel="stylesheet" href="../assets/css/styles.css?v=rental-ux-v68" />
 </head>
 <body class="admin-app-page">
   <div id="loginView" class="login-shell hidden">
@@ -40,6 +40,7 @@
 
         <div class="nav-section-label admin-only">Operations</div>
         <button class="nav-btn admin-only" data-tab-btn="inventory"><span class="nav-icon">◇</span><span>Inventory</span></button>
+        <button class="nav-btn admin-only" data-tab-btn="equipment"><span class="nav-icon">▣</span><span>Equipment</span></button>
         <button class="nav-btn admin-only" data-tab-btn="reviews"><span class="nav-icon">☆</span><span>Reviews</span></button>
         <button class="nav-btn admin-only" data-tab-btn="employees"><span class="nav-icon">○</span><span>Employees</span></button>
 
@@ -204,6 +205,12 @@
           </div>
         </div>
         <div id="inventoryList" class="inventory-grid"></div>
+      </section>
+
+
+      <section class="tab-panel" data-tab-panel="equipment">
+        <div class="section-header"><div><h2 style="margin:0;">Equipment</h2><div class="muted small">Operational equipment that is not rented to customers: chair straps, dollies, chair carts, and similar gear. No cost tracking.</div></div><button class="btn btn-primary" id="addSupportEquipmentBtn" type="button">Add Equipment</button></div>
+        <div id="supportEquipmentList" class="stack-sm"></div>
       </section>
 
       <section class="tab-panel" data-tab-panel="reviews">
@@ -851,6 +858,6 @@
     </div>
   </div>
 
-  <script type="module" src="../assets/js/app-admin.js?v=rental-ux-v66"></script>
+  <script type="module" src="../assets/js/app-admin.js?v=rental-ux-v69"></script>
 </body>
 </html>
