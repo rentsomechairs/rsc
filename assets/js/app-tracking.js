@@ -1,8 +1,8 @@
-import { getPublicReview, getPublicTrackingRecord, getPublicTrackingRecords, getSettings, getSession, savePublicReview } from './store.js?v=rental-ux-v68';
-import { currency, formatDateTime, safeText } from './utils.js?v=rental-ux-v68';
+import { getPublicReview, getPublicTrackingRecord, getPublicTrackingRecords, getSettings, getSession, savePublicReview } from './store.js?v=rental-ux-v70';
+import { currency, formatDateTime, safeText } from './utils.js?v=rental-ux-v70';
 
 const els = {};
-const TRACKING_VERSION = 'rental-ux-v68';
+const TRACKING_VERSION = 'rental-ux-v70';
 const state = { records: [], settings: {}, trackingUrl: '', activeRecord: null, activeReview: null, verifiedCodes: new Set(), adminSession: null };
 const PAYMENT_METHOD_ORDER = ['cash', 'invoice', 'venmo', 'paypal', 'cashapp', 'zelle', 'googlepay', 'crypto'];
 const PAYMENT_METHOD_LABELS = {

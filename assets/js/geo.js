@@ -3,6 +3,19 @@ const PHOTON_BASE = 'https://photon.komoot.io';
 const OSRM_BASE = 'https://router.project-osrm.org';
 
 let googleMapsPromise = null;
+let googleMapsDisabled = false;
+const geocodeCache = new Map();
+function withTimeout(promise, ms, label) {
+  return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out`)), ms))]);
+}
+function disableGoogleOnAuthError(error) {
+  const message = String(error?.message || error || '');
+  if (/RefererNotAllowedMapError|REQUEST_DENIED|ApiNotActivatedMapError|InvalidKeyMapError|ApiTargetBlockedMapError/i.test(message)) {
+    googleMapsDisabled = true;
+    console.warn('Google Maps is not authorized for this site; using fallback location services until reload. Check API key website restrictions.');
+  }
+}
+
 let googleAutocompleteSession = { token: null, touchedAt: 0, key: '' };
 
 function compactParts(parts) {
@@ -200,8 +213,8 @@ async function searchAddressesGoogle(query, { limit = 5, origin = null, context 
 
 async function geocodeAddressGoogle(query, { origin = null, context = null } = {}) {
   const apiKey = getGoogleMapsApiKey(context);
-  if (!apiKey) return null;
-  await ensureGoogleMaps(apiKey);
+  if (!apiKey || googleMapsDisabled) return null;
+  await withTimeout(ensureGoogleMaps(apiKey), 4000, 'Google Maps startup');
   const { Geocoder } = await google.maps.importLibrary('geocoding');
   const { LatLngBounds } = await google.maps.importLibrary('core');
   const text = String(query || '').trim();
@@ -245,7 +258,7 @@ async function geocodeAddressGoogle(query, { origin = null, context = null } = {
 
 async function getRoadEstimateGoogle(origin, destination, context = null) {
   const apiKey = getGoogleMapsApiKey(context);
-  if (!apiKey) throw new Error('Google Maps API key missing');
+  if (!apiKey || googleMapsDisabled) throw new Error('Google Maps unavailable');
   await ensureGoogleMaps(apiKey);
 
   // Current Maps JavaScript Routes API. DistanceMatrixService was deprecated
@@ -372,7 +385,7 @@ async function geocodeAddressCensus(query) {
   const response = await fetch(url.toString(), {
     headers: { 'Accept': 'application/json' },
     mode: 'cors',
-    cache: 'no-store'
+    cache: 'no-store', signal: AbortSignal.timeout(4500)
   });
   if (!response.ok) throw new Error(`Census geocode failed (${response.status})`);
   const payload = await response.json();
@@ -408,7 +421,7 @@ async function fetchPhoton(query, { limit = 10, origin = null } = {}) {
   const response = await fetch(url.toString(), {
     headers: { 'Accept': 'application/json' },
     mode: 'cors',
-    cache: 'no-store'
+    cache: 'no-store', signal: AbortSignal.timeout(4500)
   });
   if (!response.ok) throw new Error(`Address lookup failed (${response.status})`);
   const payload = await response.json();
@@ -472,11 +485,12 @@ async function searchAddressesPhoton(query, { limit = 5, origin = null } = {}) {
 
 export async function searchAddresses(query, options = {}) {
   const context = options?.context || null;
-  if (getGoogleMapsApiKey(context)) {
+  if (getGoogleMapsApiKey(context) && !googleMapsDisabled) {
     try {
-      const googleMatches = await searchAddressesGoogle(query, options);
+      const googleMatches = await withTimeout(searchAddressesGoogle(query, options), 4500, 'Google address search');
       if (googleMatches.length) return googleMatches;
     } catch (error) {
+      disableGoogleOnAuthError(error);
       // Fall through to the no-key fallback so address entry still works if Google changes/breaks.
     }
   }
@@ -484,12 +498,16 @@ export async function searchAddresses(query, options = {}) {
 }
 
 export async function geocodeAddress(query, options = {}) {
+  const cacheKey = String(query || '').trim().toLowerCase();
+  const cached = geocodeCache.get(cacheKey);
+  if (cached && Date.now() - cached.time < 30 * 60 * 1000) return { ...cached.result, distanceFromOriginMiles: options?.origin ? haversineMiles(options.origin, cached.result) : null };
   const context = options?.context || null;
-  if (getGoogleMapsApiKey(context)) {
+  if (getGoogleMapsApiKey(context) && !googleMapsDisabled) {
     try {
-      const googleMatch = await geocodeAddressGoogle(query, options);
-      if (googleMatch) return googleMatch;
+      const googleMatch = await withTimeout(geocodeAddressGoogle(query, options), 4500, 'Google geocode');
+      if (googleMatch) { geocodeCache.set(cacheKey, {result: googleMatch, time: Date.now()}); return googleMatch; }
     } catch (error) {
+      disableGoogleOnAuthError(error);
       console.warn('Google geocode failed; trying fallback providers.', error);
     }
   }
@@ -503,6 +521,7 @@ export async function geocodeAddress(query, options = {}) {
       censusMatch.distanceFromOriginMiles = options?.origin
         ? haversineMiles(options.origin, censusMatch)
         : null;
+      geocodeCache.set(cacheKey, {result: censusMatch, time: Date.now()});
       return censusMatch;
     }
   } catch (error) {
@@ -511,6 +530,7 @@ export async function geocodeAddress(query, options = {}) {
 
   try {
     const matches = await searchAddressesPhoton(query, { limit: 1, origin: options?.origin || null });
+    if (matches[0]) geocodeCache.set(cacheKey, {result: matches[0], time: Date.now()});
     return matches[0] || null;
   } catch (error) {
     console.warn('Photon geocode failed.', error);
@@ -557,7 +577,7 @@ async function getRoadEstimatePhoton(origin, destination) {
   url.searchParams.set('overview', 'false');
   url.searchParams.set('alternatives', 'false');
   url.searchParams.set('steps', 'false');
-  const response = await fetch(url.toString(), { headers: { 'Accept': 'application/json' }, mode: 'cors' });
+  const response = await fetch(url.toString(), { headers: { 'Accept': 'application/json' }, mode: 'cors', signal: AbortSignal.timeout(4500) });
   if (!response.ok) throw new Error(`Routing failed (${response.status})`);
   const payload = await response.json();
   const route = payload?.routes?.[0] || {};
@@ -576,10 +596,11 @@ export async function computeDeliveryEstimate(origin, destination, context = nul
   const destinationCoords = normalizeCoords(destination);
   if (!(originCoords && destinationCoords)) throw new Error('Origin and destination coordinates are required.');
   let estimate = null;
-  if (getGoogleMapsApiKey(context)) {
+  if (getGoogleMapsApiKey(context) && !googleMapsDisabled) {
     try {
-      estimate = await getRoadEstimateGoogle(originCoords, destinationCoords, context);
+      estimate = await withTimeout(getRoadEstimateGoogle(originCoords, destinationCoords, context), 4500, 'Google routing');
     } catch (error) {
+      disableGoogleOnAuthError(error);
       console.warn('Google route estimate failed; trying fallback route service.', error);
     }
   }

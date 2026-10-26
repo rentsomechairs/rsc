@@ -1,10 +1,11 @@
-import { APP_CONFIG } from './config.js?v=rental-ux-v68';
+import { APP_CONFIG } from './config.js?v=rental-ux-v70';
 
 let firebaseApp;
 let auth;
 let db;
 let storage;
 let authReadyPromise;
+let firebaseInitPromise;
 
 function hasFirebaseConfig() {
   const cfg = APP_CONFIG.firebase?.config || {};
@@ -18,25 +19,28 @@ export function isFirebaseEnabled() {
 export async function initFirebase() {
   if (!hasFirebaseConfig()) return null;
   if (firebaseApp) return { firebaseApp, auth, db, storage };
-
-  const appMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js');
-  const authMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js');
-  const fireMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js');
-  const storageMod = await import('https://www.gstatic.com/firebasejs/11.0.2/firebase-storage.js');
-
-  firebaseApp = appMod.initializeApp(APP_CONFIG.firebase.config);
-  auth = authMod.getAuth(firebaseApp);
-  db = fireMod.getFirestore(firebaseApp);
-  storage = storageMod.getStorage(firebaseApp);
-
-  authReadyPromise = new Promise((resolve) => {
-    const unsub = authMod.onAuthStateChanged(auth, (user) => {
-      unsub();
-      resolve(user || null);
-    });
-  });
-
-  return { firebaseApp, auth, db, storage };
+  if (!firebaseInitPromise) {
+    firebaseInitPromise = (async () => {
+      const [appMod, authMod, fireMod, storageMod] = await Promise.all([
+        import('https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js'),
+        import('https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js'),
+        import('https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js'),
+        import('https://www.gstatic.com/firebasejs/11.0.2/firebase-storage.js')
+      ]);
+      firebaseApp = appMod.initializeApp(APP_CONFIG.firebase.config);
+      auth = authMod.getAuth(firebaseApp);
+      db = fireMod.getFirestore(firebaseApp);
+      storage = storageMod.getStorage(firebaseApp);
+      authReadyPromise = new Promise((resolve) => {
+        const unsub = authMod.onAuthStateChanged(auth, (user) => {
+          unsub();
+          resolve(user || null);
+        });
+      });
+      return { firebaseApp, auth, db, storage };
+    })().catch((error) => { firebaseInitPromise = null; throw error; });
+  }
+  return firebaseInitPromise;
 }
 
 export async function waitForAuthReady() {

@@ -1,7 +1,7 @@
-import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v69';
-import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js?v=rental-ux-v69';
-import { debounce, geocodeAddress, searchAddresses } from './geo.js?v=rental-ux-v69';
-import { syncCompletedOrderFinancials } from './finance-service.js?v=rental-ux-v69';
+import { createOrderSnapshot, deletePublicReview, deleteSingleOrder, deleteSingleInventoryItem, exportOrdersBackup, getCategories, getCostRecords, getInventory, getOpenOrders, getCompletedOrders as loadCompletedOrders, getAssignedOrders, getPublicReviews, getSession, getSettings, getCurrentUserProfile, getUsers, importOrdersBackup, loginAdmin, logoutAdmin, saveCostRecords, saveSettings, saveSingleInventoryItem, saveSingleOrder, saveUserProfile, deleteUserProfile, saveEmployeeOrderProgress, saveOwnContractAcceptance, getSchedules, getSchedule, saveSchedule, getUserProfile, getSecondaryUsers, updateSecondaryApproval, getPayoutRequests, createPayoutRequest, updatePayoutRequestStatus, saveOwnPayoutAccounts } from './store.js?v=rental-ux-v70';
+import { CONTACT_METHODS, ORDER_STATUSES, PAYMENT_STATUSES, addDays, buildContactMap, compareCompletedDesc, compareExchangeAsc, contactSummary, currency, formatDateTime, getOrderColumn, normalizeCategory, overlaps, parseDateTime, safeText, uid } from './utils.js?v=rental-ux-v70';
+import { debounce, geocodeAddress, searchAddresses } from './geo.js?v=rental-ux-v70';
+import { syncCompletedOrderFinancials } from './finance-service.js?v=rental-ux-v70';
 const state = {
   inventory: [],
   orders: [],
@@ -64,7 +64,7 @@ const els = {};
 const DEFAULT_DEPOSIT_THRESHOLD = 100;
 const DEPOSIT_RATE = 0.35;
 const TRACKING_PAGE_PATH = '../tracking/index.html';
-const ADMIN_VERSION = 'rental-ux-v68';
+const ADMIN_VERSION = 'rental-ux-v70';
 console.log('ADMIN VERSION:', ADMIN_VERSION);
 
 const PAYMENT_METHOD_DEFS = [
@@ -413,8 +413,7 @@ async function init() {
   bindApp();
   renderLoadingPlaceholders('Loading from Firebase…');
   await withBusy(async () => {
-    await loadImageLibrary();
-    await loadData();
+    await Promise.all([loadImageLibrary(), loadData()]);
     applyRoleAccess();
     renderAll();
     startPayoutRequestWatcher();
@@ -2905,50 +2904,52 @@ function handleInventoryImagePreview() {
   if (els.inventoryPreviewSurface) { els.inventoryPreviewSurface.style.cssText = inventoryBackgroundCss(); const previewImg = els.inventoryPreviewSurface.querySelector('img'); if (previewImg) previewImg.style.cssText = inventoryImageCss(); }
 }
 async function loadData() {
-  state.inventory = await getInventory();
-  state.primaryEmployee = (isSecondaryLogin() && state.currentUser?.status === 'approved') ? await getUserProfile(state.currentUser.primaryEmployeeId).catch(() => null) : null;
-  const employeeUid = isSecondaryLogin() ? (state.primaryEmployee?.uid || state.currentUser.primaryEmployeeId) : (state.currentUser?.uid || state.currentUser?.id || '');
-  if (state.currentUser?.role === 'admin') state.users = await getUsers().catch(() => []);
-  else if (isSecondaryLogin()) state.users = [state.primaryEmployee, state.currentUser].filter(Boolean);
-  else state.users = [state.currentUser];
-  state.secondaryUsers = (!isSecondaryLogin() && state.currentUser?.role === 'employee') ? await getSecondaryUsers(employeeUid).catch(() => []) : [];
-  if (isAdminUser()) {
-    state.payoutRequests = await getPayoutRequests().catch(async (err) => {
-      console.error('Could not load all payout requests; trying employee-scoped queries.', err);
-      const employeeIds = (state.users || []).filter((u) => u && u.role === 'employee').map((u) => u.uid || u.id).filter(Boolean);
-      const payoutGroups = await Promise.all(employeeIds.map((uid) => getPayoutRequests(uid).catch(() => [])));
-      return payoutGroups.flat();
-    });
-  } else {
-    state.payoutRequests = (!isSecondaryLogin() && state.currentUser?.role === 'employee')
-      ? await getPayoutRequests(employeeUid).catch((err) => { console.error('Could not load employee payout requests', err); return []; })
-      : [];
-  }
-  state.settings = await getSettings();
-  const secondaryApproved = !isSecondaryLogin() || state.currentUser?.status === 'approved';
-  if (state.currentUser?.role === 'admin') state.schedules = await getSchedules().catch(() => []);
-  else { const ownSchedule = secondaryApproved ? await getSchedule(employeeUid).catch(() => null) : null; state.schedules = ownSchedule ? [ownSchedule] : []; }
+  const secondary = isSecondaryLogin();
+  const admin = state.currentUser?.role === 'admin';
+  const employee = state.currentUser?.role === 'employee';
+  const secondaryApproved = !secondary || state.currentUser?.status === 'approved';
+  // Fetch independent resources concurrently instead of serially blocking dashboard startup.
+  const [inventory, primaryEmployee, users, settings, reviews, costs] = await Promise.all([
+    getInventory(),
+    secondary && secondaryApproved ? getUserProfile(state.currentUser.primaryEmployeeId).catch(() => null) : Promise.resolve(null),
+    admin ? getUsers().catch(() => []) : Promise.resolve(null),
+    getSettings(),
+    getPublicReviews().catch(() => []),
+    getCostRecords().catch(() => [])
+  ]);
+  state.inventory = inventory;
+  state.primaryEmployee = primaryEmployee;
+  state.users = admin ? users : secondary ? [primaryEmployee, state.currentUser].filter(Boolean) : [state.currentUser];
+  state.settings = settings;
+  state.reviews = reviews;
+  state.costs = costs;
+  const employeeUid = secondary ? (primaryEmployee?.uid || state.currentUser.primaryEmployeeId) : (state.currentUser?.uid || state.currentUser?.id || '');
+  const payoutTask = admin ? getPayoutRequests().catch(async (err) => {
+    console.error('Could not load all payout requests; trying employee-scoped queries.', err);
+    const employeeIds = (state.users || []).filter((u) => u && u.role === 'employee').map((u) => u.uid || u.id).filter(Boolean);
+    return (await Promise.all(employeeIds.map((uid) => getPayoutRequests(uid).catch(() => [])))).flat();
+  }) : (!secondary && employee ? getPayoutRequests(employeeUid).catch((err) => { console.error('Could not load employee payout requests', err); return []; }) : Promise.resolve([]));
+  const [secondaryUsers, payoutRequests, schedules, rawOrders] = await Promise.all([
+    !secondary && employee ? getSecondaryUsers(employeeUid).catch(() => []) : Promise.resolve([]),
+    payoutTask,
+    admin ? getSchedules().catch(() => []) : secondaryApproved ? getSchedule(employeeUid).then((row) => row ? [row] : []).catch(() => []) : Promise.resolve([]),
+    employee || secondary ? (secondaryApproved ? getAssignedOrders(employeeUid) : Promise.resolve([])) : getOpenOrders()
+  ]);
+  state.secondaryUsers = secondaryUsers;
+  state.payoutRequests = payoutRequests;
+  state.schedules = schedules;
   state.schedulePersonId = employeeUid;
-  const rawOrders = (state.currentUser?.role === 'employee' || isSecondaryLogin()) ? (secondaryApproved ? await getAssignedOrders(employeeUid) : []) : await getOpenOrders();
   const normalizedOrders = rawOrders.map((order) => ({
-    assignedEmployeeId: '',
-    assignedEmployeeName: '',
-    ...order,
+    assignedEmployeeId: '', assignedEmployeeName: '', ...order,
     paymentStatus: order.paymentStatus === 'Deposit' ? 'Deposit Paid' : order.paymentStatus
   }));
-  const tracked = ensureOrdersHaveTrackingCodes(normalizedOrders);
-  state.orders = tracked.orders;
-  if (state.currentUser?.role === 'employee' || isSecondaryLogin()) state.orders = state.orders.filter((order) => order.assignedEmployeeId === employeeUid);
-
-  // IMPORTANT: load-time normalization is runtime-only. Loading the admin must be read-only.
-  // Deposit/payment derived values, legacy status labels, missing optional assignment fields,
-  // and temporary tracking codes are allowed to normalize in memory, but are persisted only
-  // when that specific order is later edited/saved by a real user action.
+  state.orders = ensureOrdersHaveTrackingCodes(normalizedOrders).orders;
+  if (employee || secondary) state.orders = state.orders.filter((order) => order.assignedEmployeeId === employeeUid);
+  // Keep load-time normalization read-only; persist only after a deliberate edit.
   syncAllOrdersToDepositRule({ touchUpdatedAt: false });
-  state.reviews = await getPublicReviews().catch(() => []);
-  state.costs = await getCostRecords().catch(() => []);
   state.averages = Array.isArray(state.settings?.averageTasks) ? state.settings.averageTasks : [];
 }
+
 function setBusyState(isBusy, message = 'Saving…') {
   if (!els.appBusyOverlay) return;
   if (isBusy) {
@@ -5322,7 +5323,7 @@ async function saveInlineOrder(orderId) {
   await withBusy(async () => {
     state.orders = state.orders.map((entry) => entry.id === orderId ? next : entry);
     await saveSingleOrder(next, order, { actor: 'admin-inline-edit' });
-    await syncCompletedOrderFinancials(next).catch((error) => console.error('Inline order financial sync failed:', error));
+    void syncCompletedOrderFinancials(next).catch((error) => console.error('Inline order financial sync failed:', error));
     renderOrders(); renderOrdersCalendar(); renderCalendarView(); renderDeliveryRoute(); renderNumbers();
     await copyLatestOrderUpdate(next, savedChanges);
   }, 'Saving inline changes…');
